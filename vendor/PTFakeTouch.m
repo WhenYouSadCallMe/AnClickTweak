@@ -4,9 +4,9 @@
 typedef struct __IOHIDEvent *IOHIDEventRef;
 typedef struct __IOHIDEventSystemClient *IOHIDEventSystemClientRef;
 
-extern IOHIDEventRef IOHIDEventCreateDigitizerEvent(CFAllocatorRef allocator, uint64_t timeStamp, uint32_t transducerType, uint32_t index, uint32_t identity, uint32_t eventMask, uint32_t buttonMask, CGFloat x, CGFloat y, CGFloat z, CGFloat tipPressure, CGFloat barrelPressure, Boolean range, Boolean touch, IOOptionBits options);
-extern IOHIDEventRef IOHIDEventCreateDigitizerFingerEvent(CFAllocatorRef allocator, uint64_t timeStamp, uint32_t index, uint32_t identity, uint32_t eventMask, CGFloat x, CGFloat y, CGFloat z, CGFloat tipPressure, CGFloat twist, Boolean range, Boolean touch, IOOptionBits options);
-extern void IOHIDEventAppendEvent(IOHIDEventRef event, IOHIDEventRef childEvent, IOOptionBits options);
+extern IOHIDEventRef IOHIDEventCreateDigitizerEvent(CFAllocatorRef allocator, uint64_t timeStamp, uint32_t transducerType, uint32_t index, uint32_t identity, uint32_t eventMask, uint32_t buttonMask, CGFloat x, CGFloat y, CGFloat z, CGFloat tipPressure, CGFloat barrelPressure, Boolean range, Boolean touch, OptionBits options);
+extern IOHIDEventRef IOHIDEventCreateDigitizerFingerEvent(CFAllocatorRef allocator, uint64_t timeStamp, uint32_t index, uint32_t identity, uint32_t eventMask, CGFloat x, CGFloat y, CGFloat z, CGFloat tipPressure, CGFloat twist, Boolean range, Boolean touch, OptionBits options);
+extern void IOHIDEventAppendEvent(IOHIDEventRef event, IOHIDEventRef childEvent, OptionBits options);
 extern IOHIDEventSystemClientRef IOHIDEventSystemClientCreate(CFAllocatorRef allocator);
 extern void IOHIDEventSystemClientDispatchEvent(IOHIDEventSystemClientRef client, IOHIDEventRef event);
 
