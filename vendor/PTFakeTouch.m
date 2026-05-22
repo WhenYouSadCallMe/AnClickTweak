@@ -1,4 +1,4 @@
-#import "PTFakeTouch.h"
+#import "../include/PTFakeTouch.h"
 #import <mach/mach_time.h>
 
 typedef struct __IOHIDEvent *IOHIDEventRef;
