@@ -1,0 +1,48 @@
+name: Build AnClick
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Theos
+        run: |
+          brew install ldid xz
+          git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+
+      - name: Install iPhoneOS SDK
+        run: |
+          mkdir -p "$THEOS/sdks"
+          curl -L \
+            -o /tmp/iPhoneOS16.5.sdk.tar.xz \
+            "https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz"
+          tar -xf /tmp/iPhoneOS16.5.sdk.tar.xz -C "$THEOS/sdks"
+
+      - name: Download OpenCV iOS framework
+        run: |
+          curl -L \
+            -o /tmp/opencv-ios-framework.zip \
+            "https://github.com/opencv/opencv/releases/download/4.10.0/opencv-4.10.0-ios-framework.zip"
+          unzip -q /tmp/opencv-ios-framework.zip -d /tmp/opencv-ios
+          cp -R /tmp/opencv-ios/opencv2.framework ./opencv2.framework
+
+      - name: Build package
+        run: |
+          make clean package FINALPACKAGE=1
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnClick-packages
+          path: packages/*
