@@ -12,14 +12,18 @@ AnClick_FILES = \
 	src/AnClickUI.m \
 	vendor/PTFakeTouch.m
 
-AnClick_CFLAGS = -fobjc-arc
-AnClick_OBJCFLAGS = -fobjc-arc
-AnClick_OBJCCFLAGS = -fobjc-arc -std=c++17
-AnClick_ADDITIONAL_CFLAGS = -Iinclude -I$(THEOS_PROJECT_DIR)/opencv2.framework/Headers
-AnClick_ADDITIONAL_CCFLAGS = -Iinclude -I$(THEOS_PROJECT_DIR)/opencv2.framework/Headers
-AnClick_ADDITIONAL_CXXFLAGS = -std=c++17
+OPENCV_FRAMEWORK_PATH ?= $(THEOS_PROJECT_DIR)/opencv2.framework
+OPENCV_HEADERS ?= $(OPENCV_FRAMEWORK_PATH)/Headers
+OPENCV_INCLUDE_FLAGS = -Iinclude -I$(OPENCV_HEADERS) -I$(OPENCV_FRAMEWORK_PATH)/Versions/A/Headers
+
+AnClick_CFLAGS = -fobjc-arc $(OPENCV_INCLUDE_FLAGS)
+AnClick_OBJCFLAGS = -fobjc-arc $(OPENCV_INCLUDE_FLAGS)
+AnClick_OBJCCFLAGS = -fobjc-arc -std=c++17 $(OPENCV_INCLUDE_FLAGS)
+AnClick_CPPFLAGS = $(OPENCV_INCLUDE_FLAGS)
+AnClick_CCFLAGS = -std=c++17 $(OPENCV_INCLUDE_FLAGS)
+AnClick_CXXFLAGS = -std=c++17 $(OPENCV_INCLUDE_FLAGS)
 AnClick_FRAMEWORKS = UIKit Foundation QuartzCore CoreGraphics
-AnClick_LDFLAGS = -F$(THEOS_PROJECT_DIR) -framework opencv2
+AnClick_LDFLAGS = -F$(dir $(OPENCV_FRAMEWORK_PATH)) -framework opencv2
 AnClick_PRIVATE_FRAMEWORKS = IOKit
 
 include $(THEOS_MAKE_PATH)/tweak.mk

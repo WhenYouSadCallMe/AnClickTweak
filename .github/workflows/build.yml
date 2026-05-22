@@ -36,7 +36,18 @@ jobs:
             "https://github.com/opencv/opencv/releases/download/4.10.0/opencv-4.10.0-ios-framework.zip"
           unzip -q /tmp/opencv-ios-framework.zip -d /tmp/opencv-ios
           rm -rf ./opencv2.framework
-          cp -R /tmp/opencv-ios/opencv2.framework ./opencv2.framework
+          opencv_framework="$(find /tmp/opencv-ios -name opencv2.framework -type d | head -n 1)"
+          if [ -z "$opencv_framework" ]; then
+            echo "opencv2.framework was not found in the downloaded archive"
+            find /tmp/opencv-ios -maxdepth 3 -type d
+            exit 1
+          fi
+          cp -R "$opencv_framework" ./opencv2.framework
+          if [ ! -f ./opencv2.framework/Headers/opencv2/opencv.hpp ]; then
+            echo "OpenCV header opencv2/opencv.hpp was not found where the build expects it"
+            find ./opencv2.framework -maxdepth 4 -type f | head -n 80
+            exit 1
+          fi
 
       - name: Build package
         run: |
