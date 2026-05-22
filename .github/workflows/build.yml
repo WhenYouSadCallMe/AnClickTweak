@@ -43,8 +43,8 @@ jobs:
             exit 1
           fi
           cp -R "$opencv_framework" ./opencv2.framework
-          if [ ! -f ./opencv2.framework/Headers/opencv2/opencv.hpp ]; then
-            echo "OpenCV header opencv2/opencv.hpp was not found where the build expects it"
+          if [ ! -f ./opencv2.framework/Headers/opencv.hpp ]; then
+            echo "OpenCV framework header opencv.hpp was not found where the build expects it"
             find ./opencv2.framework -maxdepth 4 -type f | head -n 80
             exit 1
           fi
