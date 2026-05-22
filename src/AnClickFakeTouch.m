@@ -1,6 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import "PTFakeTouch.h"
+#import "../include/PTFakeTouch.h"
 
 @interface AnClickFakeTouch : NSObject
 + (void)tapAtPoint:(CGPoint)point;
