@@ -29,31 +29,9 @@ jobs:
             "https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz"
           tar -xf /tmp/iPhoneOS16.5.sdk.tar.xz -C "$THEOS/sdks"
 
-      - name: Download OpenCV iOS framework
-        run: |
-          curl -L \
-            -o /tmp/opencv-ios-framework.zip \
-            "https://github.com/opencv/opencv/releases/download/4.10.0/opencv-4.10.0-ios-framework.zip"
-          unzip -q /tmp/opencv-ios-framework.zip -d /tmp/opencv-ios
-          rm -rf ./opencv2.framework
-          opencv_framework="$(find /tmp/opencv-ios -name opencv2.framework -type d | head -n 1)"
-          if [ -z "$opencv_framework" ]; then
-            echo "opencv2.framework was not found in the downloaded archive"
-            find /tmp/opencv-ios -maxdepth 3 -type d
-            exit 1
-          fi
-          cp -R "$opencv_framework" ./opencv2.framework
-          if [ ! -f ./opencv2.framework/Headers/opencv.hpp ]; then
-            echo "OpenCV framework header opencv.hpp was not found where the build expects it"
-            find ./opencv2.framework -maxdepth 4 -type f | head -n 80
-            exit 1
-          fi
-          file ./opencv2.framework/opencv2
-          lipo -info ./opencv2.framework/opencv2
-
       - name: Build package
         run: |
-          make clean package FINALPACKAGE=1 messages=yes
+          make clean package FINALPACKAGE=1
 
       - name: Upload packages
         uses: actions/upload-artifact@v4
