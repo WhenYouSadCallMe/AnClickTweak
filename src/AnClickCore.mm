@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
+#import <stdlib.h>
 
 @interface AnClickFakeTouch : NSObject
 + (void)tapAtPoint:(CGPoint)point;
