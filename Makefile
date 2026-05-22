@@ -15,8 +15,9 @@ AnClick_FILES = \
 AnClick_CFLAGS = -fobjc-arc
 AnClick_OBJCFLAGS = -fobjc-arc
 AnClick_OBJCCFLAGS = -fobjc-arc -std=c++17
-AnClick_CPPFLAGS = -Iinclude -I$(THEOS_PROJECT_DIR)/opencv2.framework/Headers
-AnClick_CXXFLAGS = -std=c++17
+AnClick_ADDITIONAL_CFLAGS = -Iinclude -I$(THEOS_PROJECT_DIR)/opencv2.framework/Headers
+AnClick_ADDITIONAL_CCFLAGS = -Iinclude -I$(THEOS_PROJECT_DIR)/opencv2.framework/Headers
+AnClick_ADDITIONAL_CXXFLAGS = -std=c++17
 AnClick_FRAMEWORKS = UIKit Foundation QuartzCore CoreGraphics
 AnClick_LDFLAGS = -F$(THEOS_PROJECT_DIR) -framework opencv2
 AnClick_PRIVATE_FRAMEWORKS = IOKit
