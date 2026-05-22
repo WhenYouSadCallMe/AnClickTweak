@@ -13,9 +13,9 @@ AnClick_FILES = \
 	vendor/PTFakeTouch.m
 
 AnClick_CFLAGS = -fobjc-arc -Iinclude
-AnClick_CCFLAGS = -std=c++17 -Iinclude
+AnClick_CCFLAGS = -std=c++17 -Iinclude -I$(THEOS_PROJECT_DIR)/opencv2.framework/Headers
 AnClick_FRAMEWORKS = UIKit Foundation QuartzCore CoreGraphics
-AnClick_LDFLAGS = -F. -framework opencv2
+AnClick_LDFLAGS = -F$(THEOS_PROJECT_DIR) -framework opencv2
 AnClick_PRIVATE_FRAMEWORKS = IOKit
 
 include $(THEOS_MAKE_PATH)/tweak.mk

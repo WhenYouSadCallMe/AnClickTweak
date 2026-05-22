@@ -35,6 +35,7 @@ jobs:
             -o /tmp/opencv-ios-framework.zip \
             "https://github.com/opencv/opencv/releases/download/4.10.0/opencv-4.10.0-ios-framework.zip"
           unzip -q /tmp/opencv-ios-framework.zip -d /tmp/opencv-ios
+          rm -rf ./opencv2.framework
           cp -R /tmp/opencv-ios/opencv2.framework ./opencv2.framework
 
       - name: Build package
