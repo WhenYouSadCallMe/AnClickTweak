@@ -15,6 +15,8 @@ AnClick_FILES = \
 AnClick_CFLAGS = -fobjc-arc
 AnClick_OBJCFLAGS = -fobjc-arc
 AnClick_OBJCCFLAGS = -fobjc-arc -std=c++17
+AnClick_ADDITIONAL_CFLAGS = -Iinclude
+AnClick_ADDITIONAL_OBJCFLAGS = -Iinclude
 AnClick_ADDITIONAL_CCFLAGS = -Iinclude
 AnClick_ADDITIONAL_CXXFLAGS = -std=c++17
 AnClick_FRAMEWORKS = UIKit Foundation QuartzCore CoreGraphics
