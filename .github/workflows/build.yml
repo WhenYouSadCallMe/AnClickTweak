@@ -48,10 +48,12 @@ jobs:
             find ./opencv2.framework -maxdepth 4 -type f | head -n 80
             exit 1
           fi
+          file ./opencv2.framework/opencv2
+          lipo -info ./opencv2.framework/opencv2
 
       - name: Build package
         run: |
-          make clean package FINALPACKAGE=1
+          make clean package FINALPACKAGE=1 messages=yes
 
       - name: Upload packages
         uses: actions/upload-artifact@v4
