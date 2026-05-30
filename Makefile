@@ -14,13 +14,11 @@ AnClick_FILES = \
 	src/AnClickUI.m \
 	vendor/PTFakeTouch.m
 
-AnClick_CFLAGS = -fobjc-arc
-AnClick_OBJCFLAGS = -fobjc-arc
-AnClick_OBJCCFLAGS = -fobjc-arc -std=c++17
-AnClick_ADDITIONAL_CFLAGS = -Iinclude -I$(OPENCV_HEADERS)
-AnClick_ADDITIONAL_OBJCFLAGS = -Iinclude -I$(OPENCV_HEADERS)
-AnClick_ADDITIONAL_CCFLAGS = -Iinclude -I$(OPENCV_HEADERS)
-AnClick_ADDITIONAL_CXXFLAGS = -std=c++17 -Iinclude -I$(OPENCV_HEADERS)
+AnClick_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
+AnClick_OBJCFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
+AnClick_CCFLAGS = -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
+AnClick_OBJCCFLAGS = -fobjc-arc -std=c++17 -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
+AnClick_CXXFLAGS = -std=c++17 -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
 AnClick_LDFLAGS = -F$(OPENCV_FRAMEWORK_DIR) -framework opencv2
 AnClick_FRAMEWORKS = UIKit Foundation QuartzCore CoreGraphics
 AnClick_PRIVATE_FRAMEWORKS = IOKit
