@@ -27,6 +27,7 @@
     UIView *_selectionView;
     UIImage *_captureSnapshot;
     UIImageView *_previewView;
+    UIView *_tapMarkerView;
 }
 
 + (instancetype)shared {
@@ -421,7 +422,7 @@
     _captureOverlay = nil;
     _selectionView = nil;
     _captureSnapshot = nil;
-    _panelWindow.hidden = NO;
+    [self restorePanelAfterExternalTap];
 }
 
 - (void)refreshTemplatePreview {
@@ -429,6 +430,66 @@
     UIImage *image = [[NSFileManager defaultManager] fileExistsAtPath:path] ? [UIImage imageWithContentsOfFile:path] : nil;
     _previewView.image = image;
     _previewView.hidden = (image == nil);
+}
+
+- (void)preparePanelForExternalTapWithHostWindow:(UIWindow *)hostWindow {
+    if (_panelWindow) {
+        _panelWindow.userInteractionEnabled = NO;
+        _panelWindow.alpha = 0.0;
+        _panelWindow.hidden = YES;
+    }
+
+    if (hostWindow && !hostWindow.isKeyWindow) {
+        [hostWindow makeKeyWindow];
+    }
+}
+
+- (void)restorePanelAfterExternalTap {
+    if (!_panelWindow) {
+        return;
+    }
+
+    [self attachPanelWindowToActiveSceneIfNeeded];
+    _panelWindow.windowLevel = UIWindowLevelAlert + 1000;
+    _panelWindow.alpha = 1.0;
+    _panelWindow.userInteractionEnabled = YES;
+    _panelWindow.hidden = NO;
+}
+
+- (void)showTapMarkerAtScreenPoint:(CGPoint)screenPoint inWindow:(UIWindow *)hostWindow {
+    [_tapMarkerView removeFromSuperview];
+    if (!hostWindow) {
+        return;
+    }
+
+    CGPoint windowPoint = [hostWindow convertPoint:screenPoint fromWindow:nil];
+    CGFloat size = 34.0;
+    UIView *marker = [[UIView alloc] initWithFrame:CGRectMake(0, 0, size, size)];
+    marker.center = windowPoint;
+    marker.userInteractionEnabled = NO;
+    marker.backgroundColor = UIColor.clearColor;
+    marker.layer.cornerRadius = size * 0.5;
+    marker.layer.borderWidth = 2.0;
+    marker.layer.borderColor = UIColor.systemRedColor.CGColor;
+
+    UIView *horizontal = [[UIView alloc] initWithFrame:CGRectMake(4, size * 0.5 - 1, size - 8, 2)];
+    horizontal.backgroundColor = UIColor.systemRedColor;
+    horizontal.userInteractionEnabled = NO;
+    [marker addSubview:horizontal];
+
+    UIView *vertical = [[UIView alloc] initWithFrame:CGRectMake(size * 0.5 - 1, 4, 2, size - 8)];
+    vertical.backgroundColor = UIColor.systemRedColor;
+    vertical.userInteractionEnabled = NO;
+    [marker addSubview:vertical];
+
+    [hostWindow addSubview:marker];
+    _tapMarkerView = marker;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.75 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [marker removeFromSuperview];
+        if (self->_tapMarkerView == marker) {
+            self->_tapMarkerView = nil;
+        }
+    });
 }
 
 - (void)playTemplateTap {
@@ -440,20 +501,26 @@
     }
 
     _statusLabel.text = @"寻找";
-    _panelWindow.hidden = YES;
+    UIWindow *hostWindow = [self hostWindow];
+    [self preparePanelForExternalTapWithHostWindow:hostWindow];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSValue *pointValue = [AnClickCore findTemplateImage:templateImage threshold:0.86];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (!pointValue) {
-                self->_panelWindow.hidden = NO;
+                [self restorePanelAfterExternalTap];
                 self->_statusLabel.text = @"未找到";
                 return;
             }
             CGPoint point = pointValue.CGPointValue;
-            [AnClickFakeTouch tapAtPoint:point];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.28 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                self->_panelWindow.hidden = NO;
-                self->_statusLabel.text = [NSString stringWithFormat:@"点 %.0f,%.0f", point.x, point.y];
+            UIWindow *currentHostWindow = [self hostWindow] ?: hostWindow;
+            [self preparePanelForExternalTapWithHostWindow:currentHostWindow];
+            [self showTapMarkerAtScreenPoint:point inWindow:currentHostWindow];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [AnClickFakeTouch tapAtPoint:point];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.9 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    [self restorePanelAfterExternalTap];
+                    self->_statusLabel.text = [NSString stringWithFormat:@"点 %.0f,%.0f", point.x, point.y];
+                });
             });
         });
     });
@@ -474,11 +541,12 @@
           point.x,
           point.y,
           hostWindow);
-    _panelWindow.hidden = YES;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [self preparePanelForExternalTapWithHostWindow:hostWindow];
+    [self showTapMarkerAtScreenPoint:point inWindow:hostWindow];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [AnClickFakeTouch tapAtPoint:point];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.28 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            self->_panelWindow.hidden = NO;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.9 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self restorePanelAfterExternalTap];
             self->_statusLabel.text = [NSString stringWithFormat:@"测 %.0f,%.0f", point.x, point.y];
         });
     });
