@@ -163,12 +163,12 @@
     if (@available(iOS 13.0, *)) {
         UIWindowScene *scene = [self activeWindowScene];
         for (UIWindow *window in scene.windows) {
-            if (window != _panelWindow && window.isKeyWindow && !window.hidden && window.alpha > 0.01) {
+            if (window != _panelWindow && window.windowLevel < UIWindowLevelAlert && window.isKeyWindow && !window.hidden && window.alpha > 0.01) {
                 return window;
             }
         }
         for (UIWindow *window in scene.windows) {
-            if (window != _panelWindow && !window.hidden && window.alpha > 0.01) {
+            if (window != _panelWindow && window.windowLevel < UIWindowLevelAlert && !window.hidden && window.alpha > 0.01) {
                 return window;
             }
         }
@@ -177,7 +177,17 @@
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    return UIApplication.sharedApplication.keyWindow ?: UIApplication.sharedApplication.windows.firstObject;
+    if (UIApplication.sharedApplication.keyWindow &&
+        UIApplication.sharedApplication.keyWindow.windowLevel < UIWindowLevelAlert &&
+        UIApplication.sharedApplication.keyWindow != _panelWindow) {
+        return UIApplication.sharedApplication.keyWindow;
+    }
+    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+        if (window != _panelWindow && window.windowLevel < UIWindowLevelAlert && !window.hidden && window.alpha > 0.01) {
+            return window;
+        }
+    }
+    return nil;
 #pragma clang diagnostic pop
 }
 
@@ -453,7 +463,14 @@
         return;
     }
 
-    CGPoint point = CGPointMake(CGRectGetMidX(hostWindow.bounds), CGRectGetMidY(hostWindow.bounds));
+    CGPoint windowPoint = CGPointMake(CGRectGetMidX(hostWindow.bounds), CGRectGetMidY(hostWindow.bounds));
+    CGPoint point = [hostWindow convertPoint:windowPoint toWindow:nil];
+    NSLog(@"[AnClick] Test tap window=(%.1f, %.1f) screen=(%.1f, %.1f) host=%@",
+          windowPoint.x,
+          windowPoint.y,
+          point.x,
+          point.y,
+          hostWindow);
     _panelWindow.hidden = YES;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [AnClickFakeTouch tapAtPoint:point];

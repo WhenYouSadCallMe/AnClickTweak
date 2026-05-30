@@ -24,10 +24,13 @@ static UIWindow *AnClickActiveWindow(void) {
             }
             UIWindowScene *windowScene = (UIWindowScene *)scene;
             for (UIWindow *window in windowScene.windows) {
-                if (window.isKeyWindow && !window.hidden && window.alpha > 0.01) {
+                if (window.windowLevel >= UIWindowLevelAlert || window.hidden || window.alpha <= 0.01) {
+                    continue;
+                }
+                if (window.isKeyWindow) {
                     return window;
                 }
-                if (!fallback && !window.hidden && window.alpha > 0.01) {
+                if (!fallback) {
                     fallback = window;
                 }
             }
@@ -36,16 +39,51 @@ static UIWindow *AnClickActiveWindow(void) {
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    if (UIApplication.sharedApplication.keyWindow && !UIApplication.sharedApplication.keyWindow.hidden && UIApplication.sharedApplication.keyWindow.alpha > 0.01) {
+    if (UIApplication.sharedApplication.keyWindow &&
+        UIApplication.sharedApplication.keyWindow.windowLevel < UIWindowLevelAlert &&
+        !UIApplication.sharedApplication.keyWindow.hidden &&
+        UIApplication.sharedApplication.keyWindow.alpha > 0.01) {
         return UIApplication.sharedApplication.keyWindow;
     }
     for (UIWindow *window in UIApplication.sharedApplication.windows) {
-        if (!window.hidden && window.alpha > 0.01) {
+        if (window.windowLevel < UIWindowLevelAlert && !window.hidden && window.alpha > 0.01) {
             return window;
         }
     }
 #pragma clang diagnostic pop
     return fallback;
+}
+
+static UIImage *AnClickCaptureActiveWindowImage(UIWindow **capturedWindow) {
+    __block UIImage *image = nil;
+    __block UIWindow *window = nil;
+    void (^captureBlock)(void) = ^{
+        window = AnClickActiveWindow();
+        if (!window) {
+            return;
+        }
+
+        CGSize size = window.bounds.size;
+        CGFloat scale = UIScreen.mainScreen.scale;
+        UIGraphicsBeginImageContextWithOptions(size, NO, scale);
+        BOOL drawn = [window drawViewHierarchyInRect:window.bounds afterScreenUpdates:NO];
+        if (!drawn) {
+            [window.layer renderInContext:UIGraphicsGetCurrentContext()];
+        }
+        image = UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsEndImageContext();
+    };
+
+    if (NSThread.isMainThread) {
+        captureBlock();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), captureBlock);
+    }
+
+    if (capturedWindow) {
+        *capturedWindow = window;
+    }
+    return image;
 }
 
 static cv::Mat AnClickMatFromUIImage(UIImage *image) {
@@ -82,34 +120,12 @@ static cv::Mat AnClickMatFromUIImage(UIImage *image) {
 @implementation AnClickCore
 
 + (UIImage *)captureCurrentWindowImage {
-    __block UIImage *image = nil;
-    void (^captureBlock)(void) = ^{
-        UIWindow *window = AnClickActiveWindow();
-        if (!window) {
-            return;
-        }
-
-        CGSize size = window.bounds.size;
-        CGFloat scale = UIScreen.mainScreen.scale;
-        UIGraphicsBeginImageContextWithOptions(size, NO, scale);
-        BOOL drawn = [window drawViewHierarchyInRect:window.bounds afterScreenUpdates:NO];
-        if (!drawn) {
-            [window.layer renderInContext:UIGraphicsGetCurrentContext()];
-        }
-        image = UIGraphicsGetImageFromCurrentImageContext();
-        UIGraphicsEndImageContext();
-    };
-
-    if (NSThread.isMainThread) {
-        captureBlock();
-    } else {
-        dispatch_sync(dispatch_get_main_queue(), captureBlock);
-    }
-    return image;
+    return AnClickCaptureActiveWindowImage(NULL);
 }
 
 + (NSValue *)findTemplateImage:(UIImage *)templateImage threshold:(double)threshold {
-    UIImage *sourceImage = [self captureCurrentWindowImage];
+    UIWindow *sourceWindow = nil;
+    UIImage *sourceImage = AnClickCaptureActiveWindowImage(&sourceWindow);
     if (!sourceImage || !templateImage) {
         return nil;
     }
@@ -131,10 +147,16 @@ static cv::Mat AnClickMatFromUIImage(UIImage *image) {
     }
 
     CGFloat scale = UIScreen.mainScreen.scale;
-    CGFloat centerX = ((CGFloat)bestLocation.x + (CGFloat)templ.cols * 0.5) / scale;
-    CGFloat centerY = ((CGFloat)bestLocation.y + (CGFloat)templ.rows * 0.5) / scale;
-    NSLog(@"[AnClick] OpenCV match score %.3f at %.1f, %.1f", bestScore, centerX, centerY);
-    return [NSValue valueWithCGPoint:CGPointMake(centerX, centerY)];
+    CGPoint windowPoint = CGPointMake(((CGFloat)bestLocation.x + (CGFloat)templ.cols * 0.5) / scale,
+                                      ((CGFloat)bestLocation.y + (CGFloat)templ.rows * 0.5) / scale);
+    CGPoint screenPoint = sourceWindow ? [sourceWindow convertPoint:windowPoint toWindow:nil] : windowPoint;
+    NSLog(@"[AnClick] OpenCV match score %.3f window=(%.1f, %.1f) screen=(%.1f, %.1f)",
+          bestScore,
+          windowPoint.x,
+          windowPoint.y,
+          screenPoint.x,
+          screenPoint.y);
+    return [NSValue valueWithCGPoint:screenPoint];
 }
 
 + (BOOL)findAndTapTemplateImage:(UIImage *)templateImage threshold:(double)threshold {

@@ -63,7 +63,8 @@
 
 + (void)triggerUIKitControlAtPoint:(CGPoint)point {
     UIWindow *window = [self activeApplicationWindow];
-    UIView *view = [window hitTest:point withEvent:nil];
+    CGPoint windowPoint = [window convertPoint:point fromWindow:nil];
+    UIView *view = [window hitTest:windowPoint withEvent:nil];
     UIControl *control = nil;
     for (UIView *current = view; current; current = current.superview) {
         if ([current isKindOfClass:UIControl.class]) {
@@ -73,14 +74,24 @@
     }
 
     if (!control || !control.enabled || control.hidden || control.alpha <= 0.01) {
-        NSLog(@"[AnClick] UIKit fallback missed at %.1f, %.1f view=%@", point.x, point.y, view);
+        NSLog(@"[AnClick] UIKit fallback missed screen=(%.1f, %.1f) window=(%.1f, %.1f) view=%@",
+              point.x,
+              point.y,
+              windowPoint.x,
+              windowPoint.y,
+              view);
         return;
     }
 
     [control sendActionsForControlEvents:UIControlEventTouchDown];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [control sendActionsForControlEvents:UIControlEventTouchUpInside];
-        NSLog(@"[AnClick] UIKit fallback tapped %@ at %.1f, %.1f", control, point.x, point.y);
+        NSLog(@"[AnClick] UIKit fallback tapped %@ screen=(%.1f, %.1f) window=(%.1f, %.1f)",
+              control,
+              point.x,
+              point.y,
+              windowPoint.x,
+              windowPoint.y);
     });
 }
 

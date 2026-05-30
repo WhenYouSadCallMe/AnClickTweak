@@ -393,7 +393,7 @@ static void AnClickSetEventWithTouches(UIEvent *event, NSArray<UITouch *> *touch
     UIEvent *event = [UIApplication.sharedApplication respondsToSelector:@selector(_touchesEvent)]
         ? [UIApplication.sharedApplication _touchesEvent]
         : [[UIEvent alloc] init];
-    AnClickSetEventWithTouches(event, AnClickTouches);
+    AnClickSetEventWithTouches(event, @[touch]);
     [UIApplication.sharedApplication sendEvent:event];
 
     NSLog(@"[AnClick] PTFakeTouch %@ id=%ld screen=(%.1f, %.1f) window=%@",
