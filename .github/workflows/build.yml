@@ -31,8 +31,6 @@ jobs:
           file build-artifacts/AnClick.dylib
           otool -hv build-artifacts/AnClick.dylib
           otool -L build-artifacts/AnClick.dylib
-          ldid -S build-artifacts/AnClick.dylib
-          file build-artifacts/AnClick.dylib
 
       - name: Upload build diagnostics
         if: failure()
