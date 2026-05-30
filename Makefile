@@ -4,6 +4,8 @@ TARGET := iphone:clang:latest:14.0
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = AnClick
+OPENCV_FRAMEWORK_DIR = $(THEOS_PROJECT_DIR)/opencv-ios
+OPENCV_HEADERS = $(OPENCV_FRAMEWORK_DIR)/opencv2.framework/Headers
 
 AnClick_FILES = \
 	src/AnClickCore.mm \
@@ -12,12 +14,13 @@ AnClick_FILES = \
 	src/AnClickUI.m \
 	vendor/PTFakeTouch.m
 
-AnClick_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include
-AnClick_OBJCFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include
-AnClick_CCFLAGS = -I$(THEOS_PROJECT_DIR)/include
-AnClick_OBJCCFLAGS = -fobjc-arc -std=c++17 -I$(THEOS_PROJECT_DIR)/include
-AnClick_CXXFLAGS = -std=c++17 -I$(THEOS_PROJECT_DIR)/include
-AnClick_FRAMEWORKS = UIKit Foundation QuartzCore CoreGraphics
+AnClick_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
+AnClick_OBJCFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
+AnClick_CCFLAGS = -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
+AnClick_OBJCCFLAGS = -fobjc-arc -std=c++17 -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
+AnClick_CXXFLAGS = -std=c++17 -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
+AnClick_LDFLAGS = -F$(OPENCV_FRAMEWORK_DIR) -framework opencv2 -lc++ -lz
+AnClick_FRAMEWORKS = UIKit Foundation QuartzCore CoreGraphics Accelerate
 AnClick_PRIVATE_FRAMEWORKS = IOKit
 
 include $(THEOS_MAKE_PATH)/tweak.mk
