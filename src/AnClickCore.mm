@@ -36,7 +36,7 @@ static UIWindow *AnClickActiveWindow(void) {
             }
             UIWindowScene *windowScene = (UIWindowScene *)scene;
             for (UIWindow *window in windowScene.windows) {
-                if (window.isKeyWindow) {
+                if (window.isKeyWindow && !window.hidden && window.alpha > 0.01) {
                     return window;
                 }
                 if (!fallback && !window.hidden && window.alpha > 0.01) {
@@ -48,7 +48,7 @@ static UIWindow *AnClickActiveWindow(void) {
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    if (UIApplication.sharedApplication.keyWindow) {
+    if (UIApplication.sharedApplication.keyWindow && !UIApplication.sharedApplication.keyWindow.hidden && UIApplication.sharedApplication.keyWindow.alpha > 0.01) {
         return UIApplication.sharedApplication.keyWindow;
     }
     for (UIWindow *window in UIApplication.sharedApplication.windows) {

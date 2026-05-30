@@ -1,29 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
-@interface AnClickRecordEvent : NSObject
-@property (nonatomic, assign) NSInteger type;
-@property (nonatomic, assign) CGPoint point;
-@property (nonatomic, assign) NSTimeInterval timestamp;
-@end
-
-@interface AnClickRecorder : NSObject
-+ (instancetype)shared;
-- (void)startRecording;
-- (NSArray<AnClickRecordEvent *> *)stopRecording;
-- (NSArray<AnClickRecordEvent *> *)events;
-- (NSArray<NSDictionary *> *)serializedEvents;
-@property (nonatomic, assign, getter=isRecording) BOOL recording;
-@end
-
-@interface AnClickFakeTouch : NSObject
-+ (void)tapAtPoint:(CGPoint)point;
-+ (void)swipeFrom:(CGPoint)start to:(CGPoint)end;
-+ (void)touchDownAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
-+ (void)touchMoveAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
-+ (void)touchUpAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
-@end
-
 @interface AnClickCore : NSObject
 + (UIImage *)captureCurrentWindowImage;
 + (BOOL)findAndTapTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
@@ -37,12 +14,12 @@
 @implementation AnClickUI {
     UIWindow *_panelWindow;
     UIView *_panelView;
-    UIButton *_recordButton;
+    UIButton *_captureButton;
     UIButton *_playButton;
-    UIButton *_visionButton;
-    UIButton *_templateButton;
     UILabel *_statusLabel;
-    NSArray<AnClickRecordEvent *> *_lastRecording;
+    UIView *_captureOverlay;
+    UIView *_selectionView;
+    UIImage *_captureSnapshot;
 }
 
 + (instancetype)shared {
@@ -59,7 +36,6 @@
         if (self->_panelWindow) {
             [self attachPanelWindowToActiveSceneIfNeeded];
             self->_panelWindow.hidden = NO;
-            [self->_panelWindow makeKeyAndVisible];
             return;
         }
         [self buildPanel];
@@ -99,8 +75,7 @@
 }
 
 - (void)buildPanel {
-    CGRect frame = CGRectMake(18, 120, 280, 54);
-    _panelWindow = [[UIWindow alloc] initWithFrame:frame];
+    _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(18, 120, 210, 54)];
     [self attachPanelWindowToActiveSceneIfNeeded];
     _panelWindow.windowLevel = UIWindowLevelAlert + 1000;
     _panelWindow.backgroundColor = UIColor.clearColor;
@@ -110,49 +85,41 @@
     _panelWindow.rootViewController = controller;
 
     _panelView = [[UIView alloc] initWithFrame:_panelWindow.bounds];
-    _panelView.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.86];
+    _panelView.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.88];
     _panelView.layer.cornerRadius = 8;
     _panelView.layer.borderWidth = 1;
     _panelView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.18].CGColor;
     [controller.view addSubview:_panelView];
 
-    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelPan:)];
-    [_panelView addGestureRecognizer:pan];
+    UIPanGestureRecognizer *panelPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelPan:)];
+    [_panelView addGestureRecognizer:panelPan];
 
-    _recordButton = [self buttonWithTitle:@"Rec" action:@selector(toggleRecord)];
-    _recordButton.frame = CGRectMake(8, 8, 48, 38);
-    [_panelView addSubview:_recordButton];
+    _captureButton = [self panelButtonWithTitle:@"截图" action:@selector(beginTemplateCapture)];
+    _captureButton.frame = CGRectMake(8, 8, 58, 38);
+    [_panelView addSubview:_captureButton];
 
-    _playButton = [self buttonWithTitle:@"Play" action:@selector(playRecording)];
-    _playButton.frame = CGRectMake(62, 8, 54, 38);
+    _playButton = [self panelButtonWithTitle:@"播放" action:@selector(playTemplateTap)];
+    _playButton.frame = CGRectMake(72, 8, 58, 38);
     [_panelView addSubview:_playButton];
 
-    _visionButton = [self buttonWithTitle:@"CV" action:@selector(runVisionTap)];
-    _visionButton.frame = CGRectMake(122, 8, 42, 38);
-    [_panelView addSubview:_visionButton];
-
-    _templateButton = [self buttonWithTitle:@"Tpl" action:@selector(beginTemplateCapture)];
-    _templateButton.frame = CGRectMake(170, 8, 42, 38);
-    [_panelView addSubview:_templateButton];
-
-    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(218, 8, 54, 38)];
-    _statusLabel.text = @"Idle";
+    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(136, 8, 66, 38)];
+    _statusLabel.text = @"待机";
     _statusLabel.textColor = UIColor.whiteColor;
     _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
     _statusLabel.adjustsFontSizeToFitWidth = YES;
-    _statusLabel.minimumScaleFactor = 0.65;
+    _statusLabel.minimumScaleFactor = 0.6;
     _statusLabel.textAlignment = NSTextAlignmentCenter;
     [_panelView addSubview:_statusLabel];
 
-    [_panelWindow makeKeyAndVisible];
+    _panelWindow.hidden = NO;
     NSLog(@"[AnClick] Panel shown");
 }
 
-- (UIButton *)buttonWithTitle:(NSString *)title action:(SEL)action {
+- (UIButton *)panelButtonWithTitle:(NSString *)title action:(SEL)action {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     [button setTitle:title forState:UIControlStateNormal];
     [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    button.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
     button.backgroundColor = [UIColor colorWithRed:0.10 green:0.34 blue:0.56 alpha:1.0];
     button.layer.cornerRadius = 6;
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
@@ -168,69 +135,6 @@
     [recognizer setTranslation:CGPointZero inView:_panelWindow];
 }
 
-- (void)toggleRecord {
-    AnClickRecorder *recorder = [AnClickRecorder shared];
-    if (recorder.isRecording) {
-        _lastRecording = [recorder stopRecording];
-        _statusLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)_lastRecording.count];
-        [_recordButton setTitle:@"Rec" forState:UIControlStateNormal];
-        _recordButton.backgroundColor = [UIColor colorWithRed:0.10 green:0.34 blue:0.56 alpha:1.0];
-    } else {
-        [recorder startRecording];
-        _lastRecording = nil;
-        _statusLabel.text = @"Live";
-        [_recordButton setTitle:@"Stop" forState:UIControlStateNormal];
-        _recordButton.backgroundColor = [UIColor colorWithRed:0.62 green:0.12 blue:0.16 alpha:1.0];
-    }
-}
-
-- (void)playRecording {
-    NSArray<AnClickRecordEvent *> *events = _lastRecording ?: [[AnClickRecorder shared] events];
-    if (events.count == 0) {
-        _statusLabel.text = @"Empty";
-        return;
-    }
-
-    _statusLabel.text = @"Run";
-    for (AnClickRecordEvent *event in events) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(event.timestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            NSInteger touchId = 7;
-            if (event.type == 0) {
-                [AnClickFakeTouch touchDownAtPoint:event.point touchId:touchId];
-            } else if (event.type == 1) {
-                [AnClickFakeTouch touchMoveAtPoint:event.point touchId:touchId];
-            } else {
-                [AnClickFakeTouch touchUpAtPoint:event.point touchId:touchId];
-            }
-        });
-    }
-
-    AnClickRecordEvent *lastEvent = events.lastObject;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((lastEvent.timestamp + 0.2) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        self->_statusLabel.text = @"Idle";
-    });
-}
-
-- (void)runVisionTap {
-    NSString *path = [self templatePath];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
-        path = [NSBundle.mainBundle pathForResource:@"anclick_template" ofType:@"png"];
-    }
-    UIImage *templateImage = path ? [UIImage imageWithContentsOfFile:path] : nil;
-    if (!templateImage) {
-        _statusLabel.text = @"NoTpl";
-        return;
-    }
-
-    _statusLabel.text = @"Scan";
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        BOOL tapped = [AnClickCore findAndTapTemplateImage:templateImage threshold:0.86];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self->_statusLabel.text = tapped ? @"Tap" : @"Miss";
-        });
-    });
-}
-
 - (NSString *)templatePath {
     NSURL *documentsURL = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
     return [[documentsURL path] stringByAppendingPathComponent:@"anclick_template.png"];
@@ -240,11 +144,16 @@
     if (@available(iOS 13.0, *)) {
         UIWindowScene *scene = [self activeWindowScene];
         for (UIWindow *window in scene.windows) {
-            if (window.isKeyWindow) {
+            if (window != _panelWindow && window.isKeyWindow && !window.hidden && window.alpha > 0.01) {
                 return window;
             }
         }
-        return scene.windows.firstObject;
+        for (UIWindow *window in scene.windows) {
+            if (window != _panelWindow && !window.hidden && window.alpha > 0.01) {
+                return window;
+            }
+        }
+        return nil;
     }
 
 #pragma clang diagnostic push
@@ -256,69 +165,185 @@
 - (void)beginTemplateCapture {
     UIWindow *hostWindow = [self hostWindow];
     if (!hostWindow) {
-        _statusLabel.text = @"NoWin";
+        _statusLabel.text = @"无窗口";
         return;
     }
 
-    _statusLabel.text = @"Pick";
-    UIView *overlay = [[UIView alloc] initWithFrame:hostWindow.bounds];
-    overlay.backgroundColor = [UIColor colorWithWhite:0 alpha:0.35];
-    overlay.userInteractionEnabled = YES;
-    overlay.accessibilityIdentifier = @"AnClickTemplateOverlay";
-
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(16, 80, hostWindow.bounds.size.width - 32, 44)];
-    label.text = @"Tap target";
-    label.textColor = UIColor.whiteColor;
-    label.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
-    label.textAlignment = NSTextAlignmentCenter;
-    [overlay addSubview:label];
-
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTemplateTap:)];
-    [overlay addGestureRecognizer:tap];
-    [hostWindow addSubview:overlay];
+    _statusLabel.text = @"截图中";
+    _panelWindow.hidden = YES;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        self->_captureSnapshot = [AnClickCore captureCurrentWindowImage];
+        if (!self->_captureSnapshot.CGImage) {
+            self->_panelWindow.hidden = NO;
+            self->_statusLabel.text = @"截图失败";
+            return;
+        }
+        [self showCaptureOverlayInWindow:hostWindow];
+    });
 }
 
-- (void)handleTemplateTap:(UITapGestureRecognizer *)recognizer {
-    UIView *overlay = recognizer.view;
-    UIWindow *hostWindow = (UIWindow *)overlay.window;
-    CGPoint point = [recognizer locationInView:hostWindow];
+- (void)showCaptureOverlayInWindow:(UIWindow *)hostWindow {
+    [_captureOverlay removeFromSuperview];
 
-    overlay.hidden = YES;
+    _captureOverlay = [[UIView alloc] initWithFrame:hostWindow.bounds];
+    _captureOverlay.backgroundColor = [UIColor colorWithWhite:0 alpha:0.36];
+    _captureOverlay.userInteractionEnabled = YES;
+
+    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(12, 54, hostWindow.bounds.size.width - 24, 42)];
+    hint.text = @"拖动方框选择区域，双指缩放大小";
+    hint.textColor = UIColor.whiteColor;
+    hint.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    hint.adjustsFontSizeToFitWidth = YES;
+    hint.textAlignment = NSTextAlignmentCenter;
+    [_captureOverlay addSubview:hint];
+
+    CGFloat side = MIN(150.0, MIN(hostWindow.bounds.size.width, hostWindow.bounds.size.height) - 40.0);
+    CGRect selectionFrame = CGRectMake((hostWindow.bounds.size.width - side) * 0.5,
+                                       (hostWindow.bounds.size.height - side) * 0.5,
+                                       side,
+                                       side);
+    _selectionView = [[UIView alloc] initWithFrame:selectionFrame];
+    _selectionView.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    _selectionView.layer.borderColor = UIColor.systemYellowColor.CGColor;
+    _selectionView.layer.borderWidth = 2.0;
+    _selectionView.userInteractionEnabled = YES;
+    [_captureOverlay addSubview:_selectionView];
+
+    UILabel *selectionLabel = [[UILabel alloc] initWithFrame:_selectionView.bounds];
+    selectionLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    selectionLabel.text = @"模板区域";
+    selectionLabel.textColor = UIColor.whiteColor;
+    selectionLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
+    selectionLabel.textAlignment = NSTextAlignmentCenter;
+    [_selectionView addSubview:selectionLabel];
+
+    UIPanGestureRecognizer *movePan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleSelectionPan:)];
+    [_selectionView addGestureRecognizer:movePan];
+
+    UIPinchGestureRecognizer *pinch = [[UIPinchGestureRecognizer alloc] initWithTarget:self action:@selector(handleSelectionPinch:)];
+    [_selectionView addGestureRecognizer:pinch];
+
+    UIButton *saveButton = [self overlayButtonWithTitle:@"保存" action:@selector(saveSelectedTemplate)];
+    saveButton.frame = CGRectMake(16, hostWindow.bounds.size.height - 70, 86, 44);
+    [_captureOverlay addSubview:saveButton];
+
+    UIButton *cancelButton = [self overlayButtonWithTitle:@"取消" action:@selector(cancelTemplateCapture)];
+    cancelButton.frame = CGRectMake(hostWindow.bounds.size.width - 102, hostWindow.bounds.size.height - 70, 86, 44);
+    [_captureOverlay addSubview:cancelButton];
+
+    [hostWindow addSubview:_captureOverlay];
+}
+
+- (UIButton *)overlayButtonWithTitle:(NSString *)title action:(SEL)action {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    [button setTitle:title forState:UIControlStateNormal];
+    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    button.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightBold];
+    button.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.9];
+    button.layer.cornerRadius = 8;
+    button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.25].CGColor;
+    button.layer.borderWidth = 1;
+    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return button;
+}
+
+- (CGRect)clampedSelectionFrame:(CGRect)frame {
+    CGRect bounds = _captureOverlay.bounds;
+    CGFloat minSide = 40.0;
+    CGFloat maxWidth = MAX(minSide, bounds.size.width - 20.0);
+    CGFloat maxHeight = MAX(minSide, bounds.size.height - 20.0);
+    frame.size.width = MIN(MAX(frame.size.width, minSide), maxWidth);
+    frame.size.height = MIN(MAX(frame.size.height, minSide), maxHeight);
+    frame.origin.x = MIN(MAX(frame.origin.x, 10.0), bounds.size.width - frame.size.width - 10.0);
+    frame.origin.y = MIN(MAX(frame.origin.y, 10.0), bounds.size.height - frame.size.height - 10.0);
+    return frame;
+}
+
+- (void)handleSelectionPan:(UIPanGestureRecognizer *)recognizer {
+    CGPoint translation = [recognizer translationInView:_captureOverlay];
+    CGRect frame = _selectionView.frame;
+    frame.origin.x += translation.x;
+    frame.origin.y += translation.y;
+    _selectionView.frame = [self clampedSelectionFrame:frame];
+    [recognizer setTranslation:CGPointZero inView:_captureOverlay];
+}
+
+- (void)handleSelectionPinch:(UIPinchGestureRecognizer *)recognizer {
+    CGRect frame = _selectionView.frame;
+    CGPoint center = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
+    frame.size.width *= recognizer.scale;
+    frame.size.height *= recognizer.scale;
+    frame.origin.x = center.x - frame.size.width * 0.5;
+    frame.origin.y = center.y - frame.size.height * 0.5;
+    _selectionView.frame = [self clampedSelectionFrame:frame];
+    recognizer.scale = 1.0;
+}
+
+- (void)saveSelectedTemplate {
+    if (!_captureSnapshot.CGImage || !_selectionView) {
+        [self cancelTemplateCapture];
+        _statusLabel.text = @"截图失败";
+        return;
+    }
+
+    CGRect selectionFrame = _selectionView.frame;
+    CGFloat scale = _captureSnapshot.scale;
+    CGRect cropRect = CGRectMake(selectionFrame.origin.x * scale,
+                                 selectionFrame.origin.y * scale,
+                                 selectionFrame.size.width * scale,
+                                 selectionFrame.size.height * scale);
+    CGRect imageBounds = CGRectMake(0, 0, CGImageGetWidth(_captureSnapshot.CGImage), CGImageGetHeight(_captureSnapshot.CGImage));
+    cropRect = CGRectIntersection(cropRect, imageBounds);
+    if (CGRectIsEmpty(cropRect)) {
+        [self cancelTemplateCapture];
+        _statusLabel.text = @"区域错误";
+        return;
+    }
+
+    CGImageRef croppedRef = CGImageCreateWithImageInRect(_captureSnapshot.CGImage, cropRect);
+    if (!croppedRef) {
+        [self cancelTemplateCapture];
+        _statusLabel.text = @"保存失败";
+        return;
+    }
+
+    UIImage *templateImage = [UIImage imageWithCGImage:croppedRef scale:scale orientation:_captureSnapshot.imageOrientation];
+    CGImageRelease(croppedRef);
+    NSData *pngData = UIImagePNGRepresentation(templateImage);
+    BOOL saved = [pngData writeToFile:[self templatePath] atomically:YES];
+    [self finishTemplateCapture];
+    _statusLabel.text = saved ? @"已保存" : @"保存失败";
+}
+
+- (void)cancelTemplateCapture {
+    [self finishTemplateCapture];
+    _statusLabel.text = @"取消";
+}
+
+- (void)finishTemplateCapture {
+    [_captureOverlay removeFromSuperview];
+    _captureOverlay = nil;
+    _selectionView = nil;
+    _captureSnapshot = nil;
+    _panelWindow.hidden = NO;
+}
+
+- (void)playTemplateTap {
+    NSString *path = [self templatePath];
+    UIImage *templateImage = [[NSFileManager defaultManager] fileExistsAtPath:path] ? [UIImage imageWithContentsOfFile:path] : nil;
+    if (!templateImage) {
+        _statusLabel.text = @"先截图";
+        return;
+    }
+
+    _statusLabel.text = @"寻找";
     _panelWindow.hidden = YES;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIImage *screen = [AnClickCore captureCurrentWindowImage];
-        self->_panelWindow.hidden = NO;
-        [overlay removeFromSuperview];
-
-        if (!screen.CGImage) {
-            self->_statusLabel.text = @"NoImg";
-            return;
-        }
-
-        CGFloat scale = screen.scale;
-        CGFloat templateSide = 100.0;
-        CGRect pointRect = CGRectMake((point.x - templateSide * 0.5) * scale,
-                                      (point.y - templateSide * 0.5) * scale,
-                                      templateSide * scale,
-                                      templateSide * scale);
-        CGRect imageBounds = CGRectMake(0, 0, CGImageGetWidth(screen.CGImage), CGImageGetHeight(screen.CGImage));
-        CGRect cropRect = CGRectIntersection(pointRect, imageBounds);
-        if (CGRectIsEmpty(cropRect)) {
-            self->_statusLabel.text = @"BadTpl";
-            return;
-        }
-
-        CGImageRef croppedRef = CGImageCreateWithImageInRect(screen.CGImage, cropRect);
-        if (!croppedRef) {
-            self->_statusLabel.text = @"BadTpl";
-            return;
-        }
-
-        UIImage *templateImage = [UIImage imageWithCGImage:croppedRef scale:scale orientation:screen.imageOrientation];
-        CGImageRelease(croppedRef);
-        NSData *pngData = UIImagePNGRepresentation(templateImage);
-        BOOL saved = [pngData writeToFile:[self templatePath] atomically:YES];
-        self->_statusLabel.text = saved ? @"TplOK" : @"TplErr";
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        BOOL tapped = [AnClickCore findAndTapTemplateImage:templateImage threshold:0.86];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self->_panelWindow.hidden = NO;
+            self->_statusLabel.text = tapped ? @"已点击" : @"未找到";
+        });
     });
 }
 
