@@ -26,11 +26,14 @@ jobs:
         run: |
           make clean all FINALPACKAGE=1
           mkdir -p build-artifacts
-          find .theos -name 'AnClick.dylib' -type f -exec cp {} build-artifacts/ \;
+          dylib_path="$(find .theos/obj -name 'AnClick.dylib' -type f ! -path '*.dSYM/*' -print -quit)"
+          test -n "$dylib_path"
+          cp "$dylib_path" build-artifacts/AnClick.dylib
           test -f build-artifacts/AnClick.dylib
           file build-artifacts/AnClick.dylib
           otool -hv build-artifacts/AnClick.dylib
           otool -L build-artifacts/AnClick.dylib
+          ldid -S build-artifacts/AnClick.dylib
 
       - name: Upload build diagnostics
         if: failure()
