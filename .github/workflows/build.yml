@@ -64,7 +64,16 @@ jobs:
 
       - name: Build dylib
         run: |
-          make clean all FINALPACKAGE=1
+          set +e
+          make clean all FINALPACKAGE=1 2>&1 | tee build.log
+          build_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$build_status" -ne 0 ]; then
+            grep -E "fatal error:| error:|Undefined symbols|ld:|clang.*error" build.log | tail -n 60 | while IFS= read -r line; do
+              echo "::error file=.github/workflows/build.yml,line=44::$line"
+            done
+            exit "$build_status"
+          fi
           mkdir -p build-artifacts
           dylib_path="$(find .theos/obj -name 'AnClick.dylib' -type f ! -path '*.dSYM/*' -print -quit)"
           test -n "$dylib_path"
