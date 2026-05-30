@@ -1,7 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
-#import <opencv2/opencv.hpp>
+#import <opencv2/core.hpp>
+#import <opencv2/imgproc.hpp>
 #include <vector>
 
 @interface AnClickFakeTouch : NSObject
