@@ -1,4 +1,4 @@
-name: Build AnClick
+name: Build AnClick dylib
 
 on:
   workflow_dispatch:
@@ -19,19 +19,23 @@ jobs:
         run: |
           brew install ldid xz
           git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+          echo "$HOME/theos/bin" >> "$GITHUB_PATH"
           echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
 
-      - name: Install iPhoneOS SDK
+      - name: Download OpenCV iOS framework
         run: |
-          mkdir -p "$THEOS/sdks"
-          curl -L \
-            -o /tmp/iPhoneOS16.5.sdk.tar.xz \
-            "https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz"
-          tar -xf /tmp/iPhoneOS16.5.sdk.tar.xz -C "$THEOS/sdks"
+          curl -L --retry 3 --retry-delay 5 \
+            -o opencv-ios-framework.zip \
+            "https://github.com/opencv/opencv/releases/download/4.10.0/opencv-4.10.0-ios-framework.zip"
+          unzip -q opencv-ios-framework.zip
+          test -d opencv2.framework/Headers
 
-      - name: Build package
+      - name: Build dylib
         run: |
-          make clean package FINALPACKAGE=1
+          make clean all FINALPACKAGE=1
+          mkdir -p build-artifacts
+          find .theos -name 'AnClick.dylib' -type f -exec cp {} build-artifacts/ \;
+          test -f build-artifacts/AnClick.dylib
 
       - name: Upload build diagnostics
         if: failure()
@@ -40,11 +44,11 @@ jobs:
           name: AnClick-build-diagnostics
           path: |
             .theos/**
-            packages/**
+            opencv-ios-framework.zip
           include-hidden-files: true
 
-      - name: Upload packages
+      - name: Upload dylib
         uses: actions/upload-artifact@v4
         with:
-          name: AnClick-packages
-          path: packages/*
+          name: AnClick-dylib
+          path: build-artifacts/AnClick.dylib

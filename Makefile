@@ -1,9 +1,11 @@
-ARCHS = arm64 arm64e
+ARCHS = arm64
 TARGET := iphone:clang:latest:14.0
 
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = AnClick
+OPENCV_FRAMEWORK_DIR = $(THEOS_PROJECT_DIR)
+OPENCV_HEADERS = $(OPENCV_FRAMEWORK_DIR)/opencv2.framework/Headers
 
 AnClick_FILES = \
 	src/AnClickCore.mm \
@@ -15,10 +17,11 @@ AnClick_FILES = \
 AnClick_CFLAGS = -fobjc-arc
 AnClick_OBJCFLAGS = -fobjc-arc
 AnClick_OBJCCFLAGS = -fobjc-arc -std=c++17
-AnClick_ADDITIONAL_CFLAGS = -Iinclude
-AnClick_ADDITIONAL_OBJCFLAGS = -Iinclude
-AnClick_ADDITIONAL_CCFLAGS = -Iinclude
-AnClick_ADDITIONAL_CXXFLAGS = -std=c++17
+AnClick_ADDITIONAL_CFLAGS = -Iinclude -I$(OPENCV_HEADERS)
+AnClick_ADDITIONAL_OBJCFLAGS = -Iinclude -I$(OPENCV_HEADERS)
+AnClick_ADDITIONAL_CCFLAGS = -Iinclude -I$(OPENCV_HEADERS)
+AnClick_ADDITIONAL_CXXFLAGS = -std=c++17 -Iinclude -I$(OPENCV_HEADERS)
+AnClick_LDFLAGS = -F$(OPENCV_FRAMEWORK_DIR) -framework opencv2
 AnClick_FRAMEWORKS = UIKit Foundation QuartzCore CoreGraphics
 AnClick_PRIVATE_FRAMEWORKS = IOKit
 
