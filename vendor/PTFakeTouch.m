@@ -8,6 +8,8 @@ extern IOHIDEventRef IOHIDEventCreateDigitizerEvent(CFAllocatorRef allocator, ui
 extern IOHIDEventRef IOHIDEventCreateDigitizerFingerEvent(CFAllocatorRef allocator, uint64_t timeStamp, uint32_t index, uint32_t identity, uint32_t eventMask, CGFloat x, CGFloat y, CGFloat z, CGFloat tipPressure, CGFloat twist, Boolean range, Boolean touch, OptionBits options);
 extern void IOHIDEventAppendEvent(IOHIDEventRef event, IOHIDEventRef childEvent, OptionBits options);
 extern IOHIDEventSystemClientRef IOHIDEventSystemClientCreate(CFAllocatorRef allocator);
+extern void IOHIDEventSystemClientScheduleWithRunLoop(IOHIDEventSystemClientRef client, CFRunLoopRef runLoop, CFStringRef mode);
+extern void IOHIDEventSystemClientSetMatchingMultiple(IOHIDEventSystemClientRef client, CFArrayRef matchings);
 extern void IOHIDEventSystemClientDispatchEvent(IOHIDEventSystemClientRef client, IOHIDEventRef event);
 extern void IOHIDEventSetIntegerValue(IOHIDEventRef event, uint32_t field, int64_t value);
 extern void IOHIDEventSetSenderID(IOHIDEventRef event, uint64_t senderID);
@@ -21,6 +23,7 @@ static const uint32_t kPTDigitizerEventAttribute = 1 << 6;
 static const uint32_t kPTDigitizerIsDisplayIntegrated = 0xB0019;
 static const uint64_t kPTDigitizerSenderID = 0x000000010000032DULL;
 static BOOL gPTFakeTouchUseScreenScale = NO;
+static BOOL gPTFakeTouchScheduleClient = YES;
 
 @implementation PTFakeTouch
 
@@ -28,11 +31,23 @@ static BOOL gPTFakeTouchUseScreenScale = NO;
     gPTFakeTouchUseScreenScale = useScreenScale;
 }
 
++ (void)setUseEventSystemClientScheduling:(BOOL)enabled {
+    gPTFakeTouchScheduleClient = enabled;
+}
+
 + (void)fakeTouchId:(NSInteger)touchId AtPoint:(CGPoint)point WithType:(PTFakeTouchEvent)type {
     static IOHIDEventSystemClientRef client = NULL;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         client = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
+        if (client && gPTFakeTouchScheduleClient) {
+            IOHIDEventSystemClientScheduleWithRunLoop(client, CFRunLoopGetMain(), kCFRunLoopCommonModes);
+            NSDictionary *matching = @{
+                @"PrimaryUsagePage": @(0x0D),
+                @"PrimaryUsage": @(0x04),
+            };
+            IOHIDEventSystemClientSetMatchingMultiple(client, (__bridge CFArrayRef)@[matching]);
+        }
     });
 
     if (!client) {

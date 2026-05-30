@@ -21,6 +21,7 @@
     UIView *_panelView;
     UIButton *_captureButton;
     UIButton *_playButton;
+    UIButton *_testButton;
     UILabel *_statusLabel;
     UIView *_captureOverlay;
     UIView *_selectionView;
@@ -81,7 +82,7 @@
 }
 
 - (void)buildPanel {
-    _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(18, 120, 262, 70)];
+    _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(18, 120, 326, 70)];
     [self attachPanelWindowToActiveSceneIfNeeded];
     _panelWindow.windowLevel = UIWindowLevelAlert + 1000;
     _panelWindow.backgroundColor = UIColor.clearColor;
@@ -108,7 +109,11 @@
     _playButton.frame = CGRectMake(72, 8, 58, 38);
     [_panelView addSubview:_playButton];
 
-    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(136, 8, 118, 38)];
+    _testButton = [self panelButtonWithTitle:@"测试" action:@selector(testCenterTap)];
+    _testButton.frame = CGRectMake(136, 8, 58, 38);
+    [_panelView addSubview:_testButton];
+
+    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(200, 8, 118, 38)];
     _statusLabel.text = @"待机";
     _statusLabel.textColor = UIColor.whiteColor;
     _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
@@ -117,7 +122,7 @@
     _statusLabel.textAlignment = NSTextAlignmentCenter;
     [_panelView addSubview:_statusLabel];
 
-    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 50, 246, 12)];
+    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 50, 310, 12)];
     _previewView.contentMode = UIViewContentModeScaleAspectFit;
     _previewView.clipsToBounds = YES;
     _previewView.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
@@ -437,6 +442,24 @@
                 self->_panelWindow.hidden = NO;
                 self->_statusLabel.text = [NSString stringWithFormat:@"点 %.0f,%.0f", point.x, point.y];
             });
+        });
+    });
+}
+
+- (void)testCenterTap {
+    UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        _statusLabel.text = @"无窗口";
+        return;
+    }
+
+    CGPoint point = CGPointMake(CGRectGetMidX(hostWindow.bounds), CGRectGetMidY(hostWindow.bounds));
+    _panelWindow.hidden = YES;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [AnClickFakeTouch tapAtPoint:point];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.28 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            self->_panelWindow.hidden = NO;
+            self->_statusLabel.text = [NSString stringWithFormat:@"测 %.0f,%.0f", point.x, point.y];
         });
     });
 }

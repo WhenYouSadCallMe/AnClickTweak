@@ -14,6 +14,7 @@ typedef NS_ENUM(NSInteger, PTFakeTouchEvent) {
 
 + (void)fakeTouchId:(NSInteger)touchId AtPoint:(CGPoint)point WithType:(PTFakeTouchEvent)type;
 + (void)setUseScreenScale:(BOOL)useScreenScale;
++ (void)setUseEventSystemClientScheduling:(BOOL)enabled;
 
 @end
 
