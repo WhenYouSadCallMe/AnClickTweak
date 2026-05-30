@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <math.h>
 #import "../include/PTFakeTouch.h"
 
 @interface AnClickFakeTouch : NSObject
@@ -9,6 +10,7 @@
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end;
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end duration:(NSTimeInterval)duration steps:(NSUInteger)steps;
 + (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration;
++ (void)playRecordedEvents:(NSArray<NSDictionary *> *)events;
 + (void)touchDownAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
 + (void)touchMoveAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
 + (void)touchUpAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
@@ -37,11 +39,17 @@
 
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration {
     NSInteger touchId = 3;
-    NSTimeInterval holdDuration = MAX(duration, 0.35);
+    NSTimeInterval holdDuration = MAX(duration, 1.1);
     [self touchDownAtPoint:point touchId:touchId];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self touchMoveAtPoint:point touchId:touchId];
-    });
+
+    NSUInteger pulses = MAX((NSUInteger)floor(holdDuration / 0.12), 4);
+    for (NSUInteger i = 1; i < pulses; i++) {
+        NSTimeInterval delay = holdDuration * ((NSTimeInterval)i / (NSTimeInterval)pulses);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self touchMoveAtPoint:point touchId:touchId];
+        });
+    }
+
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self touchUpAtPoint:point touchId:touchId];
     });
@@ -162,6 +170,52 @@
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(safeDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self touchUpAtPoint:points.lastObject.CGPointValue touchId:touchId];
     });
+}
+
++ (void)playRecordedEvents:(NSArray<NSDictionary *> *)events {
+    if (events.count == 0) {
+        return;
+    }
+
+    NSInteger touchId = 6;
+    __block BOOL sawEnded = NO;
+    __block CGPoint lastPoint = CGPointZero;
+    __block NSTimeInterval lastTimestamp = 0;
+
+    for (NSDictionary *event in events) {
+        NSNumber *typeNumber = event[@"type"];
+        NSNumber *xNumber = event[@"x"];
+        NSNumber *yNumber = event[@"y"];
+        NSNumber *timestampNumber = event[@"timestamp"];
+        if (!typeNumber || !xNumber || !yNumber || !timestampNumber) {
+            continue;
+        }
+
+        NSInteger type = typeNumber.integerValue;
+        CGPoint point = CGPointMake(xNumber.doubleValue, yNumber.doubleValue);
+        NSTimeInterval timestamp = MAX(0, timestampNumber.doubleValue);
+        lastPoint = point;
+        lastTimestamp = MAX(lastTimestamp, timestamp);
+        if (type == 2 || type == 3) {
+            sawEnded = YES;
+        }
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (type == 0) {
+                [self touchDownAtPoint:point touchId:touchId];
+            } else if (type == 1) {
+                [self touchMoveAtPoint:point touchId:touchId];
+            } else {
+                [self touchUpAtPoint:point touchId:touchId];
+            }
+        });
+    }
+
+    if (!sawEnded) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((lastTimestamp + 0.08) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self touchUpAtPoint:lastPoint touchId:touchId];
+        });
+    }
 }
 
 + (void)touchDownAtPoint:(CGPoint)point touchId:(NSInteger)touchId {

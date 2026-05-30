@@ -117,6 +117,9 @@ static void (*original_sendEvent)(id self, SEL _cmd, UIEvent *event);
     if (!self.isRecording || event.type != UIEventTypeTouches) {
         return;
     }
+    if (window.windowLevel >= UIWindowLevelAlert) {
+        return;
+    }
 
     NSSet<UITouch *> *touches = [event allTouches];
     if (touches.count == 0) {
@@ -149,7 +152,7 @@ static void (*original_sendEvent)(id self, SEL _cmd, UIEvent *event);
 
             AnClickRecordEvent *record = [[AnClickRecordEvent alloc] init];
             record.type = type;
-            record.point = [touch locationInView:window];
+            record.point = [window convertPoint:[touch locationInView:window] toWindow:nil];
             record.timestamp = MAX(0, CACurrentMediaTime() - _recordStartTime);
             [_events addObject:record];
         }

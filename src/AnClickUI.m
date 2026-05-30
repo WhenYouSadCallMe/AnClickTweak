@@ -21,6 +21,15 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 + (void)doubleTapAtPoint:(CGPoint)point;
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration;
 + (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration;
++ (void)playRecordedEvents:(NSArray<NSDictionary *> *)events;
+@end
+
+@interface AnClickRecorder : NSObject
++ (instancetype)shared;
+- (void)startRecording;
+- (NSArray *)stopRecording;
+- (NSArray<NSDictionary *> *)serializedEvents;
+@property (nonatomic, assign, getter=isRecording) BOOL recording;
 @end
 
 @interface AnClickUI : NSObject
@@ -51,6 +60,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     CAShapeLayer *_trajectoryLayer;
     NSMutableArray<NSValue *> *_recordedSwipePoints;
     NSMutableArray<NSValue *> *_liveSwipePoints;
+    NSArray<NSDictionary *> *_recordedMacroEvents;
     CGPoint _manualActionPoints[3];
     BOOL _hasManualActionPoint[3];
     CGPoint _manualSwipeAnchor;
@@ -167,11 +177,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _runManualButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 48, buttonWidth, 34);
     [_panelView addSubview:_runManualButton];
 
-    _recordSwipeButton = [self panelButtonWithTitle:@"录滑" action:@selector(beginSwipeRecording)];
+    _recordSwipeButton = [self panelButtonWithTitle:@"录制" action:@selector(toggleMacroRecording)];
     _recordSwipeButton.frame = CGRectMake(gap, 88, buttonWidth, 34);
     [_panelView addSubview:_recordSwipeButton];
 
-    _previewSwipeButton = [self panelButtonWithTitle:@"预轨" action:@selector(previewCurrentAction)];
+    _previewSwipeButton = [self panelButtonWithTitle:@"回放" action:@selector(playRecordedMacro)];
     _previewSwipeButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 88, buttonWidth, 34);
     [_panelView addSubview:_previewSwipeButton];
 
@@ -847,6 +857,41 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _hasManualActionPoint[(NSUInteger)_actionMode] = NO;
     _manualActionPoints[(NSUInteger)_actionMode] = CGPointZero;
     _statusLabel.text = [NSString stringWithFormat:@"已清%@", [self currentActionName]];
+}
+
+- (void)toggleMacroRecording {
+    AnClickRecorder *recorder = [AnClickRecorder shared];
+    if (recorder.isRecording) {
+        [recorder stopRecording];
+        _recordedMacroEvents = [recorder serializedEvents];
+        [_recordSwipeButton setTitle:@"录制" forState:UIControlStateNormal];
+        _recordSwipeButton.backgroundColor = [UIColor colorWithRed:0.10 green:0.34 blue:0.56 alpha:1.0];
+        _statusLabel.text = [NSString stringWithFormat:@"已录 %lu步", (unsigned long)_recordedMacroEvents.count];
+        return;
+    }
+
+    _recordedMacroEvents = nil;
+    [recorder startRecording];
+    [_recordSwipeButton setTitle:@"停止" forState:UIControlStateNormal];
+    _recordSwipeButton.backgroundColor = [UIColor colorWithRed:0.84 green:0.18 blue:0.18 alpha:1.0];
+    _statusLabel.text = @"录制中";
+}
+
+- (void)playRecordedMacro {
+    if (_recordedMacroEvents.count == 0) {
+        _statusLabel.text = @"无录制";
+        return;
+    }
+
+    UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        _statusLabel.text = @"无窗口";
+        return;
+    }
+
+    [self preparePanelForExternalTapWithHostWindow:hostWindow];
+    [AnClickFakeTouch playRecordedEvents:_recordedMacroEvents];
+    _statusLabel.text = [NSString stringWithFormat:@"回放 %lu步", (unsigned long)_recordedMacroEvents.count];
 }
 
 - (void)beginSwipeRecording {
