@@ -123,7 +123,7 @@ enum {
 @end
 
 @interface UITouch (AnClickPTFakeTouch)
-- (instancetype)anclick_initAtPoint:(CGPoint)point inWindow:(UIWindow *)window;
+- (instancetype)initAnClickAtPoint:(CGPoint)point inWindow:(UIWindow *)window;
 - (void)anclick_setLocationInWindow:(CGPoint)location;
 - (void)anclick_setPhaseAndUpdateTimestamp:(UITouchPhase)phase;
 - (void)anclick_setHIDEvent;
@@ -131,7 +131,7 @@ enum {
 
 @implementation UITouch (AnClickPTFakeTouch)
 
-- (instancetype)anclick_initAtPoint:(CGPoint)point inWindow:(UIWindow *)window {
+- (instancetype)initAnClickAtPoint:(CGPoint)point inWindow:(UIWindow *)window {
     self = [super init];
     if (!self || !window) {
         return self;
@@ -386,7 +386,7 @@ static void AnClickSetEventWithTouches(UIEvent *event, NSArray<UITouch *> *touch
     if (phase == UITouchPhaseBegan || touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled) {
         UIWindow *window = AnClickWindowForPoint(point);
         CGPoint windowPoint = [window convertPoint:point fromWindow:nil];
-        touch = [[UITouch alloc] anclick_initAtPoint:windowPoint inWindow:window];
+        touch = [[UITouch alloc] initAnClickAtPoint:windowPoint inWindow:window];
         AnClickTouches[index] = touch;
     } else {
         CGPoint windowPoint = [touch.window convertPoint:point fromWindow:nil];
