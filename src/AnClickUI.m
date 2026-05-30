@@ -25,6 +25,7 @@
 @end
 
 @interface AnClickCore : NSObject
++ (UIImage *)captureCurrentWindowImage;
 + (BOOL)findAndTapTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 @end
 
@@ -39,6 +40,7 @@
     UIButton *_recordButton;
     UIButton *_playButton;
     UIButton *_visionButton;
+    UIButton *_templateButton;
     UILabel *_statusLabel;
     NSArray<AnClickRecordEvent *> *_lastRecording;
 }
@@ -55,16 +57,51 @@
 - (void)show {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self->_panelWindow) {
+            [self attachPanelWindowToActiveSceneIfNeeded];
             self->_panelWindow.hidden = NO;
+            [self->_panelWindow makeKeyAndVisible];
             return;
         }
         [self buildPanel];
     });
 }
 
+- (UIWindowScene *)activeWindowScene {
+    if (@available(iOS 13.0, *)) {
+        UIWindowScene *fallback = nil;
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (![scene isKindOfClass:UIWindowScene.class]) {
+                continue;
+            }
+            UIWindowScene *windowScene = (UIWindowScene *)scene;
+            if (scene.activationState == UISceneActivationStateForegroundActive) {
+                return windowScene;
+            }
+            if (!fallback && scene.activationState == UISceneActivationStateForegroundInactive) {
+                fallback = windowScene;
+            }
+        }
+        return fallback;
+    }
+    return nil;
+}
+
+- (void)attachPanelWindowToActiveSceneIfNeeded {
+    if (@available(iOS 13.0, *)) {
+        if (_panelWindow.windowScene) {
+            return;
+        }
+        UIWindowScene *scene = [self activeWindowScene];
+        if (scene) {
+            _panelWindow.windowScene = scene;
+        }
+    }
+}
+
 - (void)buildPanel {
-    CGRect frame = CGRectMake(18, 120, 232, 54);
+    CGRect frame = CGRectMake(18, 120, 280, 54);
     _panelWindow = [[UIWindow alloc] initWithFrame:frame];
+    [self attachPanelWindowToActiveSceneIfNeeded];
     _panelWindow.windowLevel = UIWindowLevelAlert + 1000;
     _panelWindow.backgroundColor = UIColor.clearColor;
     _panelWindow.hidden = NO;
@@ -94,7 +131,11 @@
     _visionButton.frame = CGRectMake(122, 8, 42, 38);
     [_panelView addSubview:_visionButton];
 
-    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(170, 8, 54, 38)];
+    _templateButton = [self buttonWithTitle:@"Tpl" action:@selector(beginTemplateCapture)];
+    _templateButton.frame = CGRectMake(170, 8, 42, 38);
+    [_panelView addSubview:_templateButton];
+
+    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(218, 8, 54, 38)];
     _statusLabel.text = @"Idle";
     _statusLabel.textColor = UIColor.whiteColor;
     _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
@@ -102,6 +143,9 @@
     _statusLabel.minimumScaleFactor = 0.65;
     _statusLabel.textAlignment = NSTextAlignmentCenter;
     [_panelView addSubview:_statusLabel];
+
+    [_panelWindow makeKeyAndVisible];
+    NSLog(@"[AnClick] Panel shown");
 }
 
 - (UIButton *)buttonWithTitle:(NSString *)title action:(SEL)action {
@@ -116,12 +160,12 @@
 }
 
 - (void)handlePanelPan:(UIPanGestureRecognizer *)recognizer {
-    CGPoint translation = [recognizer translationInView:_panelWindow.superview];
+    CGPoint translation = [recognizer translationInView:_panelWindow];
     CGPoint center = _panelWindow.center;
     center.x += translation.x;
     center.y += translation.y;
     _panelWindow.center = center;
-    [recognizer setTranslation:CGPointZero inView:_panelWindow.superview];
+    [recognizer setTranslation:CGPointZero inView:_panelWindow];
 }
 
 - (void)toggleRecord {
@@ -168,7 +212,10 @@
 }
 
 - (void)runVisionTap {
-    NSString *path = [NSBundle.mainBundle pathForResource:@"anclick_template" ofType:@"png"];
+    NSString *path = [self templatePath];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+        path = [NSBundle.mainBundle pathForResource:@"anclick_template" ofType:@"png"];
+    }
     UIImage *templateImage = path ? [UIImage imageWithContentsOfFile:path] : nil;
     if (!templateImage) {
         _statusLabel.text = @"NoTpl";
@@ -184,10 +231,105 @@
     });
 }
 
+- (NSString *)templatePath {
+    NSURL *documentsURL = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
+    return [[documentsURL path] stringByAppendingPathComponent:@"anclick_template.png"];
+}
+
+- (UIWindow *)hostWindow {
+    if (@available(iOS 13.0, *)) {
+        UIWindowScene *scene = [self activeWindowScene];
+        for (UIWindow *window in scene.windows) {
+            if (window.isKeyWindow) {
+                return window;
+            }
+        }
+        return scene.windows.firstObject;
+    }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return UIApplication.sharedApplication.keyWindow ?: UIApplication.sharedApplication.windows.firstObject;
+#pragma clang diagnostic pop
+}
+
+- (void)beginTemplateCapture {
+    UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        _statusLabel.text = @"NoWin";
+        return;
+    }
+
+    _statusLabel.text = @"Pick";
+    UIView *overlay = [[UIView alloc] initWithFrame:hostWindow.bounds];
+    overlay.backgroundColor = [UIColor colorWithWhite:0 alpha:0.35];
+    overlay.userInteractionEnabled = YES;
+    overlay.accessibilityIdentifier = @"AnClickTemplateOverlay";
+
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(16, 80, hostWindow.bounds.size.width - 32, 44)];
+    label.text = @"Tap target";
+    label.textColor = UIColor.whiteColor;
+    label.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
+    label.textAlignment = NSTextAlignmentCenter;
+    [overlay addSubview:label];
+
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTemplateTap:)];
+    [overlay addGestureRecognizer:tap];
+    [hostWindow addSubview:overlay];
+}
+
+- (void)handleTemplateTap:(UITapGestureRecognizer *)recognizer {
+    UIView *overlay = recognizer.view;
+    UIWindow *hostWindow = (UIWindow *)overlay.window;
+    CGPoint point = [recognizer locationInView:hostWindow];
+
+    overlay.hidden = YES;
+    _panelWindow.hidden = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIImage *screen = [AnClickCore captureCurrentWindowImage];
+        self->_panelWindow.hidden = NO;
+        [overlay removeFromSuperview];
+
+        if (!screen.CGImage) {
+            self->_statusLabel.text = @"NoImg";
+            return;
+        }
+
+        CGFloat scale = screen.scale;
+        CGFloat templateSide = 100.0;
+        CGRect pointRect = CGRectMake((point.x - templateSide * 0.5) * scale,
+                                      (point.y - templateSide * 0.5) * scale,
+                                      templateSide * scale,
+                                      templateSide * scale);
+        CGRect imageBounds = CGRectMake(0, 0, CGImageGetWidth(screen.CGImage), CGImageGetHeight(screen.CGImage));
+        CGRect cropRect = CGRectIntersection(pointRect, imageBounds);
+        if (CGRectIsEmpty(cropRect)) {
+            self->_statusLabel.text = @"BadTpl";
+            return;
+        }
+
+        CGImageRef croppedRef = CGImageCreateWithImageInRect(screen.CGImage, cropRect);
+        if (!croppedRef) {
+            self->_statusLabel.text = @"BadTpl";
+            return;
+        }
+
+        UIImage *templateImage = [UIImage imageWithCGImage:croppedRef scale:scale orientation:screen.imageOrientation];
+        CGImageRelease(croppedRef);
+        NSData *pngData = UIImagePNGRepresentation(templateImage);
+        BOOL saved = [pngData writeToFile:[self templatePath] atomically:YES];
+        self->_statusLabel.text = saved ? @"TplOK" : @"TplErr";
+    });
+}
+
 @end
 
 __attribute__((constructor)) static void AnClickUIInit(void) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    NSLog(@"[AnClick] UI constructor loaded");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [[AnClickUI shared] show];
     });
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
+        [[AnClickUI shared] show];
+    }];
 }
