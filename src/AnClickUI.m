@@ -426,14 +426,17 @@
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSValue *pointValue = [AnClickCore findTemplateImage:templateImage threshold:0.86];
         dispatch_async(dispatch_get_main_queue(), ^{
-            self->_panelWindow.hidden = NO;
             if (!pointValue) {
+                self->_panelWindow.hidden = NO;
                 self->_statusLabel.text = @"未找到";
                 return;
             }
             CGPoint point = pointValue.CGPointValue;
             [AnClickFakeTouch tapAtPoint:point];
-            self->_statusLabel.text = [NSString stringWithFormat:@"点 %.0f,%.0f", point.x, point.y];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.28 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                self->_panelWindow.hidden = NO;
+                self->_statusLabel.text = [NSString stringWithFormat:@"点 %.0f,%.0f", point.x, point.y];
+            });
         });
     });
 }
