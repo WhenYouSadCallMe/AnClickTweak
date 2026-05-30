@@ -53,6 +53,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIView *_captureOverlay;
     UIView *_selectionView;
     UIView *_pointPickOverlay;
+    UIWindow *_pointPickWindow;
     UIImage *_captureSnapshot;
     UIImageView *_previewView;
     UIView *_tapMarkerView;
@@ -725,11 +726,20 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
 
     [_pointPickOverlay removeFromSuperview];
-    UIView *overlay = [[UIView alloc] initWithFrame:hostWindow.bounds];
+    _pointPickWindow.hidden = YES;
+    _pointPickWindow = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    if (@available(iOS 13.0, *)) {
+        _pointPickWindow.windowScene = hostWindow.windowScene ?: [self activeWindowScene];
+    }
+    _pointPickWindow.windowLevel = UIWindowLevelAlert + 2000;
+    _pointPickWindow.backgroundColor = UIColor.clearColor;
+    _pointPickWindow.rootViewController = [[UIViewController alloc] init];
+
+    UIView *overlay = [[UIView alloc] initWithFrame:_pointPickWindow.bounds];
     overlay.backgroundColor = [UIColor colorWithWhite:0 alpha:0.12];
     overlay.userInteractionEnabled = YES;
 
-    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(12, 44, hostWindow.bounds.size.width - 24, 34)];
+    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(12, 44, overlay.bounds.size.width - 24, 34)];
     hint.text = _actionMode == AnClickActionModeSwipe ? @"点一下设置滑动起点" : [NSString stringWithFormat:@"点一下设置%@", [self currentActionName]];
     hint.textColor = UIColor.whiteColor;
     hint.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
@@ -740,20 +750,23 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [overlay addSubview:hint];
 
     UIButton *cancelButton = [self overlayButtonWithTitle:@"取消" action:@selector(cancelPointPicking)];
-    cancelButton.frame = CGRectMake(hostWindow.bounds.size.width - 102, hostWindow.bounds.size.height - 70, 86, 44);
+    cancelButton.frame = CGRectMake(overlay.bounds.size.width - 102, overlay.bounds.size.height - 70, 86, 44);
     [overlay addSubview:cancelButton];
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingTap:)];
     [overlay addGestureRecognizer:tap];
 
-    [hostWindow addSubview:overlay];
+    [_pointPickWindow.rootViewController.view addSubview:overlay];
     _pointPickOverlay = overlay;
+    _pointPickWindow.hidden = NO;
     _statusLabel.text = @"等待取点";
 }
 
 - (void)cancelPointPicking {
     [_pointPickOverlay removeFromSuperview];
     _pointPickOverlay = nil;
+    _pointPickWindow.hidden = YES;
+    _pointPickWindow = nil;
     _statusLabel.text = @"取消取点";
 }
 
@@ -768,10 +781,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return;
     }
 
-    CGPoint windowPoint = [recognizer locationInView:hostWindow];
-    CGPoint screenPoint = [hostWindow convertPoint:windowPoint toWindow:nil];
+    CGPoint screenPoint = [recognizer locationInView:_pointPickOverlay];
     [_pointPickOverlay removeFromSuperview];
     _pointPickOverlay = nil;
+    _pointPickWindow.hidden = YES;
+    _pointPickWindow = nil;
 
     if (_actionMode == AnClickActionModeSwipe) {
         _manualSwipeAnchor = screenPoint;

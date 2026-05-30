@@ -39,14 +39,16 @@
 
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration {
     NSInteger touchId = 3;
-    NSTimeInterval holdDuration = MAX(duration, 1.1);
+    NSTimeInterval holdDuration = MAX(duration, 1.8);
     [self touchDownAtPoint:point touchId:touchId];
 
-    NSUInteger pulses = MAX((NSUInteger)floor(holdDuration / 0.12), 4);
+    NSUInteger pulses = MAX((NSUInteger)floor(holdDuration / 0.08), 8);
     for (NSUInteger i = 1; i < pulses; i++) {
         NSTimeInterval delay = holdDuration * ((NSTimeInterval)i / (NSTimeInterval)pulses);
+        CGFloat offset = (i % 2 == 0) ? 0.35 : -0.35;
+        CGPoint movedPoint = CGPointMake(point.x + offset, point.y + offset);
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self touchMoveAtPoint:point touchId:touchId];
+            [self touchMoveAtPoint:movedPoint touchId:touchId];
         });
     }
 
