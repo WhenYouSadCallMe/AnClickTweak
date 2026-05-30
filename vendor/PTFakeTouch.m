@@ -74,6 +74,10 @@ enum {
     kIOHIDDigitizerEventRange = 0x00000001,
     kIOHIDDigitizerEventTouch = 0x00000002,
     kIOHIDDigitizerEventPosition = 0x00000004,
+    kIOHIDDigitizerEventStop = 0x00000008,
+    kIOHIDDigitizerEventIdentity = 0x00000020,
+    kIOHIDDigitizerEventAttribute = 0x00000040,
+    kIOHIDDigitizerEventStart = 0x00000100,
 };
 
 enum {
@@ -103,6 +107,7 @@ enum {
 
 @interface UIApplication ()
 - (UIEvent *)_touchesEvent;
+- (void)_enqueueHIDEvent:(IOHIDEventRef)event;
 @end
 
 @interface KIFGSEventProxy : NSObject {
@@ -261,9 +266,16 @@ static IOHIDEventRef AnClickIOHIDEventWithTouches(NSArray<UITouch *> *touches) {
         }
 
         BOOL touching = touch.phase != UITouchPhaseEnded;
-        uint32_t eventMask = touch.phase == UITouchPhaseMoved
-            ? kIOHIDDigitizerEventPosition
-            : (kIOHIDDigitizerEventRange | kIOHIDDigitizerEventTouch);
+        uint32_t eventMask = kIOHIDDigitizerEventRange |
+                             kIOHIDDigitizerEventTouch |
+                             kIOHIDDigitizerEventPosition |
+                             kIOHIDDigitizerEventIdentity |
+                             kIOHIDDigitizerEventAttribute;
+        if (touch.phase == UITouchPhaseBegan) {
+            eventMask |= kIOHIDDigitizerEventStart;
+        } else if (touch.phase == UITouchPhaseEnded) {
+            eventMask |= kIOHIDDigitizerEventStop;
+        }
         CGPoint location = [touch locationInView:touch.window];
 
         IOHIDEventRef fingerEvent = IOHIDEventCreateDigitizerFingerEventWithQuality(kCFAllocatorDefault,
@@ -293,35 +305,23 @@ static IOHIDEventRef AnClickIOHIDEventWithTouches(NSArray<UITouch *> *touches) {
     return handEvent;
 }
 
-static IOHIDEventSystemClientRef AnClickSystemClient(void) {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        AnClickHIDClient = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
-        if (AnClickHIDClient) {
-            IOHIDEventSystemClientScheduleWithRunLoop(AnClickHIDClient, CFRunLoopGetMain(), kCFRunLoopCommonModes);
-            NSDictionary *matching = @{
-                @"PrimaryUsagePage": @(0x0D),
-                @"PrimaryUsage": @(0x04),
-            };
-            IOHIDEventSystemClientSetMatchingMultiple(AnClickHIDClient, (__bridge CFArrayRef)@[matching]);
-        }
-    });
-    return AnClickHIDClient;
-}
-
-static void AnClickDispatchSystemTouch(CGPoint screenPoint, NSInteger touchId, UITouchPhase phase) {
-    IOHIDEventSystemClientRef client = AnClickSystemClient();
-    if (!client) {
-        NSLog(@"[AnClick] IOHID system client unavailable");
-        return;
+static IOHIDEventRef AnClickCreateScreenHIDEvent(CGPoint screenPoint, NSInteger touchId, UITouchPhase phase, CGFloat scale) CF_RETURNS_RETAINED {
+    BOOL touching = phase != UITouchPhaseEnded && phase != UITouchPhaseCancelled;
+    uint32_t eventMask = kIOHIDDigitizerEventRange |
+                         kIOHIDDigitizerEventTouch |
+                         kIOHIDDigitizerEventPosition |
+                         kIOHIDDigitizerEventIdentity |
+                         kIOHIDDigitizerEventAttribute;
+    if (phase == UITouchPhaseBegan) {
+        eventMask |= kIOHIDDigitizerEventStart;
+    } else if (phase == UITouchPhaseEnded) {
+        eventMask |= kIOHIDDigitizerEventStop;
     }
 
-    BOOL touching = phase != UITouchPhaseEnded && phase != UITouchPhaseCancelled;
-    uint32_t eventMask = phase == UITouchPhaseMoved
-        ? kIOHIDDigitizerEventPosition
-        : (kIOHIDDigitizerEventRange | kIOHIDDigitizerEventTouch);
     uint64_t timeStamp = mach_absolute_time();
     uint32_t identity = (uint32_t)MAX(1, touchId);
+    IOHIDFloat x = (IOHIDFloat)(screenPoint.x * scale);
+    IOHIDFloat y = (IOHIDFloat)(screenPoint.y * scale);
 
     IOHIDEventRef handEvent = IOHIDEventCreateDigitizerEvent(kCFAllocatorDefault,
                                                              timeStamp,
@@ -339,7 +339,7 @@ static void AnClickDispatchSystemTouch(CGPoint screenPoint, NSInteger touchId, U
                                                              touching,
                                                              0);
     if (!handEvent) {
-        return;
+        return NULL;
     }
 
     IOHIDEventSetIntegerValue(handEvent, kIOHIDEventFieldDigitizerIsDisplayIntegrated, 1);
@@ -350,8 +350,8 @@ static void AnClickDispatchSystemTouch(CGPoint screenPoint, NSInteger touchId, U
                                                                                 1,
                                                                                 identity,
                                                                                 eventMask,
-                                                                                (IOHIDFloat)screenPoint.x,
-                                                                                (IOHIDFloat)screenPoint.y,
+                                                                                x,
+                                                                                y,
                                                                                 0,
                                                                                 touching ? 0.5 : 0,
                                                                                 0,
@@ -370,8 +370,63 @@ static void AnClickDispatchSystemTouch(CGPoint screenPoint, NSInteger touchId, U
         CFRelease(fingerEvent);
     }
 
-    IOHIDEventSystemClientDispatchEvent(client, handEvent);
-    CFRelease(handEvent);
+    return handEvent;
+}
+
+static void AnClickEnqueueApplicationHIDTouch(CGPoint screenPoint, NSInteger touchId, UITouchPhase phase) {
+    UIApplication *application = UIApplication.sharedApplication;
+    if (![application respondsToSelector:@selector(_enqueueHIDEvent:)]) {
+        return;
+    }
+
+    IOHIDEventRef pointEvent = AnClickCreateScreenHIDEvent(screenPoint, touchId, phase, 1.0);
+    if (pointEvent) {
+        [application _enqueueHIDEvent:pointEvent];
+        CFRelease(pointEvent);
+    }
+
+    CGFloat screenScale = UIScreen.mainScreen.scale;
+    if (screenScale > 1.01) {
+        IOHIDEventRef pixelEvent = AnClickCreateScreenHIDEvent(screenPoint, touchId + 20, phase, screenScale);
+        if (pixelEvent) {
+            [application _enqueueHIDEvent:pixelEvent];
+            CFRelease(pixelEvent);
+        }
+    }
+}
+
+static IOHIDEventSystemClientRef AnClickSystemClient(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        AnClickHIDClient = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
+        if (AnClickHIDClient) {
+            IOHIDEventSystemClientScheduleWithRunLoop(AnClickHIDClient, CFRunLoopGetMain(), kCFRunLoopCommonModes);
+        }
+    });
+    return AnClickHIDClient;
+}
+
+static void AnClickDispatchSystemTouch(CGPoint screenPoint, NSInteger touchId, UITouchPhase phase) {
+    IOHIDEventSystemClientRef client = AnClickSystemClient();
+    if (!client) {
+        NSLog(@"[AnClick] IOHID system client unavailable");
+        return;
+    }
+
+    IOHIDEventRef pointEvent = AnClickCreateScreenHIDEvent(screenPoint, touchId, phase, 1.0);
+    if (pointEvent) {
+        IOHIDEventSystemClientDispatchEvent(client, pointEvent);
+        CFRelease(pointEvent);
+    }
+
+    CGFloat screenScale = UIScreen.mainScreen.scale;
+    if (screenScale > 1.01) {
+        IOHIDEventRef pixelEvent = AnClickCreateScreenHIDEvent(screenPoint, touchId + 20, phase, screenScale);
+        if (pixelEvent) {
+            IOHIDEventSystemClientDispatchEvent(client, pixelEvent);
+            CFRelease(pixelEvent);
+        }
+    }
 }
 
 static void AnClickSetEventWithTouches(UIEvent *event, NSArray<UITouch *> *touches) {
@@ -482,6 +537,7 @@ static void AnClickSetEventWithTouches(UIEvent *event, NSArray<UITouch *> *touch
         : [[UIEvent alloc] init];
     AnClickSetEventWithTouches(event, @[touch]);
     [UIApplication.sharedApplication sendEvent:event];
+    AnClickEnqueueApplicationHIDTouch(point, pointId, phase);
     AnClickDispatchSystemTouch(point, pointId, phase);
 
     NSLog(@"[AnClick] PTFakeTouch %@ id=%ld screen=(%.1f, %.1f) window=%@",
