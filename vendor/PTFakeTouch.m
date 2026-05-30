@@ -16,8 +16,13 @@ static const uint32_t kPTDigitizerEventTouch = 1 << 1;
 static const uint32_t kPTDigitizerEventPosition = 1 << 2;
 static const uint32_t kPTDigitizerEventIdentity = 1 << 5;
 static const uint32_t kPTDigitizerEventAttribute = 1 << 6;
+static BOOL gPTFakeTouchUseScreenScale = NO;
 
 @implementation PTFakeTouch
+
++ (void)setUseScreenScale:(BOOL)useScreenScale {
+    gPTFakeTouchUseScreenScale = useScreenScale;
+}
 
 + (void)fakeTouchId:(NSInteger)touchId AtPoint:(CGPoint)point WithType:(PTFakeTouchEvent)type {
     static IOHIDEventSystemClientRef client = NULL;
@@ -39,7 +44,7 @@ static const uint32_t kPTDigitizerEventAttribute = 1 << 6;
     }
 
     uint64_t timestamp = mach_absolute_time();
-    CGFloat scale = UIScreen.mainScreen.scale;
+    CGFloat scale = gPTFakeTouchUseScreenScale ? UIScreen.mainScreen.scale : 1.0;
     CGFloat x = point.x * scale;
     CGFloat y = point.y * scale;
     uint32_t identity = (uint32_t)MAX(1, touchId);

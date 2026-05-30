@@ -133,6 +133,7 @@ static cv::Mat AnClickMatFromUIImage(UIImage *image) {
     CGFloat scale = UIScreen.mainScreen.scale;
     CGFloat centerX = ((CGFloat)bestLocation.x + (CGFloat)templ.cols * 0.5) / scale;
     CGFloat centerY = ((CGFloat)bestLocation.y + (CGFloat)templ.rows * 0.5) / scale;
+    NSLog(@"[AnClick] OpenCV match score %.3f at %.1f, %.1f", bestScore, centerX, centerY);
     return [NSValue valueWithCGPoint:CGPointMake(centerX, centerY)];
 }
 

@@ -3,7 +3,12 @@
 
 @interface AnClickCore : NSObject
 + (UIImage *)captureCurrentWindowImage;
++ (NSValue *)findTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 + (BOOL)findAndTapTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
+@end
+
+@interface AnClickFakeTouch : NSObject
++ (void)tapAtPoint:(CGPoint)point;
 @end
 
 @interface AnClickUI : NSObject
@@ -20,6 +25,7 @@
     UIView *_captureOverlay;
     UIView *_selectionView;
     UIImage *_captureSnapshot;
+    UIImageView *_previewView;
 }
 
 + (instancetype)shared {
@@ -75,7 +81,7 @@
 }
 
 - (void)buildPanel {
-    _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(18, 120, 210, 54)];
+    _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(18, 120, 262, 70)];
     [self attachPanelWindowToActiveSceneIfNeeded];
     _panelWindow.windowLevel = UIWindowLevelAlert + 1000;
     _panelWindow.backgroundColor = UIColor.clearColor;
@@ -102,7 +108,7 @@
     _playButton.frame = CGRectMake(72, 8, 58, 38);
     [_panelView addSubview:_playButton];
 
-    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(136, 8, 66, 38)];
+    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(136, 8, 118, 38)];
     _statusLabel.text = @"待机";
     _statusLabel.textColor = UIColor.whiteColor;
     _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
@@ -110,6 +116,14 @@
     _statusLabel.minimumScaleFactor = 0.6;
     _statusLabel.textAlignment = NSTextAlignmentCenter;
     [_panelView addSubview:_statusLabel];
+
+    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 50, 246, 12)];
+    _previewView.contentMode = UIViewContentModeScaleAspectFit;
+    _previewView.clipsToBounds = YES;
+    _previewView.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+    _previewView.hidden = YES;
+    [_panelView addSubview:_previewView];
+    [self refreshTemplatePreview];
 
     _panelWindow.hidden = NO;
     NSLog(@"[AnClick] Panel shown");
@@ -216,12 +230,10 @@
     selectionLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
     selectionLabel.textAlignment = NSTextAlignmentCenter;
     [_selectionView addSubview:selectionLabel];
+    [self addCornerHandles];
 
     UIPanGestureRecognizer *movePan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleSelectionPan:)];
     [_selectionView addGestureRecognizer:movePan];
-
-    UIPinchGestureRecognizer *pinch = [[UIPinchGestureRecognizer alloc] initWithTarget:self action:@selector(handleSelectionPinch:)];
-    [_selectionView addGestureRecognizer:pinch];
 
     UIButton *saveButton = [self overlayButtonWithTitle:@"保存" action:@selector(saveSelectedTemplate)];
     saveButton.frame = CGRectMake(16, hostWindow.bounds.size.height - 70, 86, 44);
@@ -247,6 +259,40 @@
     return button;
 }
 
+- (UIView *)cornerHandleWithTag:(NSInteger)tag {
+    UIView *handle = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 30, 30)];
+    handle.tag = tag;
+    handle.backgroundColor = UIColor.systemYellowColor;
+    handle.layer.cornerRadius = 15;
+    handle.layer.borderColor = UIColor.blackColor.CGColor;
+    handle.layer.borderWidth = 1;
+    handle.userInteractionEnabled = YES;
+    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleCornerPan:)];
+    [handle addGestureRecognizer:pan];
+    return handle;
+}
+
+- (void)addCornerHandles {
+    for (NSInteger tag = 1; tag <= 4; tag++) {
+        [_selectionView addSubview:[self cornerHandleWithTag:tag]];
+    }
+    [self layoutCornerHandles];
+}
+
+- (void)layoutCornerHandles {
+    for (UIView *handle in _selectionView.subviews) {
+        if (handle.tag == 1) {
+            handle.center = CGPointMake(0, 0);
+        } else if (handle.tag == 2) {
+            handle.center = CGPointMake(_selectionView.bounds.size.width, 0);
+        } else if (handle.tag == 3) {
+            handle.center = CGPointMake(0, _selectionView.bounds.size.height);
+        } else if (handle.tag == 4) {
+            handle.center = CGPointMake(_selectionView.bounds.size.width, _selectionView.bounds.size.height);
+        }
+    }
+}
+
 - (CGRect)clampedSelectionFrame:(CGRect)frame {
     CGRect bounds = _captureOverlay.bounds;
     CGFloat minSide = 40.0;
@@ -260,11 +306,41 @@
 }
 
 - (void)handleSelectionPan:(UIPanGestureRecognizer *)recognizer {
+    if (recognizer.view != _selectionView) {
+        return;
+    }
     CGPoint translation = [recognizer translationInView:_captureOverlay];
     CGRect frame = _selectionView.frame;
     frame.origin.x += translation.x;
     frame.origin.y += translation.y;
     _selectionView.frame = [self clampedSelectionFrame:frame];
+    [recognizer setTranslation:CGPointZero inView:_captureOverlay];
+}
+
+- (void)handleCornerPan:(UIPanGestureRecognizer *)recognizer {
+    CGPoint translation = [recognizer translationInView:_captureOverlay];
+    CGRect frame = _selectionView.frame;
+
+    if (recognizer.view.tag == 1) {
+        frame.origin.x += translation.x;
+        frame.origin.y += translation.y;
+        frame.size.width -= translation.x;
+        frame.size.height -= translation.y;
+    } else if (recognizer.view.tag == 2) {
+        frame.origin.y += translation.y;
+        frame.size.width += translation.x;
+        frame.size.height -= translation.y;
+    } else if (recognizer.view.tag == 3) {
+        frame.origin.x += translation.x;
+        frame.size.width -= translation.x;
+        frame.size.height += translation.y;
+    } else {
+        frame.size.width += translation.x;
+        frame.size.height += translation.y;
+    }
+
+    _selectionView.frame = [self clampedSelectionFrame:frame];
+    [self layoutCornerHandles];
     [recognizer setTranslation:CGPointZero inView:_captureOverlay];
 }
 
@@ -276,6 +352,7 @@
     frame.origin.x = center.x - frame.size.width * 0.5;
     frame.origin.y = center.y - frame.size.height * 0.5;
     _selectionView.frame = [self clampedSelectionFrame:frame];
+    [self layoutCornerHandles];
     recognizer.scale = 1.0;
 }
 
@@ -312,6 +389,7 @@
     NSData *pngData = UIImagePNGRepresentation(templateImage);
     BOOL saved = [pngData writeToFile:[self templatePath] atomically:YES];
     [self finishTemplateCapture];
+    [self refreshTemplatePreview];
     _statusLabel.text = saved ? @"已保存" : @"保存失败";
 }
 
@@ -328,6 +406,13 @@
     _panelWindow.hidden = NO;
 }
 
+- (void)refreshTemplatePreview {
+    NSString *path = [self templatePath];
+    UIImage *image = [[NSFileManager defaultManager] fileExistsAtPath:path] ? [UIImage imageWithContentsOfFile:path] : nil;
+    _previewView.image = image;
+    _previewView.hidden = (image == nil);
+}
+
 - (void)playTemplateTap {
     NSString *path = [self templatePath];
     UIImage *templateImage = [[NSFileManager defaultManager] fileExistsAtPath:path] ? [UIImage imageWithContentsOfFile:path] : nil;
@@ -339,10 +424,16 @@
     _statusLabel.text = @"寻找";
     _panelWindow.hidden = YES;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        BOOL tapped = [AnClickCore findAndTapTemplateImage:templateImage threshold:0.86];
+        NSValue *pointValue = [AnClickCore findTemplateImage:templateImage threshold:0.86];
         dispatch_async(dispatch_get_main_queue(), ^{
             self->_panelWindow.hidden = NO;
-            self->_statusLabel.text = tapped ? @"已点击" : @"未找到";
+            if (!pointValue) {
+                self->_statusLabel.text = @"未找到";
+                return;
+            }
+            CGPoint point = pointValue.CGPointValue;
+            [AnClickFakeTouch tapAtPoint:point];
+            self->_statusLabel.text = [NSString stringWithFormat:@"点 %.0f,%.0f", point.x, point.y];
         });
     });
 }
