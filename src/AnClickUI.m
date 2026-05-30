@@ -82,7 +82,8 @@
 }
 
 - (void)buildPanel {
-    _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(18, 120, 326, 70)];
+    CGFloat panelWidth = MIN(360.0, UIScreen.mainScreen.bounds.size.width - 24.0);
+    _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(12, 120, panelWidth, 104)];
     [self attachPanelWindowToActiveSceneIfNeeded];
     _panelWindow.windowLevel = UIWindowLevelAlert + 1000;
     _panelWindow.backgroundColor = UIColor.clearColor;
@@ -101,19 +102,21 @@
     UIPanGestureRecognizer *panelPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelPan:)];
     [_panelView addGestureRecognizer:panelPan];
 
+    CGFloat gap = 8.0;
+    CGFloat buttonWidth = floor((panelWidth - gap * 4.0) / 3.0);
     _captureButton = [self panelButtonWithTitle:@"截图" action:@selector(beginTemplateCapture)];
-    _captureButton.frame = CGRectMake(8, 8, 58, 38);
+    _captureButton.frame = CGRectMake(gap, 8, buttonWidth, 38);
     [_panelView addSubview:_captureButton];
 
     _playButton = [self panelButtonWithTitle:@"播放" action:@selector(playTemplateTap)];
-    _playButton.frame = CGRectMake(72, 8, 58, 38);
+    _playButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 8, buttonWidth, 38);
     [_panelView addSubview:_playButton];
 
     _testButton = [self panelButtonWithTitle:@"测试" action:@selector(testCenterTap)];
-    _testButton.frame = CGRectMake(136, 8, 58, 38);
+    _testButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 8, buttonWidth, 38);
     [_panelView addSubview:_testButton];
 
-    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(200, 8, 118, 38)];
+    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 52, panelWidth - 16, 22)];
     _statusLabel.text = @"待机";
     _statusLabel.textColor = UIColor.whiteColor;
     _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
@@ -122,7 +125,7 @@
     _statusLabel.textAlignment = NSTextAlignmentCenter;
     [_panelView addSubview:_statusLabel];
 
-    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 50, 310, 12)];
+    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 80, panelWidth - 16, 14)];
     _previewView.contentMode = UIViewContentModeScaleAspectFit;
     _previewView.clipsToBounds = YES;
     _previewView.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
