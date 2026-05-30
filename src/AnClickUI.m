@@ -1,5 +1,14 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <QuartzCore/QuartzCore.h>
+#import <math.h>
+
+typedef NS_ENUM(NSInteger, AnClickActionMode) {
+    AnClickActionModeTap = 0,
+    AnClickActionModeDoubleTap = 1,
+    AnClickActionModeLongPress = 2,
+    AnClickActionModeSwipe = 3,
+};
 
 @interface AnClickCore : NSObject
 + (UIImage *)captureCurrentWindowImage;
@@ -9,6 +18,9 @@
 
 @interface AnClickFakeTouch : NSObject
 + (void)tapAtPoint:(CGPoint)point;
++ (void)doubleTapAtPoint:(CGPoint)point;
++ (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration;
++ (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration;
 @end
 
 @interface AnClickUI : NSObject
@@ -22,12 +34,19 @@
     UIButton *_captureButton;
     UIButton *_playButton;
     UIButton *_testButton;
+    UIButton *_recordSwipeButton;
+    NSArray<UIButton *> *_modeButtons;
     UILabel *_statusLabel;
     UIView *_captureOverlay;
     UIView *_selectionView;
     UIImage *_captureSnapshot;
     UIImageView *_previewView;
     UIView *_tapMarkerView;
+    UIView *_trajectoryView;
+    CAShapeLayer *_trajectoryLayer;
+    NSMutableArray<NSValue *> *_recordedSwipePoints;
+    NSMutableArray<NSValue *> *_liveSwipePoints;
+    AnClickActionMode _actionMode;
 }
 
 + (instancetype)shared {
@@ -84,7 +103,12 @@
 
 - (void)buildPanel {
     CGFloat panelWidth = MIN(360.0, UIScreen.mainScreen.bounds.size.width - 24.0);
-    _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(12, 120, panelWidth, 104)];
+    _actionMode = AnClickActionModeTap;
+    if (!_recordedSwipePoints) {
+        _recordedSwipePoints = [NSMutableArray array];
+    }
+
+    _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(12, 120, panelWidth, 156)];
     [self attachPanelWindowToActiveSceneIfNeeded];
     _panelWindow.windowLevel = UIWindowLevelAlert + 1000;
     _panelWindow.backgroundColor = UIColor.clearColor;
@@ -104,20 +128,37 @@
     [_panelView addGestureRecognizer:panelPan];
 
     CGFloat gap = 8.0;
-    CGFloat buttonWidth = floor((panelWidth - gap * 4.0) / 3.0);
+    CGFloat modeWidth = floor((panelWidth - gap * 5.0) / 4.0);
+    NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"滑动"];
+    NSMutableArray<UIButton *> *modeButtons = [NSMutableArray array];
+    for (NSUInteger i = 0; i < modeTitles.count; i++) {
+        UIButton *button = [self panelButtonWithTitle:modeTitles[i] action:@selector(selectActionMode:)];
+        button.tag = (NSInteger)i;
+        button.frame = CGRectMake(gap + (modeWidth + gap) * i, 8, modeWidth, 32);
+        [_panelView addSubview:button];
+        [modeButtons addObject:button];
+    }
+    _modeButtons = [modeButtons copy];
+    [self refreshModeButtons];
+
+    CGFloat buttonWidth = floor((panelWidth - gap * 5.0) / 4.0);
     _captureButton = [self panelButtonWithTitle:@"截图" action:@selector(beginTemplateCapture)];
-    _captureButton.frame = CGRectMake(gap, 8, buttonWidth, 38);
+    _captureButton.frame = CGRectMake(gap, 48, buttonWidth, 36);
     [_panelView addSubview:_captureButton];
 
     _playButton = [self panelButtonWithTitle:@"播放" action:@selector(playTemplateTap)];
-    _playButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 8, buttonWidth, 38);
+    _playButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 48, buttonWidth, 36);
     [_panelView addSubview:_playButton];
 
+    _recordSwipeButton = [self panelButtonWithTitle:@"录滑" action:@selector(beginSwipeRecording)];
+    _recordSwipeButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 48, buttonWidth, 36);
+    [_panelView addSubview:_recordSwipeButton];
+
     _testButton = [self panelButtonWithTitle:@"测试" action:@selector(testCenterTap)];
-    _testButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 8, buttonWidth, 38);
+    _testButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 48, buttonWidth, 36);
     [_panelView addSubview:_testButton];
 
-    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 52, panelWidth - 16, 22)];
+    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 92, panelWidth - 16, 22)];
     _statusLabel.text = @"待机";
     _statusLabel.textColor = UIColor.whiteColor;
     _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
@@ -126,7 +167,7 @@
     _statusLabel.textAlignment = NSTextAlignmentCenter;
     [_panelView addSubview:_statusLabel];
 
-    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 80, panelWidth - 16, 14)];
+    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 120, panelWidth - 16, 28)];
     _previewView.contentMode = UIViewContentModeScaleAspectFit;
     _previewView.clipsToBounds = YES;
     _previewView.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
@@ -147,6 +188,29 @@
     button.layer.cornerRadius = 6;
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
+}
+
+- (void)selectActionMode:(UIButton *)sender {
+    _actionMode = (AnClickActionMode)sender.tag;
+    [self refreshModeButtons];
+
+    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动"];
+    NSString *name = names[(NSUInteger)_actionMode];
+    if (_actionMode == AnClickActionModeSwipe && _recordedSwipePoints.count < 2) {
+        _statusLabel.text = @"滑动需录制";
+    } else {
+        _statusLabel.text = [NSString stringWithFormat:@"模式 %@", name];
+    }
+}
+
+- (void)refreshModeButtons {
+    for (UIButton *button in _modeButtons) {
+        BOOL selected = button.tag == _actionMode;
+        button.backgroundColor = selected
+            ? [UIColor colorWithRed:0.95 green:0.65 blue:0.14 alpha:1.0]
+            : [UIColor colorWithRed:0.10 green:0.34 blue:0.56 alpha:1.0];
+        [button setTitleColor:selected ? UIColor.blackColor : UIColor.whiteColor forState:UIControlStateNormal];
+    }
 }
 
 - (void)handlePanelPan:(UIPanGestureRecognizer *)recognizer {
@@ -203,11 +267,9 @@
     }
 
     _statusLabel.text = @"截图中";
-    _panelWindow.hidden = YES;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         self->_captureSnapshot = [AnClickCore captureCurrentWindowImage];
         if (!self->_captureSnapshot.CGImage) {
-            self->_panelWindow.hidden = NO;
             self->_statusLabel.text = @"截图失败";
             return;
         }
@@ -433,14 +495,13 @@
 }
 
 - (void)preparePanelForExternalTapWithHostWindow:(UIWindow *)hostWindow {
-    if (_panelWindow) {
-        _panelWindow.userInteractionEnabled = NO;
-        _panelWindow.alpha = 0.0;
-        _panelWindow.hidden = YES;
-    }
-
     if (hostWindow && !hostWindow.isKeyWindow) {
         [hostWindow makeKeyWindow];
+    }
+    if (_panelWindow) {
+        _panelWindow.alpha = 1.0;
+        _panelWindow.userInteractionEnabled = YES;
+        _panelWindow.hidden = NO;
     }
 }
 
@@ -492,6 +553,185 @@
     });
 }
 
+- (UIBezierPath *)pathForScreenPoints:(NSArray<NSValue *> *)points inWindow:(UIWindow *)hostWindow {
+    UIBezierPath *path = [UIBezierPath bezierPath];
+    if (points.count == 0 || !hostWindow) {
+        return path;
+    }
+
+    CGPoint first = [hostWindow convertPoint:points.firstObject.CGPointValue fromWindow:nil];
+    [path moveToPoint:first];
+    for (NSUInteger i = 1; i < points.count; i++) {
+        CGPoint point = [hostWindow convertPoint:points[i].CGPointValue fromWindow:nil];
+        [path addLineToPoint:point];
+    }
+    return path;
+}
+
+- (void)showTrajectoryForScreenPoints:(NSArray<NSValue *> *)points inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
+    [_trajectoryView removeFromSuperview];
+    if (points.count < 2 || !hostWindow) {
+        return;
+    }
+
+    UIView *view = [[UIView alloc] initWithFrame:hostWindow.bounds];
+    view.userInteractionEnabled = NO;
+    view.backgroundColor = UIColor.clearColor;
+
+    CAShapeLayer *layer = [CAShapeLayer layer];
+    layer.frame = view.bounds;
+    layer.path = [self pathForScreenPoints:points inWindow:hostWindow].CGPath;
+    layer.strokeColor = UIColor.systemGreenColor.CGColor;
+    layer.fillColor = UIColor.clearColor.CGColor;
+    layer.lineWidth = 4.0;
+    layer.lineCap = kCALineCapRound;
+    layer.lineJoin = kCALineJoinRound;
+    [view.layer addSublayer:layer];
+
+    [hostWindow addSubview:view];
+    _trajectoryView = view;
+    _trajectoryLayer = layer;
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(duration, 0.4) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [view removeFromSuperview];
+        if (self->_trajectoryView == view) {
+            self->_trajectoryView = nil;
+            self->_trajectoryLayer = nil;
+        }
+    });
+}
+
+- (void)updateLiveTrajectoryInWindow:(UIWindow *)hostWindow {
+    if (!_trajectoryLayer || !hostWindow) {
+        return;
+    }
+    _trajectoryLayer.path = [self pathForScreenPoints:_liveSwipePoints inWindow:hostWindow].CGPath;
+}
+
+- (NSArray<NSValue *> *)recordedSwipePointsAnchoredAtPoint:(CGPoint)anchorPoint {
+    if (_recordedSwipePoints.count < 2) {
+        return @[];
+    }
+
+    CGPoint first = _recordedSwipePoints.firstObject.CGPointValue;
+    NSMutableArray<NSValue *> *points = [NSMutableArray arrayWithCapacity:_recordedSwipePoints.count];
+    for (NSValue *value in _recordedSwipePoints) {
+        CGPoint point = value.CGPointValue;
+        CGPoint anchored = CGPointMake(anchorPoint.x + point.x - first.x,
+                                       anchorPoint.y + point.y - first.y);
+        [points addObject:[NSValue valueWithCGPoint:anchored]];
+    }
+    return points;
+}
+
+- (void)performSelectedActionAtPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow {
+    [self preparePanelForExternalTapWithHostWindow:hostWindow];
+
+    if (_actionMode == AnClickActionModeSwipe) {
+        NSArray<NSValue *> *path = [self recordedSwipePointsAnchoredAtPoint:point];
+        if (path.count < 2) {
+            _statusLabel.text = @"先录滑动";
+            return;
+        }
+        [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:1.1];
+        [AnClickFakeTouch playPath:path duration:0.55];
+        _statusLabel.text = [NSString stringWithFormat:@"滑 %.0f,%.0f", point.x, point.y];
+        return;
+    }
+
+    [self showTapMarkerAtScreenPoint:point inWindow:hostWindow];
+    if (_actionMode == AnClickActionModeDoubleTap) {
+        [AnClickFakeTouch doubleTapAtPoint:point];
+        _statusLabel.text = [NSString stringWithFormat:@"双 %.0f,%.0f", point.x, point.y];
+    } else if (_actionMode == AnClickActionModeLongPress) {
+        [AnClickFakeTouch longPressAtPoint:point duration:0.75];
+        _statusLabel.text = [NSString stringWithFormat:@"长 %.0f,%.0f", point.x, point.y];
+    } else {
+        [AnClickFakeTouch tapAtPoint:point];
+        _statusLabel.text = [NSString stringWithFormat:@"点 %.0f,%.0f", point.x, point.y];
+    }
+}
+
+- (void)beginSwipeRecording {
+    UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        _statusLabel.text = @"无窗口";
+        return;
+    }
+
+    [_trajectoryView removeFromSuperview];
+    _liveSwipePoints = [NSMutableArray array];
+
+    UIView *view = [[UIView alloc] initWithFrame:hostWindow.bounds];
+    view.backgroundColor = [UIColor colorWithWhite:0 alpha:0.10];
+    view.userInteractionEnabled = YES;
+
+    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(12, 44, hostWindow.bounds.size.width - 24, 34)];
+    hint.text = @"滑动录制中";
+    hint.textColor = UIColor.whiteColor;
+    hint.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
+    hint.textAlignment = NSTextAlignmentCenter;
+    hint.backgroundColor = [UIColor colorWithWhite:0 alpha:0.45];
+    hint.layer.cornerRadius = 8;
+    hint.clipsToBounds = YES;
+    [view addSubview:hint];
+
+    CAShapeLayer *layer = [CAShapeLayer layer];
+    layer.frame = view.bounds;
+    layer.strokeColor = UIColor.systemGreenColor.CGColor;
+    layer.fillColor = UIColor.clearColor.CGColor;
+    layer.lineWidth = 4.0;
+    layer.lineCap = kCALineCapRound;
+    layer.lineJoin = kCALineJoinRound;
+    [view.layer addSublayer:layer];
+
+    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleSwipeRecordingPan:)];
+    [view addGestureRecognizer:pan];
+
+    [hostWindow addSubview:view];
+    _trajectoryView = view;
+    _trajectoryLayer = layer;
+    _statusLabel.text = @"录制滑动";
+}
+
+- (void)handleSwipeRecordingPan:(UIPanGestureRecognizer *)recognizer {
+    UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        return;
+    }
+
+    CGPoint windowPoint = [recognizer locationInView:hostWindow];
+    CGPoint screenPoint = [hostWindow convertPoint:windowPoint toWindow:nil];
+
+    if (recognizer.state == UIGestureRecognizerStateBegan) {
+        [_liveSwipePoints removeAllObjects];
+        [_liveSwipePoints addObject:[NSValue valueWithCGPoint:screenPoint]];
+    } else if (recognizer.state == UIGestureRecognizerStateChanged) {
+        CGPoint last = _liveSwipePoints.lastObject.CGPointValue;
+        CGFloat dx = screenPoint.x - last.x;
+        CGFloat dy = screenPoint.y - last.y;
+        if (sqrt(dx * dx + dy * dy) >= 3.0) {
+            [_liveSwipePoints addObject:[NSValue valueWithCGPoint:screenPoint]];
+        }
+    } else if (recognizer.state == UIGestureRecognizerStateEnded || recognizer.state == UIGestureRecognizerStateCancelled) {
+        [_liveSwipePoints addObject:[NSValue valueWithCGPoint:screenPoint]];
+        if (_liveSwipePoints.count >= 2) {
+            _recordedSwipePoints = [_liveSwipePoints mutableCopy];
+            _actionMode = AnClickActionModeSwipe;
+            [self refreshModeButtons];
+            _statusLabel.text = [NSString stringWithFormat:@"已录 %lu点", (unsigned long)_recordedSwipePoints.count];
+            [self showTrajectoryForScreenPoints:_recordedSwipePoints inWindow:hostWindow duration:1.0];
+        } else {
+            _statusLabel.text = @"录制失败";
+            [_trajectoryView removeFromSuperview];
+        }
+        _liveSwipePoints = nil;
+        return;
+    }
+
+    [self updateLiveTrajectoryInWindow:hostWindow];
+}
+
 - (void)playTemplateTap {
     NSString *path = [self templatePath];
     UIImage *templateImage = [[NSFileManager defaultManager] fileExistsAtPath:path] ? [UIImage imageWithContentsOfFile:path] : nil;
@@ -514,14 +754,7 @@
             CGPoint point = pointValue.CGPointValue;
             UIWindow *currentHostWindow = [self hostWindow] ?: hostWindow;
             [self preparePanelForExternalTapWithHostWindow:currentHostWindow];
-            [self showTapMarkerAtScreenPoint:point inWindow:currentHostWindow];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [AnClickFakeTouch tapAtPoint:point];
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.9 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    [self restorePanelAfterExternalTap];
-                    self->_statusLabel.text = [NSString stringWithFormat:@"点 %.0f,%.0f", point.x, point.y];
-                });
-            });
+            [self performSelectedActionAtPoint:point inWindow:currentHostWindow];
         });
     });
 }
@@ -542,14 +775,7 @@
           point.y,
           hostWindow);
     [self preparePanelForExternalTapWithHostWindow:hostWindow];
-    [self showTapMarkerAtScreenPoint:point inWindow:hostWindow];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [AnClickFakeTouch tapAtPoint:point];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.9 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self restorePanelAfterExternalTap];
-            self->_statusLabel.text = [NSString stringWithFormat:@"测 %.0f,%.0f", point.x, point.y];
-        });
-    });
+    [self performSelectedActionAtPoint:point inWindow:hostWindow];
 }
 
 @end
