@@ -35,10 +35,15 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIButton *_playButton;
     UIButton *_testButton;
     UIButton *_recordSwipeButton;
+    UIButton *_pickPointButton;
+    UIButton *_runManualButton;
+    UIButton *_previewSwipeButton;
+    UIButton *_clearActionButton;
     NSArray<UIButton *> *_modeButtons;
     UILabel *_statusLabel;
     UIView *_captureOverlay;
     UIView *_selectionView;
+    UIView *_pointPickOverlay;
     UIImage *_captureSnapshot;
     UIImageView *_previewView;
     UIView *_tapMarkerView;
@@ -46,6 +51,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     CAShapeLayer *_trajectoryLayer;
     NSMutableArray<NSValue *> *_recordedSwipePoints;
     NSMutableArray<NSValue *> *_liveSwipePoints;
+    CGPoint _manualActionPoints[3];
+    BOOL _hasManualActionPoint[3];
+    CGPoint _manualSwipeAnchor;
+    BOOL _hasManualSwipeAnchor;
     AnClickActionMode _actionMode;
 }
 
@@ -108,7 +117,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         _recordedSwipePoints = [NSMutableArray array];
     }
 
-    _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(12, 120, panelWidth, 156)];
+    _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(12, 120, panelWidth, 196)];
     [self attachPanelWindowToActiveSceneIfNeeded];
     _panelWindow.windowLevel = UIWindowLevelAlert + 1000;
     _panelWindow.backgroundColor = UIColor.clearColor;
@@ -143,22 +152,38 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     CGFloat buttonWidth = floor((panelWidth - gap * 5.0) / 4.0);
     _captureButton = [self panelButtonWithTitle:@"截图" action:@selector(beginTemplateCapture)];
-    _captureButton.frame = CGRectMake(gap, 48, buttonWidth, 36);
+    _captureButton.frame = CGRectMake(gap, 48, buttonWidth, 34);
     [_panelView addSubview:_captureButton];
 
-    _playButton = [self panelButtonWithTitle:@"播放" action:@selector(playTemplateTap)];
-    _playButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 48, buttonWidth, 36);
+    _playButton = [self panelButtonWithTitle:@"识图" action:@selector(playTemplateTap)];
+    _playButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 48, buttonWidth, 34);
     [_panelView addSubview:_playButton];
 
+    _pickPointButton = [self panelButtonWithTitle:@"取点" action:@selector(beginPointPicking)];
+    _pickPointButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 48, buttonWidth, 34);
+    [_panelView addSubview:_pickPointButton];
+
+    _runManualButton = [self panelButtonWithTitle:@"执行" action:@selector(runManualAction)];
+    _runManualButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 48, buttonWidth, 34);
+    [_panelView addSubview:_runManualButton];
+
     _recordSwipeButton = [self panelButtonWithTitle:@"录滑" action:@selector(beginSwipeRecording)];
-    _recordSwipeButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 48, buttonWidth, 36);
+    _recordSwipeButton.frame = CGRectMake(gap, 88, buttonWidth, 34);
     [_panelView addSubview:_recordSwipeButton];
 
+    _previewSwipeButton = [self panelButtonWithTitle:@"预轨" action:@selector(previewCurrentAction)];
+    _previewSwipeButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 88, buttonWidth, 34);
+    [_panelView addSubview:_previewSwipeButton];
+
+    _clearActionButton = [self panelButtonWithTitle:@"清除" action:@selector(clearCurrentActionConfig)];
+    _clearActionButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 88, buttonWidth, 34);
+    [_panelView addSubview:_clearActionButton];
+
     _testButton = [self panelButtonWithTitle:@"测试" action:@selector(testCenterTap)];
-    _testButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 48, buttonWidth, 36);
+    _testButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 88, buttonWidth, 34);
     [_panelView addSubview:_testButton];
 
-    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 92, panelWidth - 16, 22)];
+    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 130, panelWidth - 16, 22)];
     _statusLabel.text = @"待机";
     _statusLabel.textColor = UIColor.whiteColor;
     _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
@@ -167,7 +192,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _statusLabel.textAlignment = NSTextAlignmentCenter;
     [_panelView addSubview:_statusLabel];
 
-    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 120, panelWidth - 16, 28)];
+    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 158, panelWidth - 16, 30)];
     _previewView.contentMode = UIViewContentModeScaleAspectFit;
     _previewView.clipsToBounds = YES;
     _previewView.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
@@ -194,10 +219,18 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _actionMode = (AnClickActionMode)sender.tag;
     [self refreshModeButtons];
 
-    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动"];
-    NSString *name = names[(NSUInteger)_actionMode];
-    if (_actionMode == AnClickActionModeSwipe && _recordedSwipePoints.count < 2) {
-        _statusLabel.text = @"滑动需录制";
+    NSString *name = [self currentActionName];
+    if (_actionMode == AnClickActionModeSwipe) {
+        if (_recordedSwipePoints.count < 2) {
+            _statusLabel.text = @"滑动需录制";
+        } else if (_hasManualSwipeAnchor) {
+            _statusLabel.text = @"滑动已设锚点";
+        } else {
+            _statusLabel.text = @"滑动已录轨迹";
+        }
+    } else if ([self hasManualPointForMode:_actionMode]) {
+        CGPoint point = _manualActionPoints[(NSUInteger)_actionMode];
+        _statusLabel.text = [NSString stringWithFormat:@"%@ %.0f,%.0f", name, point.x, point.y];
     } else {
         _statusLabel.text = [NSString stringWithFormat:@"模式 %@", name];
     }
@@ -211,6 +244,18 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
             : [UIColor colorWithRed:0.10 green:0.34 blue:0.56 alpha:1.0];
         [button setTitleColor:selected ? UIColor.blackColor : UIColor.whiteColor forState:UIControlStateNormal];
     }
+}
+
+- (NSString *)currentActionName {
+    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动"];
+    return names[(NSUInteger)_actionMode];
+}
+
+- (BOOL)hasManualPointForMode:(AnClickActionMode)mode {
+    if (mode < AnClickActionModeTap || mode > AnClickActionModeLongPress) {
+        return NO;
+    }
+    return _hasManualActionPoint[(NSUInteger)mode];
 }
 
 - (void)handlePanelPan:(UIPanGestureRecognizer *)recognizer {
@@ -652,6 +697,158 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
 }
 
+- (NSArray<NSValue *> *)manualSwipePath {
+    if (_recordedSwipePoints.count < 2) {
+        return @[];
+    }
+    if (_hasManualSwipeAnchor) {
+        return [self recordedSwipePointsAnchoredAtPoint:_manualSwipeAnchor];
+    }
+    return [_recordedSwipePoints copy];
+}
+
+- (void)beginPointPicking {
+    UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        _statusLabel.text = @"无窗口";
+        return;
+    }
+
+    [_pointPickOverlay removeFromSuperview];
+    UIView *overlay = [[UIView alloc] initWithFrame:hostWindow.bounds];
+    overlay.backgroundColor = [UIColor colorWithWhite:0 alpha:0.12];
+    overlay.userInteractionEnabled = YES;
+
+    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(12, 44, hostWindow.bounds.size.width - 24, 34)];
+    hint.text = _actionMode == AnClickActionModeSwipe ? @"点一下设置滑动起点" : [NSString stringWithFormat:@"点一下设置%@", [self currentActionName]];
+    hint.textColor = UIColor.whiteColor;
+    hint.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
+    hint.textAlignment = NSTextAlignmentCenter;
+    hint.backgroundColor = [UIColor colorWithWhite:0 alpha:0.45];
+    hint.layer.cornerRadius = 8;
+    hint.clipsToBounds = YES;
+    [overlay addSubview:hint];
+
+    UIButton *cancelButton = [self overlayButtonWithTitle:@"取消" action:@selector(cancelPointPicking)];
+    cancelButton.frame = CGRectMake(hostWindow.bounds.size.width - 102, hostWindow.bounds.size.height - 70, 86, 44);
+    [overlay addSubview:cancelButton];
+
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingTap:)];
+    [overlay addGestureRecognizer:tap];
+
+    [hostWindow addSubview:overlay];
+    _pointPickOverlay = overlay;
+    _statusLabel.text = @"等待取点";
+}
+
+- (void)cancelPointPicking {
+    [_pointPickOverlay removeFromSuperview];
+    _pointPickOverlay = nil;
+    _statusLabel.text = @"取消取点";
+}
+
+- (void)handlePointPickingTap:(UITapGestureRecognizer *)recognizer {
+    if (recognizer.state != UIGestureRecognizerStateEnded) {
+        return;
+    }
+
+    UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        [self cancelPointPicking];
+        return;
+    }
+
+    CGPoint windowPoint = [recognizer locationInView:hostWindow];
+    CGPoint screenPoint = [hostWindow convertPoint:windowPoint toWindow:nil];
+    [_pointPickOverlay removeFromSuperview];
+    _pointPickOverlay = nil;
+
+    if (_actionMode == AnClickActionModeSwipe) {
+        _manualSwipeAnchor = screenPoint;
+        _hasManualSwipeAnchor = YES;
+        [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
+        NSArray<NSValue *> *path = [self manualSwipePath];
+        if (path.count >= 2) {
+            [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:1.0];
+        }
+        _statusLabel.text = [NSString stringWithFormat:@"滑动起点 %.0f,%.0f", screenPoint.x, screenPoint.y];
+        return;
+    }
+
+    _manualActionPoints[(NSUInteger)_actionMode] = screenPoint;
+    _hasManualActionPoint[(NSUInteger)_actionMode] = YES;
+    [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
+    _statusLabel.text = [NSString stringWithFormat:@"%@点 %.0f,%.0f", [self currentActionName], screenPoint.x, screenPoint.y];
+}
+
+- (void)runManualAction {
+    UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        _statusLabel.text = @"无窗口";
+        return;
+    }
+
+    if (_actionMode == AnClickActionModeSwipe) {
+        NSArray<NSValue *> *path = [self manualSwipePath];
+        if (path.count < 2) {
+            _statusLabel.text = @"先录滑动";
+            return;
+        }
+        [self preparePanelForExternalTapWithHostWindow:hostWindow];
+        [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:1.1];
+        [AnClickFakeTouch playPath:path duration:0.55];
+        _statusLabel.text = _hasManualSwipeAnchor ? @"执行滑动锚点" : @"执行原轨迹";
+        return;
+    }
+
+    if (![self hasManualPointForMode:_actionMode]) {
+        _statusLabel.text = @"先取点";
+        return;
+    }
+    [self performSelectedActionAtPoint:_manualActionPoints[(NSUInteger)_actionMode] inWindow:hostWindow];
+}
+
+- (void)previewCurrentAction {
+    UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        _statusLabel.text = @"无窗口";
+        return;
+    }
+
+    if (_actionMode == AnClickActionModeSwipe) {
+        NSArray<NSValue *> *path = [self manualSwipePath];
+        if (path.count < 2) {
+            _statusLabel.text = @"先录滑动";
+            return;
+        }
+        [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:1.2];
+        _statusLabel.text = _hasManualSwipeAnchor ? @"预览锚点轨迹" : @"预览原轨迹";
+        return;
+    }
+
+    if (![self hasManualPointForMode:_actionMode]) {
+        _statusLabel.text = @"先取点";
+        return;
+    }
+    CGPoint point = _manualActionPoints[(NSUInteger)_actionMode];
+    [self showTapMarkerAtScreenPoint:point inWindow:hostWindow];
+    _statusLabel.text = [NSString stringWithFormat:@"预览%@ %.0f,%.0f", [self currentActionName], point.x, point.y];
+}
+
+- (void)clearCurrentActionConfig {
+    if (_actionMode == AnClickActionModeSwipe) {
+        [_recordedSwipePoints removeAllObjects];
+        _hasManualSwipeAnchor = NO;
+        [_trajectoryView removeFromSuperview];
+        _statusLabel.text = @"已清滑动";
+        return;
+    }
+
+    _hasManualActionPoint[(NSUInteger)_actionMode] = NO;
+    _manualActionPoints[(NSUInteger)_actionMode] = CGPointZero;
+    _statusLabel.text = [NSString stringWithFormat:@"已清%@", [self currentActionName]];
+}
+
 - (void)beginSwipeRecording {
     UIWindow *hostWindow = [self hostWindow];
     if (!hostWindow) {
@@ -717,6 +914,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [_liveSwipePoints addObject:[NSValue valueWithCGPoint:screenPoint]];
         if (_liveSwipePoints.count >= 2) {
             _recordedSwipePoints = [_liveSwipePoints mutableCopy];
+            _hasManualSwipeAnchor = NO;
             _actionMode = AnClickActionModeSwipe;
             [self refreshModeButtons];
             _statusLabel.text = [NSString stringWithFormat:@"已录 %lu点", (unsigned long)_recordedSwipePoints.count];
