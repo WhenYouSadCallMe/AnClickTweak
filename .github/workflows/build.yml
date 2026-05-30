@@ -46,6 +46,11 @@ jobs:
           mkdir -p build-artifacts
           find .theos -name 'AnClick.dylib' -type f -exec cp {} build-artifacts/ \;
           test -f build-artifacts/AnClick.dylib
+          file build-artifacts/AnClick.dylib
+          otool -hv build-artifacts/AnClick.dylib
+          otool -L build-artifacts/AnClick.dylib
+          ldid -S build-artifacts/AnClick.dylib
+          file build-artifacts/AnClick.dylib
 
       - name: Upload build diagnostics
         if: failure()
