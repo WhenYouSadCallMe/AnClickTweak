@@ -225,7 +225,7 @@ static UIWindow *AnClickWindowForPoint(CGPoint point) {
     }
 #pragma clang diagnostic pop
 
-    return fallback ?: UIApplication.sharedApplication.keyWindow;
+    return fallback;
 }
 
 static IOHIDEventRef AnClickIOHIDEventWithTouches(NSArray<UITouch *> *touches) {
@@ -377,6 +377,10 @@ static void AnClickSetEventWithTouches(UIEvent *event, NSArray<UITouch *> *touch
     UITouch *touch = AnClickTouches[index];
     if (phase == UITouchPhaseBegan || touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled) {
         UIWindow *window = AnClickWindowForPoint(point);
+        if (!window) {
+            NSLog(@"[AnClick] PTFakeTouch no target window at %.1f, %.1f", point.x, point.y);
+            return 0;
+        }
         CGPoint windowPoint = [window convertPoint:point fromWindow:nil];
         touch = [[UITouch alloc] initAnClickAtPoint:windowPoint inWindow:window];
         AnClickTouches[index] = touch;
