@@ -54,13 +54,7 @@ jobs:
             --without python2 \
             --without python3 \
             --without ts
-          framework_binary="$(find opencv-ios -path '*/opencv2.framework/opencv2' -type f -print -quit)"
-          test -n "$framework_binary"
-          framework_path="$(dirname "$framework_binary")"
-          if [ "$framework_path" != "opencv-ios/opencv2.framework" ]; then
-            rm -rf opencv-ios/opencv2.framework
-            cp -R "$framework_path" opencv-ios/opencv2.framework
-          fi
+          test -e opencv-ios/opencv2.framework/opencv2
           header_file="$(find opencv-ios/opencv2.framework/Headers -name core.hpp -type f -print -quit)"
           test -n "$header_file"
           mkdir -p opencv-ios-headers/opencv2
