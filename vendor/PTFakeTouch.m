@@ -13,12 +13,12 @@ typedef float IOHIDFloat;
 typedef uint32_t IOHIDDigitizerTransducerType;
 typedef uint32_t IOHIDEventField;
 typedef uint32_t IOHIDEventType;
-typedef UInt32 IOOptionBits;
+typedef uint32_t IOOptionBits;
 
 static IOHIDEventRef AnClickIOHIDEventWithTouches(NSArray<UITouch *> *touches) CF_RETURNS_RETAINED;
 
 extern IOHIDEventRef IOHIDEventCreateDigitizerEvent(CFAllocatorRef allocator,
-                                                    AbsoluteTime timeStamp,
+                                                    uint64_t timeStamp,
                                                     IOHIDDigitizerTransducerType type,
                                                     uint32_t index,
                                                     uint32_t identity,
@@ -33,7 +33,7 @@ extern IOHIDEventRef IOHIDEventCreateDigitizerEvent(CFAllocatorRef allocator,
                                                     Boolean touch,
                                                     IOOptionBits options);
 extern IOHIDEventRef IOHIDEventCreateDigitizerFingerEventWithQuality(CFAllocatorRef allocator,
-                                                                     AbsoluteTime timeStamp,
+                                                                     uint64_t timeStamp,
                                                                      uint32_t index,
                                                                      uint32_t identity,
                                                                      uint32_t eventMask,
@@ -237,10 +237,7 @@ static UIWindow *AnClickWindowForPoint(CGPoint point) {
 }
 
 static IOHIDEventRef AnClickIOHIDEventWithTouches(NSArray<UITouch *> *touches) {
-    uint64_t abTime = mach_absolute_time();
-    AbsoluteTime timeStamp;
-    timeStamp.hi = (UInt32)(abTime >> 32);
-    timeStamp.lo = (UInt32)abTime;
+    uint64_t timeStamp = mach_absolute_time();
 
     IOHIDEventRef handEvent = IOHIDEventCreateDigitizerEvent(kCFAllocatorDefault,
                                                              timeStamp,
