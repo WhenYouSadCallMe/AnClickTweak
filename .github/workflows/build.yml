@@ -30,7 +30,12 @@ jobs:
           unzip -q opencv-ios-framework.zip
           test -d opencv2.framework/Headers
           find opencv2.framework/Headers -maxdepth 3 -name opencv.hpp -print
-          cp -R opencv2.framework/Headers/opencv2 include/
+          mkdir -p include/opencv2
+          if [ -d opencv2.framework/Headers/opencv2 ]; then
+            cp -R opencv2.framework/Headers/opencv2/. include/opencv2/
+          else
+            cp -R opencv2.framework/Headers/. include/opencv2/
+          fi
           test -f include/opencv2/opencv.hpp
 
       - name: Build dylib
