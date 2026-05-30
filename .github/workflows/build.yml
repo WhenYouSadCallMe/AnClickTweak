@@ -29,6 +29,9 @@ jobs:
             "https://github.com/opencv/opencv/releases/download/4.10.0/opencv-4.10.0-ios-framework.zip"
           unzip -q opencv-ios-framework.zip
           test -d opencv2.framework/Headers
+          find opencv2.framework/Headers -maxdepth 3 -name opencv.hpp -print
+          cp -R opencv2.framework/Headers/opencv2 include/
+          test -f include/opencv2/opencv.hpp
 
       - name: Build dylib
         run: |
