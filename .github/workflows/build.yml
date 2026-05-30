@@ -53,21 +53,14 @@ jobs:
             --without js \
             --without python2 \
             --without python3 \
-            --without ts
-          test -e opencv-ios/opencv2.framework/opencv2
-          header_file="$(find opencv-ios/opencv2.framework/Headers -name core.hpp -type f -print -quit)"
-          test -n "$header_file"
+            --without ts || test -f opencv-ios/build/build-arm64-iphoneos/lib/Release/libopencv_merged.a
+          mkdir -p opencv-ios-lib
+          cp opencv-ios/build/build-arm64-iphoneos/lib/Release/libopencv_merged.a opencv-ios-lib/
           mkdir -p opencv-ios-headers/opencv2
-          header_dir="$(dirname "$header_file")"
-          if [ "$(basename "$header_dir")" = "opencv2" ]; then
-            cp -R "$header_dir"/. opencv-ios-headers/opencv2/
-          else
-            cp -R opencv-ios/opencv2.framework/Headers/. opencv-ios-headers/opencv2/
-          fi
-          test -f opencv-ios/opencv2.framework/opencv2
+          cp -R opencv-ios/build/build-arm64-iphoneos/install/include/opencv2/. opencv-ios-headers/opencv2/
+          test -f opencv-ios-lib/libopencv_merged.a
           test -f opencv-ios-headers/opencv2/core.hpp
-          file opencv-ios/opencv2.framework/opencv2
-          otool -L opencv-ios/opencv2.framework/opencv2 || true
+          file opencv-ios-lib/libopencv_merged.a
 
       - name: Build dylib
         run: |
@@ -91,6 +84,7 @@ jobs:
             .theos/**
             opencv-ios/**
             opencv-ios-headers/**
+            opencv-ios-lib/**
           include-hidden-files: true
 
       - name: Upload dylib
