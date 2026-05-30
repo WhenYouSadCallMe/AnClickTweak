@@ -40,6 +40,8 @@ jobs:
 
       - name: Build dylib
         run: |
+          find "$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" \
+            -name 'libswiftCompatibility*' -print
           make clean all FINALPACKAGE=1
           mkdir -p build-artifacts
           find .theos -name 'AnClick.dylib' -type f -exec cp {} build-artifacts/ \;
