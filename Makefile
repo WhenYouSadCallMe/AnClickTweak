@@ -6,6 +6,9 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = AnClick
 OPENCV_FRAMEWORK_DIR = $(THEOS_PROJECT_DIR)
 OPENCV_HEADERS = $(OPENCV_FRAMEWORK_DIR)/opencv2.framework/Headers
+XCODE_TOOLCHAIN_DIR = $(shell xcode-select -p)/Toolchains/XcodeDefault.xctoolchain
+SWIFT_LIB_DIR = $(XCODE_TOOLCHAIN_DIR)/usr/lib/swift/iphoneos
+SWIFT_COMPAT_LIB_DIR = $(XCODE_TOOLCHAIN_DIR)/usr/lib/swift-5.0/iphoneos
 
 AnClick_FILES = \
 	src/AnClickCore.mm \
@@ -19,7 +22,7 @@ AnClick_OBJCFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS
 AnClick_CCFLAGS = -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
 AnClick_OBJCCFLAGS = -fobjc-arc -std=c++17 -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
 AnClick_CXXFLAGS = -std=c++17 -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
-AnClick_LDFLAGS = -F$(OPENCV_FRAMEWORK_DIR) -framework opencv2
+AnClick_LDFLAGS = -F$(OPENCV_FRAMEWORK_DIR) -framework opencv2 -L$(SWIFT_LIB_DIR) -L$(SWIFT_COMPAT_LIB_DIR) -Wl,-rpath,/usr/lib/swift
 AnClick_FRAMEWORKS = UIKit Foundation QuartzCore CoreGraphics
 AnClick_PRIVATE_FRAMEWORKS = IOKit
 
