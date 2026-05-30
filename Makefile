@@ -5,7 +5,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = AnClick
 OPENCV_FRAMEWORK_DIR = $(THEOS_PROJECT_DIR)/opencv-ios
-OPENCV_HEADERS = $(OPENCV_FRAMEWORK_DIR)/opencv2.framework/Headers
+OPENCV_HEADERS = $(THEOS_PROJECT_DIR)/opencv-ios-headers
 
 AnClick_FILES = \
 	src/AnClickCore.mm \

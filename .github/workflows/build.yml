@@ -54,8 +54,24 @@ jobs:
             --without python2 \
             --without python3 \
             --without ts
+          framework_binary="$(find opencv-ios -path '*/opencv2.framework/opencv2' -type f -print -quit)"
+          test -n "$framework_binary"
+          framework_path="$(dirname "$framework_binary")"
+          if [ "$framework_path" != "opencv-ios/opencv2.framework" ]; then
+            rm -rf opencv-ios/opencv2.framework
+            cp -R "$framework_path" opencv-ios/opencv2.framework
+          fi
+          header_file="$(find opencv-ios/opencv2.framework/Headers -name core.hpp -type f -print -quit)"
+          test -n "$header_file"
+          mkdir -p opencv-ios-headers/opencv2
+          header_dir="$(dirname "$header_file")"
+          if [ "$(basename "$header_dir")" = "opencv2" ]; then
+            cp -R "$header_dir"/. opencv-ios-headers/opencv2/
+          else
+            cp -R opencv-ios/opencv2.framework/Headers/. opencv-ios-headers/opencv2/
+          fi
           test -f opencv-ios/opencv2.framework/opencv2
-          test -f opencv-ios/opencv2.framework/Headers/opencv2/core.hpp
+          test -f opencv-ios-headers/opencv2/core.hpp
           file opencv-ios/opencv2.framework/opencv2
           otool -L opencv-ios/opencv2.framework/opencv2 || true
 
@@ -80,6 +96,7 @@ jobs:
           path: |
             .theos/**
             opencv-ios/**
+            opencv-ios-headers/**
           include-hidden-files: true
 
       - name: Upload dylib
