@@ -21,6 +21,66 @@
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.14 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self touchUpAtPoint:point touchId:touchId];
+        [self triggerUIKitControlAtPoint:point];
+    });
+}
+
++ (UIWindow *)activeApplicationWindow {
+    UIWindow *fallback = nil;
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (scene.activationState != UISceneActivationStateForegroundActive || ![scene isKindOfClass:UIWindowScene.class]) {
+                continue;
+            }
+            UIWindowScene *windowScene = (UIWindowScene *)scene;
+            for (UIWindow *window in windowScene.windows) {
+                if (window.windowLevel >= UIWindowLevelAlert || window.hidden || window.alpha <= 0.01) {
+                    continue;
+                }
+                if (window.isKeyWindow) {
+                    return window;
+                }
+                if (!fallback) {
+                    fallback = window;
+                }
+            }
+        }
+    }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    if (UIApplication.sharedApplication.keyWindow && UIApplication.sharedApplication.keyWindow.windowLevel < UIWindowLevelAlert) {
+        return UIApplication.sharedApplication.keyWindow;
+    }
+    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+        if (window.windowLevel < UIWindowLevelAlert && !window.hidden && window.alpha > 0.01) {
+            return window;
+        }
+    }
+#pragma clang diagnostic pop
+    return fallback;
+}
+
++ (void)triggerUIKitControlAtPoint:(CGPoint)point {
+    UIWindow *window = [self activeApplicationWindow];
+    UIView *view = [window hitTest:point withEvent:nil];
+    UIControl *control = nil;
+    for (UIView *current = view; current; current = current.superview) {
+        if ([current isKindOfClass:UIControl.class]) {
+            control = (UIControl *)current;
+            break;
+        }
+    }
+
+    if (!control || !control.enabled || control.hidden || control.alpha <= 0.01) {
+        NSLog(@"[AnClick] UIKit fallback missed at %.1f, %.1f view=%@", point.x, point.y, view);
+        return;
+    }
+
+    [control sendActionsForControlEvents:UIControlEventTouchDown];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [control sendActionsForControlEvents:UIControlEventTouchUpInside];
+        NSLog(@"[AnClick] UIKit fallback tapped %@ at %.1f, %.1f", control, point.x, point.y);
     });
 }
 
