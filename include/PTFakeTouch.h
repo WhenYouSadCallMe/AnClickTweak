@@ -1,8 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
-NS_ASSUME_NONNULL_BEGIN
-
 typedef NS_ENUM(NSInteger, PTFakeTouchEvent) {
     PTFakeTouchEventTouchDown = 0,
     PTFakeTouchEventTouchUp = 1,
@@ -12,10 +10,10 @@ typedef NS_ENUM(NSInteger, PTFakeTouchEvent) {
 
 @interface PTFakeTouch : NSObject
 
-+ (void)fakeTouchId:(NSInteger)touchId AtPoint:(CGPoint)point WithType:(PTFakeTouchEvent)type;
-+ (void)setUseScreenScale:(BOOL)useScreenScale;
-+ (void)setUseEventSystemClientScheduling:(BOOL)enabled;
++ (NSInteger)getAvailablePointId;
++ (NSInteger)fakeTouchId:(NSInteger)pointId AtPoint:(CGPoint)point withTouchPhase:(UITouchPhase)phase;
+
+// Compatibility wrapper used by the tweak code.
++ (NSInteger)fakeTouchId:(NSInteger)touchId AtPoint:(CGPoint)point WithType:(PTFakeTouchEvent)type;
 
 @end
-
-NS_ASSUME_NONNULL_END
