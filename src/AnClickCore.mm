@@ -1,9 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
-#import <opencv2/core.hpp>
-#import <opencv2/imgproc.hpp>
-#include <vector>
+#import <stdlib.h>
 
 @interface AnClickFakeTouch : NSObject
 + (void)tapAtPoint:(CGPoint)point;
@@ -14,6 +12,20 @@
 + (NSValue *)findTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 + (BOOL)findAndTapTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 @end
+
+typedef struct {
+    size_t width;
+    size_t height;
+    size_t bytesPerRow;
+    unsigned char *data;
+} AnClickBitmap;
+
+static void AnClickBitmapRelease(AnClickBitmap *bitmap) {
+    if (bitmap && bitmap->data) {
+        free(bitmap->data);
+        bitmap->data = NULL;
+    }
+}
 
 static UIWindow *AnClickActiveWindow(void) {
     UIWindow *fallback = nil;
@@ -48,35 +60,67 @@ static UIWindow *AnClickActiveWindow(void) {
     return fallback;
 }
 
-static cv::Mat AnClickMatFromUIImage(UIImage *image) {
+static AnClickBitmap AnClickBitmapFromUIImage(UIImage *image) {
+    AnClickBitmap bitmap = {0, 0, 0, NULL};
     if (!image.CGImage) {
-        return cv::Mat();
+        return bitmap;
     }
 
     CGImageRef imageRef = image.CGImage;
-    size_t width = CGImageGetWidth(imageRef);
-    size_t height = CGImageGetHeight(imageRef);
-    size_t bytesPerRow = width * 4;
-    std::vector<unsigned char> data(height * bytesPerRow);
+    bitmap.width = CGImageGetWidth(imageRef);
+    bitmap.height = CGImageGetHeight(imageRef);
+    bitmap.bytesPerRow = bitmap.width * 4;
+    bitmap.data = (unsigned char *)calloc(bitmap.height, bitmap.bytesPerRow);
+    if (!bitmap.data) {
+        bitmap.width = 0;
+        bitmap.height = 0;
+        bitmap.bytesPerRow = 0;
+        return bitmap;
+    }
 
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-    CGContextRef context = CGBitmapContextCreate(data.data(),
-                                                 width,
-                                                 height,
+    CGContextRef context = CGBitmapContextCreate(bitmap.data,
+                                                 bitmap.width,
+                                                 bitmap.height,
                                                  8,
-                                                 bytesPerRow,
+                                                 bitmap.bytesPerRow,
                                                  colorSpace,
                                                  kCGImageAlphaPremultipliedLast | kCGBitmapByteOrderDefault);
     if (context) {
-        CGContextDrawImage(context, CGRectMake(0, 0, width, height), imageRef);
+        CGContextDrawImage(context, CGRectMake(0, 0, bitmap.width, bitmap.height), imageRef);
         CGContextRelease(context);
     }
     CGColorSpaceRelease(colorSpace);
 
-    cv::Mat rgba((int)height, (int)width, CV_8UC4, data.data(), bytesPerRow);
-    cv::Mat bgr;
-    cv::cvtColor(rgba, bgr, cv::COLOR_RGBA2BGR);
-    return bgr.clone();
+    return bitmap;
+}
+
+static double AnClickTemplateScore(const AnClickBitmap *source,
+                                   const AnClickBitmap *templ,
+                                   size_t originX,
+                                   size_t originY,
+                                   double minimumScore) {
+    uint64_t diff = 0;
+    uint64_t pixelCount = (uint64_t)templ->width * (uint64_t)templ->height;
+    uint64_t maxDiff = pixelCount * 255ULL * 3ULL;
+    uint64_t allowedDiff = (uint64_t)((1.0 - minimumScore) * (double)maxDiff);
+
+    for (size_t y = 0; y < templ->height; y++) {
+        const unsigned char *sourceRow = source->data + (originY + y) * source->bytesPerRow + originX * 4;
+        const unsigned char *templateRow = templ->data + y * templ->bytesPerRow;
+        for (size_t x = 0; x < templ->width; x++) {
+            const unsigned char *sourcePixel = sourceRow + x * 4;
+            const unsigned char *templatePixel = templateRow + x * 4;
+            diff += (uint64_t)labs((long)sourcePixel[0] - (long)templatePixel[0]);
+            diff += (uint64_t)labs((long)sourcePixel[1] - (long)templatePixel[1]);
+            diff += (uint64_t)labs((long)sourcePixel[2] - (long)templatePixel[2]);
+            if (diff > allowedDiff) {
+                return 0.0;
+            }
+        }
+    }
+
+    return 1.0 - ((double)diff / (double)maxDiff);
 }
 
 @implementation AnClickCore
@@ -114,25 +158,43 @@ static cv::Mat AnClickMatFromUIImage(UIImage *image) {
         return nil;
     }
 
-    cv::Mat source = AnClickMatFromUIImage(sourceImage);
-    cv::Mat templ = AnClickMatFromUIImage(templateImage);
-    if (source.empty() || templ.empty() || source.cols < templ.cols || source.rows < templ.rows) {
+    AnClickBitmap source = AnClickBitmapFromUIImage(sourceImage);
+    AnClickBitmap templ = AnClickBitmapFromUIImage(templateImage);
+    if (!source.data || !templ.data || source.width < templ.width || source.height < templ.height) {
+        AnClickBitmapRelease(&source);
+        AnClickBitmapRelease(&templ);
         return nil;
     }
 
-    cv::Mat result;
-    cv::matchTemplate(source, templ, result, cv::TM_CCOEFF_NORMED);
-
     double bestScore = 0.0;
-    cv::Point bestLocation;
-    cv::minMaxLoc(result, NULL, &bestScore, NULL, &bestLocation);
+    size_t bestX = 0;
+    size_t bestY = 0;
+    size_t maxX = source.width - templ.width;
+    size_t maxY = source.height - templ.height;
+
+    for (size_t y = 0; y <= maxY; y++) {
+        for (size_t x = 0; x <= maxX; x++) {
+            double minimumScore = MAX(threshold, bestScore);
+            double score = AnClickTemplateScore(&source, &templ, x, y, minimumScore);
+            if (score > bestScore) {
+                bestScore = score;
+                bestX = x;
+                bestY = y;
+            }
+        }
+    }
+
     if (bestScore < threshold) {
+        AnClickBitmapRelease(&source);
+        AnClickBitmapRelease(&templ);
         return nil;
     }
 
     CGFloat scale = UIScreen.mainScreen.scale;
-    CGFloat centerX = ((CGFloat)bestLocation.x + (CGFloat)templ.cols * 0.5) / scale;
-    CGFloat centerY = ((CGFloat)bestLocation.y + (CGFloat)templ.rows * 0.5) / scale;
+    CGFloat centerX = ((CGFloat)bestX + (CGFloat)templ.width * 0.5) / scale;
+    CGFloat centerY = ((CGFloat)bestY + (CGFloat)templ.height * 0.5) / scale;
+    AnClickBitmapRelease(&source);
+    AnClickBitmapRelease(&templ);
     return [NSValue valueWithCGPoint:CGPointMake(centerX, centerY)];
 }
 

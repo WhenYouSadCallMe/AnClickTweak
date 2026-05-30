@@ -22,26 +22,8 @@ jobs:
           echo "$HOME/theos/bin" >> "$GITHUB_PATH"
           echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
 
-      - name: Download OpenCV iOS framework
-        run: |
-          curl -L --retry 3 --retry-delay 5 \
-            -o opencv-ios-framework.zip \
-            "https://github.com/opencv/opencv/releases/download/4.10.0/opencv-4.10.0-ios-framework.zip"
-          unzip -q opencv-ios-framework.zip
-          test -d opencv2.framework/Headers
-          find opencv2.framework/Headers -maxdepth 3 -name opencv.hpp -print
-          mkdir -p include/opencv2
-          if [ -d opencv2.framework/Headers/opencv2 ]; then
-            cp -R opencv2.framework/Headers/opencv2/. include/opencv2/
-          else
-            cp -R opencv2.framework/Headers/. include/opencv2/
-          fi
-          test -f include/opencv2/opencv.hpp
-
       - name: Build dylib
         run: |
-          find "$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" \
-            -name 'libswiftCompatibility*' -print
           make clean all FINALPACKAGE=1
           mkdir -p build-artifacts
           find .theos -name 'AnClick.dylib' -type f -exec cp {} build-artifacts/ \;
@@ -49,8 +31,7 @@ jobs:
           file build-artifacts/AnClick.dylib
           otool -hv build-artifacts/AnClick.dylib
           otool -L build-artifacts/AnClick.dylib
-          codesign --force --sign - --timestamp=none build-artifacts/AnClick.dylib
-          codesign -dv build-artifacts/AnClick.dylib
+          ldid -S build-artifacts/AnClick.dylib
           file build-artifacts/AnClick.dylib
 
       - name: Upload build diagnostics
@@ -60,7 +41,6 @@ jobs:
           name: AnClick-build-diagnostics
           path: |
             .theos/**
-            opencv-ios-framework.zip
           include-hidden-files: true
 
       - name: Upload dylib

@@ -4,12 +4,6 @@ TARGET := iphone:clang:latest:14.0
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = AnClick
-OPENCV_FRAMEWORK_DIR = $(THEOS_PROJECT_DIR)
-OPENCV_HEADERS = $(OPENCV_FRAMEWORK_DIR)/opencv2.framework/Headers
-XCODE_TOOLCHAIN_DIR = $(shell xcode-select -p)/Toolchains/XcodeDefault.xctoolchain
-SWIFT_LIB_DIR = $(XCODE_TOOLCHAIN_DIR)/usr/lib/swift/iphoneos
-SWIFT_COMPAT_LIB_DIR = $(XCODE_TOOLCHAIN_DIR)/usr/lib/swift-5.0/iphoneos
-_THEOS_TARGET_SWIFT_LDPATH = -L$(SWIFT_LIB_DIR) -L/usr/lib/swift -L$(SWIFT_COMPAT_LIB_DIR) -rpath /usr/lib/swift
 
 AnClick_FILES = \
 	src/AnClickCore.mm \
@@ -18,12 +12,11 @@ AnClick_FILES = \
 	src/AnClickUI.m \
 	vendor/PTFakeTouch.m
 
-AnClick_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
-AnClick_OBJCFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
-AnClick_CCFLAGS = -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
-AnClick_OBJCCFLAGS = -fobjc-arc -std=c++17 -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
-AnClick_CXXFLAGS = -std=c++17 -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
-AnClick_LDFLAGS = -F$(OPENCV_FRAMEWORK_DIR) -framework opencv2 $(_THEOS_TARGET_SWIFT_LDPATH)
+AnClick_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include
+AnClick_OBJCFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include
+AnClick_CCFLAGS = -I$(THEOS_PROJECT_DIR)/include
+AnClick_OBJCCFLAGS = -fobjc-arc -std=c++17 -I$(THEOS_PROJECT_DIR)/include
+AnClick_CXXFLAGS = -std=c++17 -I$(THEOS_PROJECT_DIR)/include
 AnClick_FRAMEWORKS = UIKit Foundation QuartzCore CoreGraphics
 AnClick_PRIVATE_FRAMEWORKS = IOKit
 
