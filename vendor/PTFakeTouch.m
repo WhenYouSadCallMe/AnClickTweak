@@ -188,14 +188,6 @@ enum {
 
 static NSMutableArray<UITouch *> *AnClickTouches;
 
-static UIEdgeInsets AnClickSafeInsets(void) {
-    UIWindow *window = UIApplication.sharedApplication.keyWindow;
-    if (@available(iOS 11.0, *)) {
-        return window.safeAreaInsets;
-    }
-    return UIEdgeInsetsZero;
-}
-
 static UIWindow *AnClickWindowForPoint(CGPoint point) {
     UIWindow *fallback = nil;
 
@@ -400,16 +392,12 @@ static void AnClickSetEventWithTouches(UIEvent *event, NSArray<UITouch *> *touch
     AnClickSetEventWithTouches(event, AnClickTouches);
     [UIApplication.sharedApplication sendEvent:event];
 
-    NSLog(@"[AnClick] PTFakeTouch %@ id=%ld screen=(%.1f, %.1f) window=%@ safe=(%.0f,%.0f,%.0f,%.0f)",
+    NSLog(@"[AnClick] PTFakeTouch %@ id=%ld screen=(%.1f, %.1f) window=%@",
           phase == UITouchPhaseBegan ? @"began" : (phase == UITouchPhaseMoved ? @"moved" : @"ended"),
           (long)pointId,
           point.x,
           point.y,
-          touch.window,
-          AnClickSafeInsets().top,
-          AnClickSafeInsets().left,
-          AnClickSafeInsets().bottom,
-          AnClickSafeInsets().right);
+          touch.window);
 
     if (touch.phase == UITouchPhaseBegan || touch.phase == UITouchPhaseMoved) {
         [touch anclick_setPhaseAndUpdateTimestamp:UITouchPhaseStationary];
