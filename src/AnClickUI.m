@@ -728,7 +728,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             self->_longPressHolding = NO;
             if (self->_actionMode == AnClickActionModeLongPress) {
-                self->_statusLabel.text = @"长按完成无点击";
+                self->_statusLabel.text = @"长按完成";
                 [self refreshModeButtons];
             }
         });

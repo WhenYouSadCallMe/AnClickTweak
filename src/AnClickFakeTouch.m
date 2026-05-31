@@ -25,7 +25,6 @@
 @implementation AnClickFakeTouch
 
 static NSInteger AnClickHoldTouchId = 8;
-static NSInteger AnClickNextHoldTouchId = 20;
 static BOOL AnClickHolding = NO;
 static CGPoint AnClickHoldPoint = {0, 0};
 static dispatch_source_t AnClickHoldTimer = nil;
@@ -56,7 +55,7 @@ static NSUInteger AnClickHoldGeneration = 0;
     NSUInteger generation = AnClickHoldGeneration;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (AnClickHolding && generation == AnClickHoldGeneration) {
-            [self cancelHold];
+            [self endHold];
         }
     });
 }
@@ -76,21 +75,17 @@ static NSUInteger AnClickHoldGeneration = 0;
 
     AnClickHolding = YES;
     AnClickHoldPoint = point;
-    AnClickHoldTouchId = AnClickNextHoldTouchId++;
-    if (AnClickNextHoldTouchId > 90) {
-        AnClickNextHoldTouchId = 20;
-    }
     AnClickHoldGeneration++;
     NSUInteger generation = AnClickHoldGeneration;
     NSInteger touchId = AnClickHoldTouchId;
     CGPoint holdPoint = AnClickHoldPoint;
-    [self touchDownAtPoint:point touchId:AnClickHoldTouchId];
+    [self touchDownAtPoint:point touchId:touchId];
 
     AnClickHoldTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
     dispatch_source_set_timer(AnClickHoldTimer,
-                              dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.01 * NSEC_PER_SEC)),
-                              (uint64_t)(0.01 * NSEC_PER_SEC),
-                              (uint64_t)(0.002 * NSEC_PER_SEC));
+                              dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)),
+                              (uint64_t)(0.05 * NSEC_PER_SEC),
+                              (uint64_t)(0.005 * NSEC_PER_SEC));
     dispatch_source_set_event_handler(AnClickHoldTimer, ^{
         if (!AnClickHolding || generation != AnClickHoldGeneration) {
             return;
