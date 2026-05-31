@@ -783,9 +783,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     CGFloat controlWidth = MIN(330.0, overlay.bounds.size.width - 24.0);
     UIView *controlPanel = [[UIView alloc] initWithFrame:CGRectMake((overlay.bounds.size.width - controlWidth) * 0.5,
-                                                                    overlay.bounds.size.height - 164.0,
+                                                                    overlay.bounds.size.height - 118.0,
                                                                     controlWidth,
-                                                                    142.0)];
+                                                                    96.0)];
     controlPanel.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.10 alpha:0.92];
     controlPanel.layer.cornerRadius = 6;
     controlPanel.layer.borderWidth = 1;
@@ -798,39 +798,19 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _pointCoordinateLabel.textAlignment = NSTextAlignmentCenter;
     [controlPanel addSubview:_pointCoordinateLabel];
 
-    UIButton *upButton = [self pointNudgeButtonWithTitle:@"上" tag:1];
-    upButton.frame = CGRectMake(62, 36, 44, 32);
-    [controlPanel addSubview:upButton];
-
-    UIButton *leftButton = [self pointNudgeButtonWithTitle:@"左" tag:2];
-    leftButton.frame = CGRectMake(14, 72, 44, 32);
-    [controlPanel addSubview:leftButton];
-
-    UIButton *rightButton = [self pointNudgeButtonWithTitle:@"右" tag:3];
-    rightButton.frame = CGRectMake(110, 72, 44, 32);
-    [controlPanel addSubview:rightButton];
-
-    UIButton *downButton = [self pointNudgeButtonWithTitle:@"下" tag:4];
-    downButton.frame = CGRectMake(62, 108, 44, 28);
-    [controlPanel addSubview:downButton];
+    CGFloat pickButtonWidth = 82.0;
+    CGFloat pickButtonGap = 12.0;
+    CGFloat pickButtonX = (controlWidth - pickButtonWidth * 2.0 - pickButtonGap) * 0.5;
 
     UIButton *confirmButton = [self overlayButtonWithTitle:@"确认" action:@selector(confirmPointPicking)];
-    confirmButton.frame = CGRectMake(controlWidth - 148, 44, 64, 40);
+    confirmButton.frame = CGRectMake(pickButtonX, 44, pickButtonWidth, 40);
     confirmButton.backgroundColor = [UIColor colorWithRed:0.93 green:0.57 blue:0.18 alpha:1.0];
     [confirmButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
     [controlPanel addSubview:confirmButton];
 
     UIButton *cancelButton = [self overlayButtonWithTitle:@"取消" action:@selector(cancelPointPicking)];
-    cancelButton.frame = CGRectMake(controlWidth - 76, 44, 64, 40);
+    cancelButton.frame = CGRectMake(pickButtonX + pickButtonWidth + pickButtonGap, 44, pickButtonWidth, 40);
     [controlPanel addSubview:cancelButton];
-
-    UILabel *stepLabel = [[UILabel alloc] initWithFrame:CGRectMake(controlWidth - 150, 92, 138, 34)];
-    stepLabel.text = @"微调 1px\n拖动可粗调";
-    stepLabel.textColor = [UIColor colorWithWhite:1 alpha:0.72];
-    stepLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
-    stepLabel.textAlignment = NSTextAlignmentCenter;
-    stepLabel.numberOfLines = 2;
-    [controlPanel addSubview:stepLabel];
 
     CGFloat cursorSize = 58.0;
     UIView *cursor = [[UIView alloc] initWithFrame:CGRectMake(0, 0, cursorSize, cursorSize)];
@@ -859,6 +839,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingTap:)];
     [overlay addGestureRecognizer:tap];
+    UIPanGestureRecognizer *overlayPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingOverlayPan:)];
+    [overlay addGestureRecognizer:overlayPan];
 
     [_pointPickWindow.rootViewController.view addSubview:overlay];
     _pointPickOverlay = overlay;
@@ -867,13 +849,6 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [self updatePointPickCursor];
     _pointPickWindow.hidden = NO;
     _statusLabel.text = @"移动准星后确认";
-}
-
-- (UIButton *)pointNudgeButtonWithTitle:(NSString *)title tag:(NSInteger)tag {
-    UIButton *button = [self overlayButtonWithTitle:title action:@selector(nudgePointPicking:)];
-    button.tag = tag;
-    button.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
-    return button;
 }
 
 - (CGPoint)initialPointPickPointInOverlay:(UIView *)overlay {
@@ -926,6 +901,26 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [self updatePointPickCursor];
 }
 
+- (void)handlePointPickingOverlayPan:(UIPanGestureRecognizer *)recognizer {
+    if (!_pointPickOverlay) {
+        return;
+    }
+    UIView *hitView = [_pointPickOverlay hitTest:[recognizer locationInView:_pointPickOverlay] withEvent:nil];
+    if ([hitView isKindOfClass:UIControl.class] ||
+        [hitView.superview isKindOfClass:UIControl.class] ||
+        hitView == _pointCursorView ||
+        [hitView isDescendantOfView:_pointCursorView]) {
+        return;
+    }
+    if (recognizer.state == UIGestureRecognizerStateBegan ||
+        recognizer.state == UIGestureRecognizerStateChanged ||
+        recognizer.state == UIGestureRecognizerStateEnded) {
+        _pendingPointPickPoint = [self clampedPointPickPoint:[recognizer locationInView:_pointPickOverlay] inOverlay:_pointPickOverlay];
+        _hasPendingPointPickPoint = YES;
+        [self updatePointPickCursor];
+    }
+}
+
 - (void)handlePointCursorPan:(UIPanGestureRecognizer *)recognizer {
     if (!_pointPickOverlay) {
         return;
@@ -937,28 +932,6 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _hasPendingPointPickPoint = YES;
     [self updatePointPickCursor];
     [recognizer setTranslation:CGPointZero inView:_pointPickOverlay];
-}
-
-- (void)nudgePointPicking:(UIButton *)sender {
-    if (!_pointPickOverlay) {
-        return;
-    }
-    CGFloat dx = 0;
-    CGFloat dy = 0;
-    if (sender.tag == 1) {
-        dy = -1;
-    } else if (sender.tag == 2) {
-        dx = -1;
-    } else if (sender.tag == 3) {
-        dx = 1;
-    } else if (sender.tag == 4) {
-        dy = 1;
-    }
-    _pendingPointPickPoint = [self clampedPointPickPoint:CGPointMake(_pendingPointPickPoint.x + dx,
-                                                                     _pendingPointPickPoint.y + dy)
-                                              inOverlay:_pointPickOverlay];
-    _hasPendingPointPickPoint = YES;
-    [self updatePointPickCursor];
 }
 
 - (void)confirmPointPicking {

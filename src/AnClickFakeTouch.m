@@ -29,6 +29,7 @@ static BOOL AnClickHolding = NO;
 static CGPoint AnClickHoldPoint = {0, 0};
 static dispatch_source_t AnClickHoldTimer = nil;
 static NSUInteger AnClickHoldGeneration = 0;
+static const CGFloat AnClickHoldJitter = 0.35;
 
 + (void)tapAtPoint:(CGPoint)point {
     NSInteger touchId = 1;
@@ -55,7 +56,7 @@ static NSUInteger AnClickHoldGeneration = 0;
     NSUInteger generation = AnClickHoldGeneration;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (AnClickHolding && generation == AnClickHoldGeneration) {
-            [self endHold];
+            [self cancelHold];
         }
     });
 }
@@ -79,6 +80,7 @@ static NSUInteger AnClickHoldGeneration = 0;
     NSUInteger generation = AnClickHoldGeneration;
     NSInteger touchId = AnClickHoldTouchId;
     CGPoint holdPoint = AnClickHoldPoint;
+    __block BOOL jitterRight = NO;
     [self touchDownAtPoint:point touchId:touchId];
 
     AnClickHoldTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
@@ -90,7 +92,9 @@ static NSUInteger AnClickHoldGeneration = 0;
         if (!AnClickHolding || generation != AnClickHoldGeneration) {
             return;
         }
-        [self touchMoveAtPoint:holdPoint touchId:touchId];
+        jitterRight = !jitterRight;
+        CGFloat dx = jitterRight ? AnClickHoldJitter : -AnClickHoldJitter;
+        [self touchMoveAtPoint:CGPointMake(holdPoint.x + dx, holdPoint.y) touchId:touchId];
     });
     dispatch_resume(AnClickHoldTimer);
 }
