@@ -107,8 +107,15 @@ static void (*original_sendEvent)(id self, SEL _cmd, UIEvent *event);
 
 - (NSArray<NSDictionary *> *)serializedEvents {
     NSMutableArray<NSDictionary *> *result = [NSMutableArray array];
-    for (AnClickRecordEvent *event in [self events]) {
-        [result addObject:[event dictionaryValue]];
+    NSArray<AnClickRecordEvent *> *events = [self events];
+    NSTimeInterval baseTimestamp = events.firstObject ? events.firstObject.timestamp : 0;
+    for (AnClickRecordEvent *event in events) {
+        [result addObject:@{
+            @"type": @(event.type),
+            @"x": @(event.point.x),
+            @"y": @(event.point.y),
+            @"timestamp": @(MAX(0, event.timestamp - baseTimestamp)),
+        }];
     }
     return result;
 }
