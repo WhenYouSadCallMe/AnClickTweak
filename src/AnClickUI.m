@@ -20,6 +20,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 + (void)tapAtPoint:(CGPoint)point;
 + (void)doubleTapAtPoint:(CGPoint)point;
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration;
++ (void)beginHoldAtPoint:(CGPoint)point;
++ (void)endHold;
++ (BOOL)isHolding;
 + (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration;
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events;
 @end
@@ -66,6 +69,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     BOOL _hasManualActionPoint[3];
     CGPoint _manualSwipeAnchor;
     BOOL _hasManualSwipeAnchor;
+    BOOL _longPressHolding;
     AnClickActionMode _actionMode;
 }
 
@@ -700,8 +704,15 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [AnClickFakeTouch doubleTapAtPoint:point];
         _statusLabel.text = [NSString stringWithFormat:@"双 %.0f,%.0f", point.x, point.y];
     } else if (_actionMode == AnClickActionModeLongPress) {
-        [AnClickFakeTouch longPressAtPoint:point duration:0.75];
-        _statusLabel.text = [NSString stringWithFormat:@"长 %.0f,%.0f", point.x, point.y];
+        if (_longPressHolding || [AnClickFakeTouch isHolding]) {
+            [AnClickFakeTouch endHold];
+            _longPressHolding = NO;
+            _statusLabel.text = @"长按已松开";
+        } else {
+            [AnClickFakeTouch beginHoldAtPoint:point];
+            _longPressHolding = YES;
+            _statusLabel.text = [NSString stringWithFormat:@"长按中 %.0f,%.0f", point.x, point.y];
+        }
     } else {
         [AnClickFakeTouch tapAtPoint:point];
         _statusLabel.text = [NSString stringWithFormat:@"点 %.0f,%.0f", point.x, point.y];
@@ -866,6 +877,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [_trajectoryView removeFromSuperview];
         _statusLabel.text = @"已清滑动";
         return;
+    }
+
+    if (_actionMode == AnClickActionModeLongPress && (_longPressHolding || [AnClickFakeTouch isHolding])) {
+        [AnClickFakeTouch endHold];
+        _longPressHolding = NO;
     }
 
     _hasManualActionPoint[(NSUInteger)_actionMode] = NO;

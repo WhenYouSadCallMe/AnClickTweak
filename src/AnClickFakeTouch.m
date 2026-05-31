@@ -7,6 +7,9 @@
 + (void)tapAtPoint:(CGPoint)point;
 + (void)doubleTapAtPoint:(CGPoint)point;
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration;
++ (void)beginHoldAtPoint:(CGPoint)point;
++ (void)endHold;
++ (BOOL)isHolding;
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end;
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end duration:(NSTimeInterval)duration steps:(NSUInteger)steps;
 + (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration;
@@ -17,6 +20,11 @@
 @end
 
 @implementation AnClickFakeTouch
+
+static NSInteger AnClickHoldTouchId = 8;
+static BOOL AnClickHolding = NO;
+static CGPoint AnClickHoldPoint = {0, 0};
+static dispatch_source_t AnClickHoldTimer = nil;
 
 + (void)tapAtPoint:(CGPoint)point {
     NSInteger touchId = 1;
@@ -38,23 +46,65 @@
 }
 
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration {
-    NSInteger touchId = 3;
-    NSTimeInterval holdDuration = MAX(duration, 1.8);
-    [self touchDownAtPoint:point touchId:touchId];
+    [self beginHoldAtPoint:point];
+}
 
-    NSUInteger pulses = MAX((NSUInteger)floor(holdDuration / 0.08), 8);
-    for (NSUInteger i = 1; i < pulses; i++) {
-        NSTimeInterval delay = holdDuration * ((NSTimeInterval)i / (NSTimeInterval)pulses);
-        CGFloat offset = (i % 2 == 0) ? 0.35 : -0.35;
-        CGPoint movedPoint = CGPointMake(point.x + offset, point.y + offset);
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self touchMoveAtPoint:movedPoint touchId:touchId];
++ (void)beginHoldAtPoint:(CGPoint)point {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self beginHoldAtPoint:point];
         });
+        return;
     }
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self touchUpAtPoint:point touchId:touchId];
+    if (AnClickHolding) {
+        [self endHold];
+    }
+
+    AnClickHolding = YES;
+    AnClickHoldPoint = point;
+    [self touchDownAtPoint:point touchId:AnClickHoldTouchId];
+
+    __block NSUInteger tick = 0;
+    AnClickHoldTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(AnClickHoldTimer,
+                              dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.06 * NSEC_PER_SEC)),
+                              (uint64_t)(0.06 * NSEC_PER_SEC),
+                              (uint64_t)(0.01 * NSEC_PER_SEC));
+    dispatch_source_set_event_handler(AnClickHoldTimer, ^{
+        if (!AnClickHolding) {
+            return;
+        }
+        tick++;
+        CGFloat offset = (tick % 2 == 0) ? 0.25 : -0.25;
+        CGPoint movedPoint = CGPointMake(AnClickHoldPoint.x + offset, AnClickHoldPoint.y + offset);
+        [self touchMoveAtPoint:movedPoint touchId:AnClickHoldTouchId];
     });
+    dispatch_resume(AnClickHoldTimer);
+}
+
++ (void)endHold {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self endHold];
+        });
+        return;
+    }
+
+    if (!AnClickHolding) {
+        return;
+    }
+
+    if (AnClickHoldTimer) {
+        dispatch_source_cancel(AnClickHoldTimer);
+        AnClickHoldTimer = nil;
+    }
+    [self touchUpAtPoint:AnClickHoldPoint touchId:AnClickHoldTouchId];
+    AnClickHolding = NO;
+}
+
++ (BOOL)isHolding {
+    return AnClickHolding;
 }
 
 + (UIWindow *)activeApplicationWindow {
