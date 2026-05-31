@@ -27,10 +27,12 @@
 static NSInteger AnClickHoldTouchId = 0;
 static BOOL AnClickHolding = NO;
 static CGPoint AnClickHoldPoint = {0, 0};
+static CGPoint AnClickHoldLastMovePoint = {0, 0};
 static dispatch_source_t AnClickHoldTimer = nil;
 static NSUInteger AnClickHoldGeneration = 0;
 static const CGFloat AnClickHoldJitter = 0.75;
 static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
+static const NSTimeInterval AnClickTouchUpDelay = 1.0 / 120.0;
 
 + (void)tapAtPoint:(CGPoint)point {
     NSInteger touchId = 1;
@@ -51,62 +53,28 @@ static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
     });
 }
 
-+ (CGPoint)cancelPointAwayFromPoint:(CGPoint)point {
-    CGRect bounds = UIScreen.mainScreen.bounds;
-    CGFloat x = point.x < CGRectGetMidX(bounds) ? CGRectGetMaxX(bounds) + 120.0 : CGRectGetMinX(bounds) - 120.0;
-    CGFloat y = point.y < CGRectGetMidY(bounds) ? CGRectGetMaxY(bounds) + 120.0 : CGRectGetMinY(bounds) - 120.0;
-    return CGPointMake(x, y);
++ (CGFloat)randomJitterWithRadius:(CGFloat)radius {
+    NSInteger bucket = (NSInteger)arc4random_uniform(2001) - 1000;
+    return ((CGFloat)bucket / 1000.0) * radius;
 }
 
-+ (CGPoint)releasePointAwayFromPoint:(CGPoint)point {
-    CGRect bounds = UIScreen.mainScreen.bounds;
-    CGFloat inset = 8.0;
-    CGFloat distance = 96.0;
-    CGFloat dx = point.x < CGRectGetMidX(bounds) ? distance : -distance;
-    CGFloat dy = point.y < CGRectGetMidY(bounds) ? distance : -distance;
-    CGPoint releasePoint = CGPointMake(point.x + dx, point.y + dy);
-    releasePoint.x = MIN(MAX(releasePoint.x, CGRectGetMinX(bounds) + inset), CGRectGetMaxX(bounds) - inset);
-    releasePoint.y = MIN(MAX(releasePoint.y, CGRectGetMinY(bounds) + inset), CGRectGetMaxY(bounds) - inset);
-
-    CGFloat movedX = releasePoint.x - point.x;
-    CGFloat movedY = releasePoint.y - point.y;
-    if (sqrt(movedX * movedX + movedY * movedY) >= 48.0) {
-        return releasePoint;
++ (CGPoint)jitteredPointAroundPoint:(CGPoint)point radius:(CGFloat)radius {
+    CGFloat dx = [self randomJitterWithRadius:radius];
+    CGFloat dy = [self randomJitterWithRadius:radius];
+    if (fabs(dx) < 0.05 && fabs(dy) < 0.05) {
+        dx = radius;
     }
+    return CGPointMake(point.x + dx, point.y + dy);
+}
 
-    CGPoint candidates[] = {
-        CGPointMake(CGRectGetMinX(bounds) + inset, CGRectGetMinY(bounds) + inset),
-        CGPointMake(CGRectGetMaxX(bounds) - inset, CGRectGetMinY(bounds) + inset),
-        CGPointMake(CGRectGetMinX(bounds) + inset, CGRectGetMaxY(bounds) - inset),
-        CGPointMake(CGRectGetMaxX(bounds) - inset, CGRectGetMaxY(bounds) - inset),
-    };
-    CGPoint bestPoint = releasePoint;
-    CGFloat bestDistance = 0;
-    for (NSUInteger i = 0; i < 4; i++) {
-        CGFloat candidateX = candidates[i].x - point.x;
-        CGFloat candidateY = candidates[i].y - point.y;
-        CGFloat candidateDistance = sqrt(candidateX * candidateX + candidateY * candidateY);
-        if (candidateDistance > bestDistance) {
-            bestDistance = candidateDistance;
-            bestPoint = candidates[i];
++ (void)finishTouchId:(NSInteger)touchId atPoint:(CGPoint)point cancelled:(BOOL)cancelled {
+    [self touchMoveAtPoint:point touchId:touchId];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickTouchUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (cancelled) {
+            [self touchCancelAtPoint:point touchId:touchId];
+        } else {
+            [self touchUpAtPoint:point touchId:touchId];
         }
-    }
-    return bestPoint;
-}
-
-+ (void)releaseTouchId:(NSInteger)touchId fromPoint:(CGPoint)startPoint toPoint:(CGPoint)releasePoint {
-    NSUInteger steps = 6;
-    NSTimeInterval stepInterval = 0.012;
-    for (NSUInteger i = 1; i <= steps; i++) {
-        CGFloat progress = (CGFloat)i / (CGFloat)steps;
-        CGPoint point = CGPointMake(startPoint.x + (releasePoint.x - startPoint.x) * progress,
-                                    startPoint.y + (releasePoint.y - startPoint.y) * progress);
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(stepInterval * i * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self touchMoveAtPoint:point touchId:touchId];
-        });
-    }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(stepInterval * (steps + 1) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self touchUpAtPoint:releasePoint touchId:touchId];
     });
 }
 
@@ -136,6 +104,7 @@ static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
 
     AnClickHolding = YES;
     AnClickHoldPoint = point;
+    AnClickHoldLastMovePoint = point;
     AnClickHoldTouchId = [PTFakeTouch getAvailablePointId];
     if (AnClickHoldTouchId <= 0) {
         AnClickHoldTouchId = 8;
@@ -144,7 +113,6 @@ static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
     NSUInteger generation = AnClickHoldGeneration;
     NSInteger touchId = AnClickHoldTouchId;
     CGPoint holdPoint = AnClickHoldPoint;
-    __block BOOL jitterRight = NO;
     [self touchDownAtPoint:point touchId:touchId];
 
     AnClickHoldTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
@@ -156,10 +124,9 @@ static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
         if (!AnClickHolding || generation != AnClickHoldGeneration) {
             return;
         }
-        jitterRight = !jitterRight;
-        CGFloat dx = jitterRight ? AnClickHoldJitter : -AnClickHoldJitter;
-        CGFloat dy = jitterRight ? -AnClickHoldJitter : AnClickHoldJitter;
-        [self touchMoveAtPoint:CGPointMake(holdPoint.x + dx, holdPoint.y + dy) touchId:touchId];
+        CGPoint movePoint = [self jitteredPointAroundPoint:holdPoint radius:AnClickHoldJitter];
+        AnClickHoldLastMovePoint = movePoint;
+        [self touchMoveAtPoint:movePoint touchId:touchId];
     });
     dispatch_resume(AnClickHoldTimer);
 }
@@ -180,12 +147,11 @@ static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
         dispatch_source_cancel(AnClickHoldTimer);
         AnClickHoldTimer = nil;
     }
-    CGPoint point = AnClickHoldPoint;
+    CGPoint point = AnClickHoldLastMovePoint;
     NSInteger touchId = AnClickHoldTouchId;
     AnClickHolding = NO;
     AnClickHoldGeneration++;
-    CGPoint releasePoint = [self releasePointAwayFromPoint:point];
-    [self releaseTouchId:touchId fromPoint:point toPoint:releasePoint];
+    [self finishTouchId:touchId atPoint:point cancelled:NO];
 }
 
 + (void)cancelHold {
@@ -204,13 +170,11 @@ static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
         dispatch_source_cancel(AnClickHoldTimer);
         AnClickHoldTimer = nil;
     }
-    CGPoint point = AnClickHoldPoint;
+    CGPoint point = AnClickHoldLastMovePoint;
     NSInteger touchId = AnClickHoldTouchId;
     AnClickHolding = NO;
     AnClickHoldGeneration++;
-    CGPoint cancelPoint = [self cancelPointAwayFromPoint:point];
-    [self touchMoveAtPoint:cancelPoint touchId:touchId];
-    [self touchCancelAtPoint:cancelPoint touchId:touchId];
+    [self finishTouchId:touchId atPoint:point cancelled:YES];
 }
 
 + (BOOL)isHolding {
@@ -307,7 +271,7 @@ static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
     }
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self touchUpAtPoint:end touchId:touchId];
+        [self finishTouchId:touchId atPoint:end cancelled:NO];
     });
 }
 
@@ -330,7 +294,7 @@ static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
     }
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(safeDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self touchUpAtPoint:points.lastObject.CGPointValue touchId:touchId];
+        [self finishTouchId:touchId atPoint:points.lastObject.CGPointValue cancelled:NO];
     });
 }
 
@@ -344,7 +308,6 @@ static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
     NSTimeInterval previousTimestamp = 0;
     CGPoint previousPoint = CGPointZero;
     NSInteger previousType = -1;
-    BOOL jitterRight = NO;
 
     for (NSDictionary *event in events) {
         NSNumber *typeNumber = event[@"type"];
@@ -361,9 +324,7 @@ static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
 
         if (touchIsDown && timestamp > previousTimestamp + AnClickHoldTickInterval) {
             for (NSTimeInterval tick = previousTimestamp + AnClickHoldTickInterval; tick < timestamp - 0.001; tick += AnClickHoldTickInterval) {
-                jitterRight = !jitterRight;
-                CGFloat dx = jitterRight ? AnClickHoldJitter : -AnClickHoldJitter;
-                CGPoint keepAlivePoint = CGPointMake(previousPoint.x + dx, previousPoint.y);
+                CGPoint keepAlivePoint = [self jitteredPointAroundPoint:previousPoint radius:AnClickHoldJitter];
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(tick * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     [self touchMoveAtPoint:keepAlivePoint touchId:touchId];
                 });
@@ -376,9 +337,9 @@ static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
             } else if (type == 1) {
                 [self touchMoveAtPoint:point touchId:touchId];
             } else if (type == 3) {
-                [self touchCancelAtPoint:point touchId:touchId];
+                [self finishTouchId:touchId atPoint:point cancelled:YES];
             } else {
-                [self touchUpAtPoint:point touchId:touchId];
+                [self finishTouchId:touchId atPoint:point cancelled:NO];
             }
         });
 
@@ -389,11 +350,9 @@ static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
     }
 
     if (previousType == 0 || previousType == 1) {
-        CGPoint cancelPoint = [self cancelPointAwayFromPoint:previousPoint];
         NSTimeInterval cancelTimestamp = previousTimestamp + 0.08;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(cancelTimestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self touchMoveAtPoint:cancelPoint touchId:touchId];
-            [self touchCancelAtPoint:cancelPoint touchId:touchId];
+            [self finishTouchId:touchId atPoint:previousPoint cancelled:YES];
         });
     }
 }

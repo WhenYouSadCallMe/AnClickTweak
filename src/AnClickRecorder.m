@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
+#import <math.h>
 #import <objc/runtime.h>
 
 typedef NS_ENUM(NSInteger, AnClickRecordEventType) {
@@ -50,7 +51,6 @@ static const CGFloat AnClickRecordKeepAliveJitter = 0.75;
     dispatch_source_t _keepAliveTimer;
     BOOL _hasActiveTouch;
     CGPoint _activeTouchPoint;
-    BOOL _jitterRight;
 }
 
 + (instancetype)shared {
@@ -96,7 +96,6 @@ static const CGFloat AnClickRecordKeepAliveJitter = 0.75;
         _recordStartTime = CACurrentMediaTime();
         _hasActiveTouch = NO;
         _activeTouchPoint = CGPointZero;
-        _jitterRight = NO;
         self.recording = YES;
     }
     [self startKeepAliveTimer];
@@ -163,6 +162,20 @@ static const CGFloat AnClickRecordKeepAliveJitter = 0.75;
     [_events addObject:record];
 }
 
+- (CGFloat)randomJitterWithRadius:(CGFloat)radius {
+    NSInteger bucket = (NSInteger)arc4random_uniform(2001) - 1000;
+    return ((CGFloat)bucket / 1000.0) * radius;
+}
+
+- (CGPoint)jitteredPointAroundPoint:(CGPoint)point radius:(CGFloat)radius {
+    CGFloat dx = [self randomJitterWithRadius:radius];
+    CGFloat dy = [self randomJitterWithRadius:radius];
+    if (fabs(dx) < 0.05 && fabs(dy) < 0.05) {
+        dx = radius;
+    }
+    return CGPointMake(point.x + dx, point.y + dy);
+}
+
 - (void)appendKeepAliveRecordIfNeeded {
     @synchronized (self) {
         if (!self.isRecording || !_hasActiveTouch) {
@@ -175,10 +188,7 @@ static const CGFloat AnClickRecordKeepAliveJitter = 0.75;
             return;
         }
 
-        _jitterRight = !_jitterRight;
-        CGFloat dx = _jitterRight ? AnClickRecordKeepAliveJitter : -AnClickRecordKeepAliveJitter;
-        CGFloat dy = _jitterRight ? -AnClickRecordKeepAliveJitter : AnClickRecordKeepAliveJitter;
-        CGPoint keepAlivePoint = CGPointMake(_activeTouchPoint.x + dx, _activeTouchPoint.y + dy);
+        CGPoint keepAlivePoint = [self jitteredPointAroundPoint:_activeTouchPoint radius:AnClickRecordKeepAliveJitter];
         [self appendRecordType:AnClickRecordEventTypeMoved point:keepAlivePoint timestamp:timestamp];
     }
 }
@@ -225,6 +235,9 @@ static const CGFloat AnClickRecordKeepAliveJitter = 0.75;
 
             CGPoint point = [window convertPoint:[touch locationInView:window] toWindow:nil];
             NSTimeInterval timestamp = MAX(0, CACurrentMediaTime() - _recordStartTime);
+            if (type == AnClickRecordEventTypeEnded || type == AnClickRecordEventTypeCancelled) {
+                [self appendRecordType:AnClickRecordEventTypeMoved point:point timestamp:timestamp];
+            }
             [self appendRecordType:type point:point timestamp:timestamp];
 
             if (type == AnClickRecordEventTypeBegan || type == AnClickRecordEventTypeMoved) {
