@@ -275,6 +275,16 @@ static const CGFloat AnClickHoldJitter = 0.35;
     __block BOOL sawEnded = NO;
     __block CGPoint lastPoint = CGPointZero;
     __block NSTimeInterval lastTimestamp = 0;
+    BOOL touchIsDown = NO;
+    BOOL gestureActive = NO;
+    CGPoint gestureStartPoint = CGPointZero;
+    NSTimeInterval gestureStartTimestamp = 0;
+    CGFloat maxGestureDistance = 0;
+    NSTimeInterval previousTimestamp = 0;
+    CGPoint previousPoint = CGPointZero;
+    NSInteger previousType = -1;
+    BOOL jitterRight = NO;
+    NSTimeInterval keepAliveInterval = 0.05;
 
     for (NSDictionary *event in events) {
         NSNumber *typeNumber = event[@"type"];
@@ -288,10 +298,44 @@ static const CGFloat AnClickHoldJitter = 0.35;
         NSInteger type = typeNumber.integerValue;
         CGPoint point = CGPointMake(xNumber.doubleValue, yNumber.doubleValue);
         NSTimeInterval timestamp = MAX(0, timestampNumber.doubleValue);
+
+        if (touchIsDown && timestamp > previousTimestamp + keepAliveInterval) {
+            for (NSTimeInterval tick = previousTimestamp + keepAliveInterval; tick < timestamp - 0.001; tick += keepAliveInterval) {
+                jitterRight = !jitterRight;
+                CGFloat dx = jitterRight ? AnClickHoldJitter : -AnClickHoldJitter;
+                CGPoint keepAlivePoint = CGPointMake(previousPoint.x + dx, previousPoint.y);
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(tick * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    [self touchMoveAtPoint:keepAlivePoint touchId:touchId];
+                });
+            }
+        }
+
         lastPoint = point;
         lastTimestamp = MAX(lastTimestamp, timestamp);
         if (type == 2 || type == 3) {
             sawEnded = YES;
+        }
+
+        BOOL cancelRecordedEnd = NO;
+        if (type == 0) {
+            touchIsDown = YES;
+            gestureActive = YES;
+            gestureStartPoint = point;
+            gestureStartTimestamp = timestamp;
+            maxGestureDistance = 0;
+        } else if (gestureActive) {
+            CGFloat dx = point.x - gestureStartPoint.x;
+            CGFloat dy = point.y - gestureStartPoint.y;
+            maxGestureDistance = MAX(maxGestureDistance, sqrt(dx * dx + dy * dy));
+            if (type == 2) {
+                NSTimeInterval heldDuration = MAX(0, timestamp - gestureStartTimestamp);
+                cancelRecordedEnd = (heldDuration >= 0.5 && maxGestureDistance <= 12.0);
+                touchIsDown = NO;
+                gestureActive = NO;
+            } else if (type == 3) {
+                touchIsDown = NO;
+                gestureActive = NO;
+            }
         }
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -299,15 +343,23 @@ static const CGFloat AnClickHoldJitter = 0.35;
                 [self touchDownAtPoint:point touchId:touchId];
             } else if (type == 1) {
                 [self touchMoveAtPoint:point touchId:touchId];
+            } else if (type == 3 || cancelRecordedEnd) {
+                [self touchCancelAtPoint:point touchId:touchId];
             } else {
                 [self touchUpAtPoint:point touchId:touchId];
             }
         });
+
+        previousTimestamp = timestamp;
+        previousPoint = point;
+        previousType = type;
     }
 
     if (!sawEnded) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((lastTimestamp + 0.08) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self touchUpAtPoint:lastPoint touchId:touchId];
+            if (previousType == 0 || previousType == 1) {
+                [self touchCancelAtPoint:lastPoint touchId:touchId];
+            }
         });
     }
 }

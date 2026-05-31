@@ -140,6 +140,9 @@ static void (*original_sendEvent)(id self, SEL _cmd, UIEvent *event);
                 case UITouchPhaseMoved:
                     type = AnClickRecordEventTypeMoved;
                     break;
+                case UITouchPhaseStationary:
+                    type = AnClickRecordEventTypeMoved;
+                    break;
                 case UITouchPhaseEnded:
                     type = AnClickRecordEventTypeEnded;
                     break;
