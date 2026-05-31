@@ -12,6 +12,7 @@ typedef NS_ENUM(NSInteger, PTFakeTouchEvent) {
 @interface PTFakeTouch : NSObject
 
 + (NSInteger)getAvailablePointId;
++ (void)cancelAllActiveTouches;
 + (NSInteger)fakeTouchId:(NSInteger)pointId AtPoint:(CGPoint)point withTouchPhase:(UITouchPhase)phase;
 
 // Compatibility wrapper used by the tweak code.

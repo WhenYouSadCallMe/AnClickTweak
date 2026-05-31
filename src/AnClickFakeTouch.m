@@ -72,6 +72,7 @@ static NSUInteger AnClickHoldGeneration = 0;
     if (AnClickHolding) {
         [self cancelHold];
     }
+    [PTFakeTouch cancelAllActiveTouches];
 
     AnClickHolding = YES;
     AnClickHoldPoint = point;
@@ -80,6 +81,9 @@ static NSUInteger AnClickHoldGeneration = 0;
         AnClickNextHoldTouchId = 20;
     }
     AnClickHoldGeneration++;
+    NSUInteger generation = AnClickHoldGeneration;
+    NSInteger touchId = AnClickHoldTouchId;
+    CGPoint holdPoint = AnClickHoldPoint;
     [self touchDownAtPoint:point touchId:AnClickHoldTouchId];
 
     AnClickHoldTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
@@ -88,10 +92,10 @@ static NSUInteger AnClickHoldGeneration = 0;
                               (uint64_t)(0.01 * NSEC_PER_SEC),
                               (uint64_t)(0.002 * NSEC_PER_SEC));
     dispatch_source_set_event_handler(AnClickHoldTimer, ^{
-        if (!AnClickHolding) {
+        if (!AnClickHolding || generation != AnClickHoldGeneration) {
             return;
         }
-        [self touchStationaryAtPoint:AnClickHoldPoint touchId:AnClickHoldTouchId];
+        [self touchStationaryAtPoint:holdPoint touchId:touchId];
     });
     dispatch_resume(AnClickHoldTimer);
 }

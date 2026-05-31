@@ -58,6 +58,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIView *_selectionView;
     UIView *_pointPickOverlay;
     UIWindow *_pointPickWindow;
+    UIView *_pointCursorView;
+    UILabel *_pointCoordinateLabel;
     UIImage *_captureSnapshot;
     UIImageView *_previewView;
     UIView *_tapMarkerView;
@@ -70,6 +72,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     BOOL _hasManualActionPoint[3];
     CGPoint _manualSwipeAnchor;
     BOOL _hasManualSwipeAnchor;
+    CGPoint _pendingPointPickPoint;
+    BOOL _hasPendingPointPickPoint;
     BOOL _longPressHolding;
     AnClickActionMode _actionMode;
 }
@@ -143,10 +147,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _panelWindow.rootViewController = controller;
 
     _panelView = [[UIView alloc] initWithFrame:_panelWindow.bounds];
-    _panelView.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.88];
-    _panelView.layer.cornerRadius = 8;
+    _panelView.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.10 alpha:0.94];
+    _panelView.layer.cornerRadius = 6;
     _panelView.layer.borderWidth = 1;
-    _panelView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.18].CGColor;
+    _panelView.layer.borderColor = [UIColor colorWithRed:0.33 green:0.58 blue:0.86 alpha:0.55].CGColor;
+    _panelView.layer.shadowColor = UIColor.blackColor.CGColor;
+    _panelView.layer.shadowOpacity = 0.35;
+    _panelView.layer.shadowRadius = 14.0;
+    _panelView.layer.shadowOffset = CGSizeMake(0, 8);
     [controller.view addSubview:_panelView];
 
     UIPanGestureRecognizer *panelPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelPan:)];
@@ -211,7 +219,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 158, panelWidth - 16, 30)];
     _previewView.contentMode = UIViewContentModeScaleAspectFit;
     _previewView.clipsToBounds = YES;
-    _previewView.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+    _previewView.backgroundColor = [UIColor colorWithRed:0.12 green:0.14 blue:0.17 alpha:1.0];
+    _previewView.layer.cornerRadius = 4;
+    _previewView.layer.borderWidth = 1;
+    _previewView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
     _previewView.hidden = YES;
     [_panelView addSubview:_previewView];
     [self refreshTemplatePreview];
@@ -225,8 +236,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [button setTitle:title forState:UIControlStateNormal];
     [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     button.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    button.backgroundColor = [UIColor colorWithRed:0.10 green:0.34 blue:0.56 alpha:1.0];
-    button.layer.cornerRadius = 6;
+    button.backgroundColor = [UIColor colorWithRed:0.16 green:0.20 blue:0.25 alpha:1.0];
+    button.layer.cornerRadius = 4;
+    button.layer.borderWidth = 1;
+    button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
 }
@@ -256,8 +269,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     for (UIButton *button in _modeButtons) {
         BOOL selected = button.tag == _actionMode;
         button.backgroundColor = selected
-            ? [UIColor colorWithRed:0.95 green:0.65 blue:0.14 alpha:1.0]
-            : [UIColor colorWithRed:0.10 green:0.34 blue:0.56 alpha:1.0];
+            ? [UIColor colorWithRed:0.93 green:0.57 blue:0.18 alpha:1.0]
+            : [UIColor colorWithRed:0.16 green:0.20 blue:0.25 alpha:1.0];
+        button.layer.borderColor = selected
+            ? [UIColor colorWithRed:1.0 green:0.78 blue:0.36 alpha:1.0].CGColor
+            : [UIColor colorWithWhite:1 alpha:0.10].CGColor;
         [button setTitleColor:selected ? UIColor.blackColor : UIColor.whiteColor forState:UIControlStateNormal];
     }
 }
@@ -393,9 +409,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [button setTitle:title forState:UIControlStateNormal];
     [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     button.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightBold];
-    button.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.9];
-    button.layer.cornerRadius = 8;
-    button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.25].CGColor;
+    button.backgroundColor = [UIColor colorWithRed:0.10 green:0.12 blue:0.15 alpha:0.94];
+    button.layer.cornerRadius = 5;
+    button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.18].CGColor;
     button.layer.borderWidth = 1;
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
@@ -750,35 +766,148 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _pointPickWindow.rootViewController = [[UIViewController alloc] init];
 
     UIView *overlay = [[UIView alloc] initWithFrame:_pointPickWindow.bounds];
-    overlay.backgroundColor = [UIColor colorWithWhite:0 alpha:0.12];
+    overlay.backgroundColor = [UIColor colorWithWhite:0 alpha:0.08];
     overlay.userInteractionEnabled = YES;
 
-    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(12, 44, overlay.bounds.size.width - 24, 34)];
-    hint.text = _actionMode == AnClickActionModeSwipe ? @"点一下设置滑动起点" : [NSString stringWithFormat:@"点一下设置%@", [self currentActionName]];
+    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(12, 44, overlay.bounds.size.width - 24, 38)];
+    hint.text = _actionMode == AnClickActionModeSwipe ? @"拖动准星选择滑动起点" : [NSString stringWithFormat:@"拖动准星选择%@", [self currentActionName]];
     hint.textColor = UIColor.whiteColor;
-    hint.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
+    hint.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     hint.textAlignment = NSTextAlignmentCenter;
-    hint.backgroundColor = [UIColor colorWithWhite:0 alpha:0.45];
-    hint.layer.cornerRadius = 8;
+    hint.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.10 alpha:0.86];
+    hint.layer.cornerRadius = 6;
+    hint.layer.borderWidth = 1;
+    hint.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
     hint.clipsToBounds = YES;
     [overlay addSubview:hint];
 
+    CGFloat controlWidth = MIN(330.0, overlay.bounds.size.width - 24.0);
+    UIView *controlPanel = [[UIView alloc] initWithFrame:CGRectMake((overlay.bounds.size.width - controlWidth) * 0.5,
+                                                                    overlay.bounds.size.height - 164.0,
+                                                                    controlWidth,
+                                                                    142.0)];
+    controlPanel.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.10 alpha:0.92];
+    controlPanel.layer.cornerRadius = 6;
+    controlPanel.layer.borderWidth = 1;
+    controlPanel.layer.borderColor = [UIColor colorWithRed:0.33 green:0.58 blue:0.86 alpha:0.45].CGColor;
+    [overlay addSubview:controlPanel];
+
+    _pointCoordinateLabel = [[UILabel alloc] initWithFrame:CGRectMake(10, 8, controlWidth - 20, 24)];
+    _pointCoordinateLabel.textColor = UIColor.whiteColor;
+    _pointCoordinateLabel.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightSemibold];
+    _pointCoordinateLabel.textAlignment = NSTextAlignmentCenter;
+    [controlPanel addSubview:_pointCoordinateLabel];
+
+    UIButton *upButton = [self pointNudgeButtonWithTitle:@"上" tag:1];
+    upButton.frame = CGRectMake(62, 36, 44, 32);
+    [controlPanel addSubview:upButton];
+
+    UIButton *leftButton = [self pointNudgeButtonWithTitle:@"左" tag:2];
+    leftButton.frame = CGRectMake(14, 72, 44, 32);
+    [controlPanel addSubview:leftButton];
+
+    UIButton *rightButton = [self pointNudgeButtonWithTitle:@"右" tag:3];
+    rightButton.frame = CGRectMake(110, 72, 44, 32);
+    [controlPanel addSubview:rightButton];
+
+    UIButton *downButton = [self pointNudgeButtonWithTitle:@"下" tag:4];
+    downButton.frame = CGRectMake(62, 108, 44, 28);
+    [controlPanel addSubview:downButton];
+
+    UIButton *confirmButton = [self overlayButtonWithTitle:@"确认" action:@selector(confirmPointPicking)];
+    confirmButton.frame = CGRectMake(controlWidth - 148, 44, 64, 40);
+    confirmButton.backgroundColor = [UIColor colorWithRed:0.93 green:0.57 blue:0.18 alpha:1.0];
+    [confirmButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
+    [controlPanel addSubview:confirmButton];
+
     UIButton *cancelButton = [self overlayButtonWithTitle:@"取消" action:@selector(cancelPointPicking)];
-    cancelButton.frame = CGRectMake(overlay.bounds.size.width - 102, overlay.bounds.size.height - 70, 86, 44);
-    [overlay addSubview:cancelButton];
+    cancelButton.frame = CGRectMake(controlWidth - 76, 44, 64, 40);
+    [controlPanel addSubview:cancelButton];
+
+    UILabel *stepLabel = [[UILabel alloc] initWithFrame:CGRectMake(controlWidth - 150, 92, 138, 34)];
+    stepLabel.text = @"微调 1px\n拖动可粗调";
+    stepLabel.textColor = [UIColor colorWithWhite:1 alpha:0.72];
+    stepLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+    stepLabel.textAlignment = NSTextAlignmentCenter;
+    stepLabel.numberOfLines = 2;
+    [controlPanel addSubview:stepLabel];
+
+    CGFloat cursorSize = 58.0;
+    UIView *cursor = [[UIView alloc] initWithFrame:CGRectMake(0, 0, cursorSize, cursorSize)];
+    cursor.backgroundColor = UIColor.clearColor;
+    cursor.layer.cornerRadius = cursorSize * 0.5;
+    cursor.layer.borderWidth = 2.0;
+    cursor.layer.borderColor = UIColor.systemYellowColor.CGColor;
+    cursor.userInteractionEnabled = YES;
+    UIView *horizontal = [[UIView alloc] initWithFrame:CGRectMake(4, cursorSize * 0.5 - 1, cursorSize - 8, 2)];
+    horizontal.backgroundColor = UIColor.systemYellowColor;
+    horizontal.userInteractionEnabled = NO;
+    [cursor addSubview:horizontal];
+    UIView *vertical = [[UIView alloc] initWithFrame:CGRectMake(cursorSize * 0.5 - 1, 4, 2, cursorSize - 8)];
+    vertical.backgroundColor = UIColor.systemYellowColor;
+    vertical.userInteractionEnabled = NO;
+    [cursor addSubview:vertical];
+    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(cursorSize * 0.5 - 3, cursorSize * 0.5 - 3, 6, 6)];
+    dot.backgroundColor = UIColor.systemRedColor;
+    dot.layer.cornerRadius = 3;
+    dot.userInteractionEnabled = NO;
+    [cursor addSubview:dot];
+    UIPanGestureRecognizer *cursorPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointCursorPan:)];
+    [cursor addGestureRecognizer:cursorPan];
+    [overlay addSubview:cursor];
+    _pointCursorView = cursor;
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingTap:)];
     [overlay addGestureRecognizer:tap];
 
     [_pointPickWindow.rootViewController.view addSubview:overlay];
     _pointPickOverlay = overlay;
+    _pendingPointPickPoint = [self initialPointPickPointInOverlay:overlay];
+    _hasPendingPointPickPoint = YES;
+    [self updatePointPickCursor];
     _pointPickWindow.hidden = NO;
-    _statusLabel.text = @"等待取点";
+    _statusLabel.text = @"移动准星后确认";
+}
+
+- (UIButton *)pointNudgeButtonWithTitle:(NSString *)title tag:(NSInteger)tag {
+    UIButton *button = [self overlayButtonWithTitle:title action:@selector(nudgePointPicking:)];
+    button.tag = tag;
+    button.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
+    return button;
+}
+
+- (CGPoint)initialPointPickPointInOverlay:(UIView *)overlay {
+    if (_actionMode == AnClickActionModeSwipe && _hasManualSwipeAnchor) {
+        return [self clampedPointPickPoint:_manualSwipeAnchor inOverlay:overlay];
+    }
+    if (_actionMode <= AnClickActionModeLongPress && [self hasManualPointForMode:_actionMode]) {
+        return [self clampedPointPickPoint:_manualActionPoints[(NSUInteger)_actionMode] inOverlay:overlay];
+    }
+    return CGPointMake(CGRectGetMidX(overlay.bounds), CGRectGetMidY(overlay.bounds));
+}
+
+- (CGPoint)clampedPointPickPoint:(CGPoint)point inOverlay:(UIView *)overlay {
+    CGFloat margin = 6.0;
+    point.x = MIN(MAX(point.x, margin), overlay.bounds.size.width - margin);
+    point.y = MIN(MAX(point.y, margin), overlay.bounds.size.height - margin);
+    return point;
+}
+
+- (void)updatePointPickCursor {
+    if (!_pointPickOverlay || !_pointCursorView || !_hasPendingPointPickPoint) {
+        return;
+    }
+    _pendingPointPickPoint = [self clampedPointPickPoint:_pendingPointPickPoint inOverlay:_pointPickOverlay];
+    _pointCursorView.center = _pendingPointPickPoint;
+    _pointCoordinateLabel.text = [NSString stringWithFormat:@"X %.0f   Y %.0f", _pendingPointPickPoint.x, _pendingPointPickPoint.y];
 }
 
 - (void)cancelPointPicking {
     [_pointPickOverlay removeFromSuperview];
     _pointPickOverlay = nil;
+    _pointCursorView = nil;
+    _pointCoordinateLabel = nil;
+    _hasPendingPointPickPoint = NO;
     _pointPickWindow.hidden = YES;
     _pointPickWindow = nil;
     _statusLabel.text = @"取消取点";
@@ -788,16 +917,63 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     if (recognizer.state != UIGestureRecognizerStateEnded) {
         return;
     }
+    UIView *hitView = [_pointPickOverlay hitTest:[recognizer locationInView:_pointPickOverlay] withEvent:nil];
+    if ([hitView isKindOfClass:UIControl.class] || [hitView.superview isKindOfClass:UIControl.class]) {
+        return;
+    }
+    _pendingPointPickPoint = [self clampedPointPickPoint:[recognizer locationInView:_pointPickOverlay] inOverlay:_pointPickOverlay];
+    _hasPendingPointPickPoint = YES;
+    [self updatePointPickCursor];
+}
 
+- (void)handlePointCursorPan:(UIPanGestureRecognizer *)recognizer {
+    if (!_pointPickOverlay) {
+        return;
+    }
+    CGPoint translation = [recognizer translationInView:_pointPickOverlay];
+    _pendingPointPickPoint = [self clampedPointPickPoint:CGPointMake(_pendingPointPickPoint.x + translation.x,
+                                                                     _pendingPointPickPoint.y + translation.y)
+                                              inOverlay:_pointPickOverlay];
+    _hasPendingPointPickPoint = YES;
+    [self updatePointPickCursor];
+    [recognizer setTranslation:CGPointZero inView:_pointPickOverlay];
+}
+
+- (void)nudgePointPicking:(UIButton *)sender {
+    if (!_pointPickOverlay) {
+        return;
+    }
+    CGFloat dx = 0;
+    CGFloat dy = 0;
+    if (sender.tag == 1) {
+        dy = -1;
+    } else if (sender.tag == 2) {
+        dx = -1;
+    } else if (sender.tag == 3) {
+        dx = 1;
+    } else if (sender.tag == 4) {
+        dy = 1;
+    }
+    _pendingPointPickPoint = [self clampedPointPickPoint:CGPointMake(_pendingPointPickPoint.x + dx,
+                                                                     _pendingPointPickPoint.y + dy)
+                                              inOverlay:_pointPickOverlay];
+    _hasPendingPointPickPoint = YES;
+    [self updatePointPickCursor];
+}
+
+- (void)confirmPointPicking {
     UIWindow *hostWindow = [self hostWindow];
-    if (!hostWindow) {
+    if (!hostWindow || !_hasPendingPointPickPoint) {
         [self cancelPointPicking];
         return;
     }
 
-    CGPoint screenPoint = [recognizer locationInView:_pointPickOverlay];
+    CGPoint screenPoint = _pendingPointPickPoint;
     [_pointPickOverlay removeFromSuperview];
     _pointPickOverlay = nil;
+    _pointCursorView = nil;
+    _pointCoordinateLabel = nil;
+    _hasPendingPointPickPoint = NO;
     _pointPickWindow.hidden = YES;
     _pointPickWindow = nil;
 
@@ -898,7 +1074,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [recorder stopRecording];
         _recordedMacroEvents = [recorder serializedEvents];
         [_recordSwipeButton setTitle:@"录制" forState:UIControlStateNormal];
-        _recordSwipeButton.backgroundColor = [UIColor colorWithRed:0.10 green:0.34 blue:0.56 alpha:1.0];
+        _recordSwipeButton.backgroundColor = [UIColor colorWithRed:0.16 green:0.20 blue:0.25 alpha:1.0];
         _statusLabel.text = [NSString stringWithFormat:@"已录 %lu步", (unsigned long)_recordedMacroEvents.count];
         return;
     }

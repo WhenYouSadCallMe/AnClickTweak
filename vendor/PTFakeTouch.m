@@ -557,6 +557,18 @@ static void AnClickSetEventWithTouches(UIEvent *event, NSArray<UITouch *> *touch
     return 0;
 }
 
++ (void)cancelAllActiveTouches {
+    for (NSInteger i = 0; i < (NSInteger)AnClickTouches.count; i++) {
+        UITouch *touch = AnClickTouches[(NSUInteger)i];
+        if (!touch.window || touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled) {
+            continue;
+        }
+        CGPoint windowPoint = [touch locationInView:touch.window];
+        CGPoint screenPoint = [touch.window convertPoint:windowPoint toWindow:nil];
+        [self fakeTouchId:i + 1 AtPoint:screenPoint withTouchPhase:UITouchPhaseCancelled];
+    }
+}
+
 + (NSInteger)fakeTouchId:(NSInteger)pointId AtPoint:(CGPoint)point WithType:(PTFakeTouchEvent)type {
     UITouchPhase phase = UITouchPhaseBegan;
     switch (type) {
