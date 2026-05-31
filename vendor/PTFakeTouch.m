@@ -78,6 +78,7 @@ enum {
     kIOHIDDigitizerEventStop = 0x00000008,
     kIOHIDDigitizerEventIdentity = 0x00000020,
     kIOHIDDigitizerEventAttribute = 0x00000040,
+    kIOHIDDigitizerEventCancel = 0x00000080,
     kIOHIDDigitizerEventStart = 0x00000100,
 };
 
@@ -310,11 +311,14 @@ static IOHIDEventRef AnClickIOHIDEventWithTouches(NSArray<UITouch *> *touches) {
     IOHIDEventSetSenderID(handEvent, 0x8000000817319373ULL);
 
     for (UITouch *touch in touches) {
-        if (touch.phase == UITouchPhaseCancelled || (touch.phase == UITouchPhaseEnded && !touch.window)) {
+        if (touch.phase == UITouchPhaseCancelled && !touch.window) {
+            continue;
+        }
+        if (touch.phase == UITouchPhaseEnded && !touch.window) {
             continue;
         }
 
-        BOOL touching = touch.phase != UITouchPhaseEnded;
+        BOOL touching = touch.phase != UITouchPhaseEnded && touch.phase != UITouchPhaseCancelled;
         uint32_t eventMask = kIOHIDDigitizerEventPosition |
                              kIOHIDDigitizerEventIdentity;
         if (touch.phase == UITouchPhaseBegan) {
@@ -326,6 +330,12 @@ static IOHIDEventRef AnClickIOHIDEventWithTouches(NSArray<UITouch *> *touches) {
             eventMask |= kIOHIDDigitizerEventRange |
                          kIOHIDDigitizerEventTouch |
                          kIOHIDDigitizerEventAttribute |
+                         kIOHIDDigitizerEventStop;
+        } else if (touch.phase == UITouchPhaseCancelled) {
+            eventMask |= kIOHIDDigitizerEventRange |
+                         kIOHIDDigitizerEventTouch |
+                         kIOHIDDigitizerEventAttribute |
+                         kIOHIDDigitizerEventCancel |
                          kIOHIDDigitizerEventStop;
         }
         CGPoint location = [touch locationInView:touch.window];
@@ -370,6 +380,12 @@ static IOHIDEventRef AnClickCreateScreenHIDEvent(CGPoint screenPoint, NSInteger 
         eventMask |= kIOHIDDigitizerEventRange |
                      kIOHIDDigitizerEventTouch |
                      kIOHIDDigitizerEventAttribute |
+                     kIOHIDDigitizerEventStop;
+    } else if (phase == UITouchPhaseCancelled) {
+        eventMask |= kIOHIDDigitizerEventRange |
+                     kIOHIDDigitizerEventTouch |
+                     kIOHIDDigitizerEventAttribute |
+                     kIOHIDDigitizerEventCancel |
                      kIOHIDDigitizerEventStop;
     }
 

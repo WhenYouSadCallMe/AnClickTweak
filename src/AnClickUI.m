@@ -22,6 +22,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration;
 + (void)beginHoldAtPoint:(CGPoint)point;
 + (void)endHold;
++ (void)cancelHold;
 + (BOOL)isHolding;
 + (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration;
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events;
@@ -882,7 +883,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
 
     if (_actionMode == AnClickActionModeLongPress && (_longPressHolding || [AnClickFakeTouch isHolding])) {
-        [AnClickFakeTouch endHold];
+        [AnClickFakeTouch cancelHold];
         _longPressHolding = NO;
     }
 

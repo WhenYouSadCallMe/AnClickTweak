@@ -9,6 +9,7 @@
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration;
 + (void)beginHoldAtPoint:(CGPoint)point;
 + (void)endHold;
++ (void)cancelHold;
 + (BOOL)isHolding;
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end;
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end duration:(NSTimeInterval)duration steps:(NSUInteger)steps;
@@ -17,6 +18,7 @@
 + (void)touchDownAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
 + (void)touchMoveAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
 + (void)touchStationaryAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
++ (void)touchCancelAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
 + (void)touchUpAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
 @end
 
@@ -53,7 +55,7 @@ static NSUInteger AnClickHoldGeneration = 0;
     NSUInteger generation = AnClickHoldGeneration;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (AnClickHolding && generation == AnClickHoldGeneration) {
-            [self endHold];
+            [self cancelHold];
         }
     });
 }
@@ -67,7 +69,7 @@ static NSUInteger AnClickHoldGeneration = 0;
     }
 
     if (AnClickHolding) {
-        [self endHold];
+        [self cancelHold];
     }
 
     AnClickHolding = YES;
@@ -112,6 +114,26 @@ static NSUInteger AnClickHoldGeneration = 0;
         AnClickHoldTimer = nil;
     }
     [self touchUpAtPoint:AnClickHoldPoint touchId:AnClickHoldTouchId];
+    AnClickHolding = NO;
+}
+
++ (void)cancelHold {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self cancelHold];
+        });
+        return;
+    }
+
+    if (!AnClickHolding) {
+        return;
+    }
+
+    if (AnClickHoldTimer) {
+        dispatch_source_cancel(AnClickHoldTimer);
+        AnClickHoldTimer = nil;
+    }
+    [self touchCancelAtPoint:AnClickHoldPoint touchId:AnClickHoldTouchId];
     AnClickHolding = NO;
 }
 
@@ -292,6 +314,10 @@ static NSUInteger AnClickHoldGeneration = 0;
 
 + (void)touchStationaryAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
     [PTFakeTouch fakeTouchId:touchId AtPoint:point WithType:PTFakeTouchEventTouchStationary];
+}
+
++ (void)touchCancelAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
+    [PTFakeTouch fakeTouchId:touchId AtPoint:point WithType:PTFakeTouchEventTouchCancel];
 }
 
 + (void)touchUpAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
