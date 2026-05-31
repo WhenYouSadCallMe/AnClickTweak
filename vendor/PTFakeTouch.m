@@ -1,6 +1,7 @@
 #import "../include/PTFakeTouch.h"
 #import <dlfcn.h>
 #import <mach/mach_time.h>
+#import <objc/runtime.h>
 
 typedef struct __IOHIDEvent *IOHIDEventRef;
 typedef struct __GSEvent *GSEventRef;
@@ -143,6 +144,8 @@ enum {
 - (void)anclick_setLocationInWindow:(CGPoint)location;
 - (void)anclick_setPhaseAndUpdateTimestamp:(UITouchPhase)phase;
 - (void)anclick_disableTapInterpretation;
+- (void)anclick_setIdentity:(uint32_t)identity;
+- (uint32_t)anclick_identity;
 - (void)anclick_setHIDEvent;
 @end
 
@@ -199,6 +202,15 @@ enum {
     }
 }
 
+- (void)anclick_setIdentity:(uint32_t)identity {
+    objc_setAssociatedObject(self, @selector(anclick_identity), @(identity), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+- (uint32_t)anclick_identity {
+    NSNumber *identity = objc_getAssociatedObject(self, @selector(anclick_identity));
+    return identity ? identity.unsignedIntValue : 0;
+}
+
 - (void)anclick_setHIDEvent {
     IOHIDEventRef event = AnClickIOHIDEventWithTouches(@[self]);
     [self _setHidEvent:event];
@@ -209,6 +221,7 @@ enum {
 
 static NSMutableArray<UITouch *> *AnClickTouches;
 static IOHIDEventSystemClientRef AnClickHIDClient;
+static uint32_t AnClickNextTouchIdentity = 1000;
 
 typedef void (*AnClickBKSHIDEventSetDigitizerInfoFunction)(IOHIDEventRef event,
                                                            uint32_t contextID,
@@ -280,6 +293,20 @@ static uint32_t AnClickContextIDForWindow(UIWindow *window) {
     return (uint32_t)[window _contextId];
 }
 
+static uint32_t AnClickNewTouchIdentity(void) {
+    AnClickNextTouchIdentity++;
+    if (AnClickNextTouchIdentity > 65000) {
+        AnClickNextTouchIdentity = 1001;
+    }
+    return AnClickNextTouchIdentity;
+}
+
+static UITouch *AnClickEndedPlaceholderTouch(void) {
+    UITouch *touch = [[UITouch alloc] init];
+    [touch setPhase:UITouchPhaseEnded];
+    return touch;
+}
+
 static void AnClickPrepareHIDEventForWindow(IOHIDEventRef event, UIWindow *window) {
     if (!event) {
         return;
@@ -308,14 +335,16 @@ static uint32_t AnClickDigitizerEventMaskForPhase(UITouchPhase phase) {
                kIOHIDDigitizerEventIdentity;
     }
     if (phase == UITouchPhaseEnded) {
-        return kIOHIDDigitizerEventIdentity |
+        return kIOHIDDigitizerEventPosition |
+               kIOHIDDigitizerEventIdentity |
                kIOHIDDigitizerEventRange |
                kIOHIDDigitizerEventTouch |
                kIOHIDDigitizerEventAttribute |
                kIOHIDDigitizerEventStop;
     }
     if (phase == UITouchPhaseCancelled) {
-        return kIOHIDDigitizerEventIdentity |
+        return kIOHIDDigitizerEventPosition |
+               kIOHIDDigitizerEventIdentity |
                kIOHIDDigitizerEventRange |
                kIOHIDDigitizerEventTouch |
                kIOHIDDigitizerEventAttribute |
@@ -358,12 +387,13 @@ static IOHIDEventRef AnClickIOHIDEventWithTouches(NSArray<UITouch *> *touches) {
 
         BOOL touching = touch.phase != UITouchPhaseEnded && touch.phase != UITouchPhaseCancelled;
         uint32_t eventMask = AnClickDigitizerEventMaskForPhase(touch.phase);
+        uint32_t identity = [touch anclick_identity] ?: 2;
         CGPoint location = [touch locationInView:touch.window];
 
         IOHIDEventRef fingerEvent = IOHIDEventCreateDigitizerFingerEventWithQuality(kCFAllocatorDefault,
                                                                                     timeStamp,
                                                                                     (uint32_t)[touches indexOfObject:touch] + 1,
-                                                                                    2,
+                                                                                    identity,
                                                                                     eventMask,
                                                                                     (IOHIDFloat)location.x,
                                                                                     (IOHIDFloat)location.y,
@@ -513,16 +543,14 @@ static void AnClickSetEventWithTouches(UIEvent *event, NSArray<UITouch *> *touch
 + (void)load {
     AnClickTouches = [NSMutableArray arrayWithCapacity:100];
     for (NSInteger i = 0; i < 100; i++) {
-        UITouch *touch = [[UITouch alloc] init];
-        [touch setPhase:UITouchPhaseEnded];
-        [AnClickTouches addObject:touch];
+        [AnClickTouches addObject:AnClickEndedPlaceholderTouch()];
     }
 }
 
 + (NSInteger)getAvailablePointId {
     for (NSInteger i = 0; i < MIN((NSInteger)AnClickTouches.count, 50); i++) {
         UITouch *touch = AnClickTouches[(NSUInteger)i];
-        if (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseStationary || touch.phase == UITouchPhaseCancelled) {
+        if (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled) {
             return i + 1;
         }
     }
@@ -574,7 +602,8 @@ static void AnClickSetEventWithTouches(UIEvent *event, NSArray<UITouch *> *touch
     }
 
     UITouch *touch = AnClickTouches[index];
-    if (phase == UITouchPhaseBegan || touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled) {
+    BOOL inactiveSlot = touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled || !touch.window;
+    if (phase == UITouchPhaseBegan) {
         UIWindow *window = AnClickWindowForPoint(point);
         if (!window) {
             NSLog(@"[AnClick] PTFakeTouch no target window at %.1f, %.1f", point.x, point.y);
@@ -582,20 +611,33 @@ static void AnClickSetEventWithTouches(UIEvent *event, NSArray<UITouch *> *touch
         }
         CGPoint windowPoint = [window convertPoint:point fromWindow:nil];
         touch = [[UITouch alloc] initAnClickAtPoint:windowPoint inWindow:window];
+        [touch anclick_setIdentity:AnClickNewTouchIdentity()];
+        if ([touch respondsToSelector:@selector(_setHidEvent:)]) {
+            [touch anclick_setHIDEvent];
+        }
         AnClickTouches[index] = touch;
+    } else if (inactiveSlot) {
+        NSLog(@"[AnClick] PTFakeTouch dropped stale phase=%ld slot=%ld screen=(%.1f, %.1f)",
+              (long)phase,
+              (long)pointId,
+              point.x,
+              point.y);
+        return pointId;
     } else {
         CGPoint windowPoint = [touch.window convertPoint:point fromWindow:nil];
         [touch anclick_setLocationInWindow:windowPoint];
         [touch anclick_setPhaseAndUpdateTimestamp:phase];
     }
 
+    uint32_t identity = [touch anclick_identity] ?: (uint32_t)MAX(1, pointId);
+    UIWindow *eventWindow = touch.window;
     UIEvent *event = [UIApplication.sharedApplication respondsToSelector:@selector(_touchesEvent)]
         ? [UIApplication.sharedApplication _touchesEvent]
         : [[UIEvent alloc] init];
     AnClickSetEventWithTouches(event, @[touch]);
     [UIApplication.sharedApplication sendEvent:event];
-    AnClickEnqueueApplicationHIDTouch(point, pointId, phase, touch.window);
-    AnClickDispatchSystemTouch(point, pointId, phase, touch.window);
+    AnClickEnqueueApplicationHIDTouch(point, identity, phase, eventWindow);
+    AnClickDispatchSystemTouch(point, identity, phase, eventWindow);
 
     if (phase != UITouchPhaseStationary) {
         NSString *phaseName = @"ended";
@@ -606,17 +648,22 @@ static void AnClickSetEventWithTouches(UIEvent *event, NSArray<UITouch *> *touch
         } else if (phase == UITouchPhaseCancelled) {
             phaseName = @"cancelled";
         }
-        NSLog(@"[AnClick] PTFakeTouch %@ id=%ld screen=(%.1f, %.1f) context=%u window=%@",
+        NSLog(@"[AnClick] PTFakeTouch %@ slot=%ld identity=%u screen=(%.1f, %.1f) context=%u window=%@",
               phaseName,
               (long)pointId,
+              identity,
               point.x,
               point.y,
-              AnClickContextIDForWindow(touch.window),
-              touch.window);
+              AnClickContextIDForWindow(eventWindow),
+              eventWindow);
     }
 
     if (touch.phase == UITouchPhaseBegan || touch.phase == UITouchPhaseMoved) {
         [touch anclick_setPhaseAndUpdateTimestamp:UITouchPhaseStationary];
+    }
+
+    if (phase == UITouchPhaseEnded || phase == UITouchPhaseCancelled) {
+        AnClickTouches[index] = AnClickEndedPlaceholderTouch();
     }
 
     return pointId;

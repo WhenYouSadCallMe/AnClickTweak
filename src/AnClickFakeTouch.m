@@ -25,6 +25,7 @@
 @implementation AnClickFakeTouch
 
 static NSInteger AnClickHoldTouchId = 8;
+static NSInteger AnClickNextHoldTouchId = 20;
 static BOOL AnClickHolding = NO;
 static CGPoint AnClickHoldPoint = {0, 0};
 static dispatch_source_t AnClickHoldTimer = nil;
@@ -74,6 +75,10 @@ static NSUInteger AnClickHoldGeneration = 0;
 
     AnClickHolding = YES;
     AnClickHoldPoint = point;
+    AnClickHoldTouchId = AnClickNextHoldTouchId++;
+    if (AnClickNextHoldTouchId > 90) {
+        AnClickNextHoldTouchId = 20;
+    }
     AnClickHoldGeneration++;
     [self touchDownAtPoint:point touchId:AnClickHoldTouchId];
 
@@ -107,8 +112,11 @@ static NSUInteger AnClickHoldGeneration = 0;
         dispatch_source_cancel(AnClickHoldTimer);
         AnClickHoldTimer = nil;
     }
-    [self touchUpAtPoint:AnClickHoldPoint touchId:AnClickHoldTouchId];
+    CGPoint point = AnClickHoldPoint;
+    NSInteger touchId = AnClickHoldTouchId;
     AnClickHolding = NO;
+    AnClickHoldGeneration++;
+    [self touchUpAtPoint:point touchId:touchId];
 }
 
 + (void)cancelHold {
@@ -127,8 +135,11 @@ static NSUInteger AnClickHoldGeneration = 0;
         dispatch_source_cancel(AnClickHoldTimer);
         AnClickHoldTimer = nil;
     }
-    [self touchCancelAtPoint:AnClickHoldPoint touchId:AnClickHoldTouchId];
+    CGPoint point = AnClickHoldPoint;
+    NSInteger touchId = AnClickHoldTouchId;
     AnClickHolding = NO;
+    AnClickHoldGeneration++;
+    [self touchCancelAtPoint:point touchId:touchId];
 }
 
 + (BOOL)isHolding {
