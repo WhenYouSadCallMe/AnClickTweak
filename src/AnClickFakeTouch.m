@@ -64,7 +64,7 @@ static const NSTimeInterval AnClickHoldTickInterval = 0.02;
     NSUInteger generation = AnClickHoldGeneration;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (AnClickHolding && generation == AnClickHoldGeneration) {
-            [self cancelHold];
+            [self endHold];
         }
     });
 }
@@ -131,8 +131,9 @@ static const NSTimeInterval AnClickHoldTickInterval = 0.02;
     NSInteger touchId = AnClickHoldTouchId;
     AnClickHolding = NO;
     AnClickHoldGeneration++;
-    [self touchMoveAtPoint:CGPointMake(point.x + AnClickHoldJitter, point.y + AnClickHoldJitter) touchId:touchId];
-    [self touchUpAtPoint:point touchId:touchId];
+    CGPoint releasePoint = [self cancelPointAwayFromPoint:point];
+    [self touchMoveAtPoint:releasePoint touchId:touchId];
+    [self touchUpAtPoint:releasePoint touchId:touchId];
 }
 
 + (void)cancelHold {
