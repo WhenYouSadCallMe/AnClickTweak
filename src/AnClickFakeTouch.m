@@ -24,12 +24,13 @@
 
 @implementation AnClickFakeTouch
 
-static NSInteger AnClickHoldTouchId = 8;
+static NSInteger AnClickHoldTouchId = 0;
 static BOOL AnClickHolding = NO;
 static CGPoint AnClickHoldPoint = {0, 0};
 static dispatch_source_t AnClickHoldTimer = nil;
 static NSUInteger AnClickHoldGeneration = 0;
-static const CGFloat AnClickHoldJitter = 1.2;
+static const CGFloat AnClickHoldJitter = 0.5;
+static const NSTimeInterval AnClickHoldTickInterval = 0.02;
 
 + (void)tapAtPoint:(CGPoint)point {
     NSInteger touchId = 1;
@@ -56,7 +57,7 @@ static const CGFloat AnClickHoldJitter = 1.2;
     NSUInteger generation = AnClickHoldGeneration;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (AnClickHolding && generation == AnClickHoldGeneration) {
-            [self cancelHold];
+            [self endHold];
         }
     });
 }
@@ -76,6 +77,10 @@ static const CGFloat AnClickHoldJitter = 1.2;
 
     AnClickHolding = YES;
     AnClickHoldPoint = point;
+    AnClickHoldTouchId = [PTFakeTouch getAvailablePointId];
+    if (AnClickHoldTouchId <= 0) {
+        AnClickHoldTouchId = 8;
+    }
     AnClickHoldGeneration++;
     NSUInteger generation = AnClickHoldGeneration;
     NSInteger touchId = AnClickHoldTouchId;
@@ -85,9 +90,9 @@ static const CGFloat AnClickHoldJitter = 1.2;
 
     AnClickHoldTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
     dispatch_source_set_timer(AnClickHoldTimer,
-                              dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)),
-                              (uint64_t)(0.05 * NSEC_PER_SEC),
-                              (uint64_t)(0.005 * NSEC_PER_SEC));
+                              dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickHoldTickInterval * NSEC_PER_SEC)),
+                              (uint64_t)(AnClickHoldTickInterval * NSEC_PER_SEC),
+                              (uint64_t)(0.002 * NSEC_PER_SEC));
     dispatch_source_set_event_handler(AnClickHoldTimer, ^{
         if (!AnClickHolding || generation != AnClickHoldGeneration) {
             return;
@@ -119,6 +124,7 @@ static const CGFloat AnClickHoldJitter = 1.2;
     NSInteger touchId = AnClickHoldTouchId;
     AnClickHolding = NO;
     AnClickHoldGeneration++;
+    [self touchMoveAtPoint:CGPointMake(point.x + AnClickHoldJitter, point.y + AnClickHoldJitter) touchId:touchId];
     [self touchUpAtPoint:point touchId:touchId];
 }
 
@@ -278,14 +284,11 @@ static const CGFloat AnClickHoldJitter = 1.2;
     __block NSTimeInterval lastTimestamp = 0;
     BOOL touchIsDown = NO;
     BOOL gestureActive = NO;
-    CGPoint gestureStartPoint = CGPointZero;
-    NSTimeInterval gestureStartTimestamp = 0;
-    CGFloat maxGestureDistance = 0;
     NSTimeInterval previousTimestamp = 0;
     CGPoint previousPoint = CGPointZero;
     NSInteger previousType = -1;
     BOOL jitterRight = NO;
-    NSTimeInterval keepAliveInterval = 0.05;
+    NSTimeInterval keepAliveInterval = AnClickHoldTickInterval;
 
     for (NSDictionary *event in events) {
         NSNumber *typeNumber = event[@"type"];
@@ -317,20 +320,11 @@ static const CGFloat AnClickHoldJitter = 1.2;
             sawEnded = YES;
         }
 
-        BOOL cancelRecordedEnd = NO;
         if (type == 0) {
             touchIsDown = YES;
             gestureActive = YES;
-            gestureStartPoint = point;
-            gestureStartTimestamp = timestamp;
-            maxGestureDistance = 0;
         } else if (gestureActive) {
-            CGFloat dx = point.x - gestureStartPoint.x;
-            CGFloat dy = point.y - gestureStartPoint.y;
-            maxGestureDistance = MAX(maxGestureDistance, sqrt(dx * dx + dy * dy));
             if (type == 2) {
-                NSTimeInterval heldDuration = MAX(0, timestamp - gestureStartTimestamp);
-                cancelRecordedEnd = (heldDuration >= 0.5 && maxGestureDistance <= 12.0);
                 touchIsDown = NO;
                 gestureActive = NO;
             } else if (type == 3) {
@@ -344,7 +338,7 @@ static const CGFloat AnClickHoldJitter = 1.2;
                 [self touchDownAtPoint:point touchId:touchId];
             } else if (type == 1) {
                 [self touchMoveAtPoint:point touchId:touchId];
-            } else if (type == 3 || cancelRecordedEnd) {
+            } else if (type == 3) {
                 [self touchCancelAtPoint:point touchId:touchId];
             } else {
                 [self touchUpAtPoint:point touchId:touchId];
