@@ -29,8 +29,8 @@ static BOOL AnClickHolding = NO;
 static CGPoint AnClickHoldPoint = {0, 0};
 static dispatch_source_t AnClickHoldTimer = nil;
 static NSUInteger AnClickHoldGeneration = 0;
-static const CGFloat AnClickHoldJitter = 0.5;
-static const NSTimeInterval AnClickHoldTickInterval = 0.02;
+static const CGFloat AnClickHoldJitter = 0.75;
+static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
 
 + (void)tapAtPoint:(CGPoint)point {
     NSInteger touchId = 1;
@@ -56,6 +56,58 @@ static const NSTimeInterval AnClickHoldTickInterval = 0.02;
     CGFloat x = point.x < CGRectGetMidX(bounds) ? CGRectGetMaxX(bounds) + 120.0 : CGRectGetMinX(bounds) - 120.0;
     CGFloat y = point.y < CGRectGetMidY(bounds) ? CGRectGetMaxY(bounds) + 120.0 : CGRectGetMinY(bounds) - 120.0;
     return CGPointMake(x, y);
+}
+
++ (CGPoint)releasePointAwayFromPoint:(CGPoint)point {
+    CGRect bounds = UIScreen.mainScreen.bounds;
+    CGFloat inset = 8.0;
+    CGFloat distance = 96.0;
+    CGFloat dx = point.x < CGRectGetMidX(bounds) ? distance : -distance;
+    CGFloat dy = point.y < CGRectGetMidY(bounds) ? distance : -distance;
+    CGPoint releasePoint = CGPointMake(point.x + dx, point.y + dy);
+    releasePoint.x = MIN(MAX(releasePoint.x, CGRectGetMinX(bounds) + inset), CGRectGetMaxX(bounds) - inset);
+    releasePoint.y = MIN(MAX(releasePoint.y, CGRectGetMinY(bounds) + inset), CGRectGetMaxY(bounds) - inset);
+
+    CGFloat movedX = releasePoint.x - point.x;
+    CGFloat movedY = releasePoint.y - point.y;
+    if (sqrt(movedX * movedX + movedY * movedY) >= 48.0) {
+        return releasePoint;
+    }
+
+    CGPoint candidates[] = {
+        CGPointMake(CGRectGetMinX(bounds) + inset, CGRectGetMinY(bounds) + inset),
+        CGPointMake(CGRectGetMaxX(bounds) - inset, CGRectGetMinY(bounds) + inset),
+        CGPointMake(CGRectGetMinX(bounds) + inset, CGRectGetMaxY(bounds) - inset),
+        CGPointMake(CGRectGetMaxX(bounds) - inset, CGRectGetMaxY(bounds) - inset),
+    };
+    CGPoint bestPoint = releasePoint;
+    CGFloat bestDistance = 0;
+    for (NSUInteger i = 0; i < 4; i++) {
+        CGFloat candidateX = candidates[i].x - point.x;
+        CGFloat candidateY = candidates[i].y - point.y;
+        CGFloat candidateDistance = sqrt(candidateX * candidateX + candidateY * candidateY);
+        if (candidateDistance > bestDistance) {
+            bestDistance = candidateDistance;
+            bestPoint = candidates[i];
+        }
+    }
+    return bestPoint;
+}
+
++ (void)releaseTouchId:(NSInteger)touchId fromPoint:(CGPoint)startPoint toPoint:(CGPoint)releasePoint {
+    NSUInteger steps = 6;
+    NSTimeInterval stepInterval = 0.012;
+    for (NSUInteger i = 1; i <= steps; i++) {
+        CGFloat progress = (CGFloat)i / (CGFloat)steps;
+        CGPoint point = CGPointMake(startPoint.x + (releasePoint.x - startPoint.x) * progress,
+                                    startPoint.y + (releasePoint.y - startPoint.y) * progress);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(stepInterval * i * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self touchMoveAtPoint:point touchId:touchId];
+        });
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(stepInterval * (steps + 1) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self touchUpAtPoint:releasePoint touchId:touchId];
+    });
 }
 
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration {
@@ -106,7 +158,8 @@ static const NSTimeInterval AnClickHoldTickInterval = 0.02;
         }
         jitterRight = !jitterRight;
         CGFloat dx = jitterRight ? AnClickHoldJitter : -AnClickHoldJitter;
-        [self touchMoveAtPoint:CGPointMake(holdPoint.x + dx, holdPoint.y) touchId:touchId];
+        CGFloat dy = jitterRight ? -AnClickHoldJitter : AnClickHoldJitter;
+        [self touchMoveAtPoint:CGPointMake(holdPoint.x + dx, holdPoint.y + dy) touchId:touchId];
     });
     dispatch_resume(AnClickHoldTimer);
 }
@@ -131,9 +184,8 @@ static const NSTimeInterval AnClickHoldTickInterval = 0.02;
     NSInteger touchId = AnClickHoldTouchId;
     AnClickHolding = NO;
     AnClickHoldGeneration++;
-    CGPoint releasePoint = [self cancelPointAwayFromPoint:point];
-    [self touchMoveAtPoint:releasePoint touchId:touchId];
-    [self touchUpAtPoint:releasePoint touchId:touchId];
+    CGPoint releasePoint = [self releasePointAwayFromPoint:point];
+    [self releaseTouchId:touchId fromPoint:point toPoint:releasePoint];
 }
 
 + (void)cancelHold {

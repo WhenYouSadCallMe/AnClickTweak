@@ -41,10 +41,16 @@ typedef NS_ENUM(NSInteger, AnClickRecordEventType) {
 @end
 
 static void (*original_sendEvent)(id self, SEL _cmd, UIEvent *event);
+static const NSTimeInterval AnClickRecordKeepAliveInterval = 1.0 / 60.0;
+static const CGFloat AnClickRecordKeepAliveJitter = 0.75;
 
 @implementation AnClickRecorder {
     NSMutableArray<AnClickRecordEvent *> *_events;
     NSTimeInterval _recordStartTime;
+    dispatch_source_t _keepAliveTimer;
+    BOOL _hasActiveTouch;
+    CGPoint _activeTouchPoint;
+    BOOL _jitterRight;
 }
 
 + (instancetype)shared {
@@ -88,15 +94,23 @@ static void (*original_sendEvent)(id self, SEL _cmd, UIEvent *event);
     @synchronized (self) {
         [_events removeAllObjects];
         _recordStartTime = CACurrentMediaTime();
+        _hasActiveTouch = NO;
+        _activeTouchPoint = CGPointZero;
+        _jitterRight = NO;
         self.recording = YES;
     }
+    [self startKeepAliveTimer];
 }
 
 - (NSArray<AnClickRecordEvent *> *)stopRecording {
+    NSArray<AnClickRecordEvent *> *recordedEvents = nil;
     @synchronized (self) {
         self.recording = NO;
-        return [_events copy];
+        _hasActiveTouch = NO;
+        recordedEvents = [_events copy];
     }
+    [self stopKeepAliveTimer];
+    return recordedEvents;
 }
 
 - (NSArray<AnClickRecordEvent *> *)events {
@@ -118,6 +132,55 @@ static void (*original_sendEvent)(id self, SEL _cmd, UIEvent *event);
         }];
     }
     return result;
+}
+
+- (void)startKeepAliveTimer {
+    [self stopKeepAliveTimer];
+    _keepAliveTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(_keepAliveTimer,
+                              dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickRecordKeepAliveInterval * NSEC_PER_SEC)),
+                              (uint64_t)(AnClickRecordKeepAliveInterval * NSEC_PER_SEC),
+                              (uint64_t)(0.002 * NSEC_PER_SEC));
+    __weak typeof(self) weakSelf = self;
+    dispatch_source_set_event_handler(_keepAliveTimer, ^{
+        [weakSelf appendKeepAliveRecordIfNeeded];
+    });
+    dispatch_resume(_keepAliveTimer);
+}
+
+- (void)stopKeepAliveTimer {
+    if (_keepAliveTimer) {
+        dispatch_source_cancel(_keepAliveTimer);
+        _keepAliveTimer = nil;
+    }
+}
+
+- (void)appendRecordType:(AnClickRecordEventType)type point:(CGPoint)point timestamp:(NSTimeInterval)timestamp {
+    AnClickRecordEvent *record = [[AnClickRecordEvent alloc] init];
+    record.type = type;
+    record.point = point;
+    record.timestamp = timestamp;
+    [_events addObject:record];
+}
+
+- (void)appendKeepAliveRecordIfNeeded {
+    @synchronized (self) {
+        if (!self.isRecording || !_hasActiveTouch) {
+            return;
+        }
+
+        NSTimeInterval timestamp = MAX(0, CACurrentMediaTime() - _recordStartTime);
+        AnClickRecordEvent *lastEvent = _events.lastObject;
+        if (lastEvent && timestamp - lastEvent.timestamp < AnClickRecordKeepAliveInterval * 0.5) {
+            return;
+        }
+
+        _jitterRight = !_jitterRight;
+        CGFloat dx = _jitterRight ? AnClickRecordKeepAliveJitter : -AnClickRecordKeepAliveJitter;
+        CGFloat dy = _jitterRight ? -AnClickRecordKeepAliveJitter : AnClickRecordKeepAliveJitter;
+        CGPoint keepAlivePoint = CGPointMake(_activeTouchPoint.x + dx, _activeTouchPoint.y + dy);
+        [self appendRecordType:AnClickRecordEventTypeMoved point:keepAlivePoint timestamp:timestamp];
+    }
 }
 
 - (void)handleEvent:(UIEvent *)event inWindow:(UIWindow *)window {
@@ -160,11 +223,16 @@ static void (*original_sendEvent)(id self, SEL _cmd, UIEvent *event);
                     continue;
             }
 
-            AnClickRecordEvent *record = [[AnClickRecordEvent alloc] init];
-            record.type = type;
-            record.point = [window convertPoint:[touch locationInView:window] toWindow:nil];
-            record.timestamp = MAX(0, CACurrentMediaTime() - _recordStartTime);
-            [_events addObject:record];
+            CGPoint point = [window convertPoint:[touch locationInView:window] toWindow:nil];
+            NSTimeInterval timestamp = MAX(0, CACurrentMediaTime() - _recordStartTime);
+            [self appendRecordType:type point:point timestamp:timestamp];
+
+            if (type == AnClickRecordEventTypeBegan || type == AnClickRecordEventTypeMoved) {
+                _hasActiveTouch = YES;
+                _activeTouchPoint = point;
+            } else {
+                _hasActiveTouch = NO;
+            }
         }
     }
 }

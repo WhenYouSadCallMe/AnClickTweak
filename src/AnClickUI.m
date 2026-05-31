@@ -770,34 +770,34 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     overlay.backgroundColor = UIColor.clearColor;
     overlay.userInteractionEnabled = YES;
 
-    CGFloat cursorSize = 58.0;
+    CGFloat cursorSize = 34.0;
     UIView *cursor = [[UIView alloc] initWithFrame:CGRectMake(0, 0, cursorSize, cursorSize)];
     cursor.backgroundColor = UIColor.clearColor;
     cursor.layer.cornerRadius = cursorSize * 0.5;
-    cursor.layer.borderWidth = 2.0;
+    cursor.layer.borderWidth = 1.5;
     cursor.layer.borderColor = UIColor.systemYellowColor.CGColor;
-    cursor.userInteractionEnabled = YES;
-    UIView *horizontal = [[UIView alloc] initWithFrame:CGRectMake(4, cursorSize * 0.5 - 1, cursorSize - 8, 2)];
+    cursor.userInteractionEnabled = NO;
+    UIView *horizontal = [[UIView alloc] initWithFrame:CGRectMake(6, cursorSize * 0.5 - 0.5, cursorSize - 12, 1)];
     horizontal.backgroundColor = UIColor.systemYellowColor;
     horizontal.userInteractionEnabled = NO;
     [cursor addSubview:horizontal];
-    UIView *vertical = [[UIView alloc] initWithFrame:CGRectMake(cursorSize * 0.5 - 1, 4, 2, cursorSize - 8)];
+    UIView *vertical = [[UIView alloc] initWithFrame:CGRectMake(cursorSize * 0.5 - 0.5, 6, 1, cursorSize - 12)];
     vertical.backgroundColor = UIColor.systemYellowColor;
     vertical.userInteractionEnabled = NO;
     [cursor addSubview:vertical];
-    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(cursorSize * 0.5 - 3, cursorSize * 0.5 - 3, 6, 6)];
+    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(cursorSize * 0.5 - 2, cursorSize * 0.5 - 2, 4, 4)];
     dot.backgroundColor = UIColor.systemRedColor;
-    dot.layer.cornerRadius = 3;
+    dot.layer.cornerRadius = 2;
     dot.userInteractionEnabled = NO;
     [cursor addSubview:dot];
-    UIPanGestureRecognizer *cursorPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointCursorPan:)];
-    [cursor addGestureRecognizer:cursorPan];
-    UITapGestureRecognizer *cursorTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(confirmPointPicking)];
-    [cursor addGestureRecognizer:cursorTap];
     [overlay addSubview:cursor];
     _pointCursorView = cursor;
 
+    UITapGestureRecognizer *confirmTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingDoubleTap:)];
+    confirmTap.numberOfTapsRequired = 2;
+    [overlay addGestureRecognizer:confirmTap];
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingTap:)];
+    [tap requireGestureRecognizerToFail:confirmTap];
     [overlay addGestureRecognizer:tap];
     UITapGestureRecognizer *cancelTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(cancelPointPicking)];
     cancelTap.numberOfTouchesRequired = 2;
@@ -811,7 +811,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _hasPendingPointPickPoint = YES;
     [self updatePointPickCursor];
     _pointPickWindow.hidden = NO;
-    _statusLabel.text = @"点准星确认";
+    _statusLabel.text = @"拖动取点 双击确定";
 }
 
 - (CGPoint)initialPointPickPointInOverlay:(UIView *)overlay {
@@ -856,22 +856,22 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     if (recognizer.state != UIGestureRecognizerStateEnded) {
         return;
     }
-    UIView *hitView = [_pointPickOverlay hitTest:[recognizer locationInView:_pointPickOverlay] withEvent:nil];
-    if (hitView == _pointCursorView || [hitView isDescendantOfView:_pointCursorView]) {
-        return;
-    }
     _pendingPointPickPoint = [self clampedPointPickPoint:[recognizer locationInView:_pointPickOverlay] inOverlay:_pointPickOverlay];
     _hasPendingPointPickPoint = YES;
     [self updatePointPickCursor];
 }
 
-- (void)handlePointPickingOverlayPan:(UIPanGestureRecognizer *)recognizer {
-    if (!_pointPickOverlay) {
+- (void)handlePointPickingDoubleTap:(UITapGestureRecognizer *)recognizer {
+    if (recognizer.state != UIGestureRecognizerStateEnded) {
         return;
     }
-    UIView *hitView = [_pointPickOverlay hitTest:[recognizer locationInView:_pointPickOverlay] withEvent:nil];
-    if (hitView == _pointCursorView ||
-        [hitView isDescendantOfView:_pointCursorView]) {
+    _pendingPointPickPoint = [self clampedPointPickPoint:[recognizer locationInView:_pointPickOverlay] inOverlay:_pointPickOverlay];
+    _hasPendingPointPickPoint = YES;
+    [self confirmPointPicking];
+}
+
+- (void)handlePointPickingOverlayPan:(UIPanGestureRecognizer *)recognizer {
+    if (!_pointPickOverlay) {
         return;
     }
     if (recognizer.state == UIGestureRecognizerStateBegan ||
