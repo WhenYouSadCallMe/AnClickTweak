@@ -30,7 +30,6 @@ static CGPoint AnClickHoldPoint = {0, 0};
 static dispatch_source_t AnClickHoldTimer = nil;
 static NSUInteger AnClickHoldGeneration = 0;
 static const CGFloat AnClickHoldJitter = 0.5;
-static const CGFloat AnClickLongPressReleaseOffset = 18.0;
 static const NSTimeInterval AnClickHoldTickInterval = 0.02;
 
 + (void)tapAtPoint:(CGPoint)point {
@@ -43,16 +42,6 @@ static const NSTimeInterval AnClickHoldTickInterval = 0.02;
         [self touchUpAtPoint:point touchId:touchId];
         [self triggerUIKitControlAtPoint:point];
     });
-}
-
-+ (CGPoint)longPressReleasePointForPoint:(CGPoint)point {
-    CGRect bounds = UIScreen.mainScreen.bounds;
-    CGFloat dx = (point.x + AnClickLongPressReleaseOffset <= CGRectGetMaxX(bounds)) ? AnClickLongPressReleaseOffset : -AnClickLongPressReleaseOffset;
-    CGFloat dy = (point.y + AnClickLongPressReleaseOffset <= CGRectGetMaxY(bounds)) ? AnClickLongPressReleaseOffset : -AnClickLongPressReleaseOffset;
-    CGPoint releasePoint = CGPointMake(point.x + dx, point.y + dy);
-    releasePoint.x = MIN(MAX(releasePoint.x, CGRectGetMinX(bounds)), CGRectGetMaxX(bounds));
-    releasePoint.y = MIN(MAX(releasePoint.y, CGRectGetMinY(bounds)), CGRectGetMaxY(bounds));
-    return releasePoint;
 }
 
 + (void)doubleTapAtPoint:(CGPoint)point {
@@ -68,7 +57,7 @@ static const NSTimeInterval AnClickHoldTickInterval = 0.02;
     NSUInteger generation = AnClickHoldGeneration;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (AnClickHolding && generation == AnClickHoldGeneration) {
-            [self endHold];
+            [self cancelHold];
         }
     });
 }
@@ -135,9 +124,8 @@ static const NSTimeInterval AnClickHoldTickInterval = 0.02;
     NSInteger touchId = AnClickHoldTouchId;
     AnClickHolding = NO;
     AnClickHoldGeneration++;
-    CGPoint releasePoint = [self longPressReleasePointForPoint:point];
-    [self touchMoveAtPoint:releasePoint touchId:touchId];
-    [self touchUpAtPoint:releasePoint touchId:touchId];
+    [self touchMoveAtPoint:CGPointMake(point.x + AnClickHoldJitter, point.y + AnClickHoldJitter) touchId:touchId];
+    [self touchUpAtPoint:point touchId:touchId];
 }
 
 + (void)cancelHold {
@@ -354,14 +342,10 @@ static const NSTimeInterval AnClickHoldTickInterval = 0.02;
             }
         }
 
-        BOOL releaseAwayFromTapPoint = NO;
-        CGPoint playbackReleasePoint = point;
+        BOOL cancelRecordedLongPress = NO;
         if (type == 2) {
             NSTimeInterval heldDuration = MAX(0, timestamp - gestureStartTimestamp);
-            releaseAwayFromTapPoint = (heldDuration >= 0.5 && maxGestureDistance <= 12.0);
-            if (releaseAwayFromTapPoint) {
-                playbackReleasePoint = [self longPressReleasePointForPoint:point];
-            }
+            cancelRecordedLongPress = (heldDuration >= 0.5 && maxGestureDistance <= 12.0);
         }
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -371,9 +355,9 @@ static const NSTimeInterval AnClickHoldTickInterval = 0.02;
                 [self touchMoveAtPoint:point touchId:touchId];
             } else if (type == 3) {
                 [self touchCancelAtPoint:point touchId:touchId];
-            } else if (releaseAwayFromTapPoint) {
-                [self touchMoveAtPoint:playbackReleasePoint touchId:touchId];
-                [self touchUpAtPoint:playbackReleasePoint touchId:touchId];
+            } else if (cancelRecordedLongPress) {
+                [self touchMoveAtPoint:CGPointMake(point.x + AnClickHoldJitter, point.y + AnClickHoldJitter) touchId:touchId];
+                [self touchCancelAtPoint:point touchId:touchId];
             } else {
                 [self touchUpAtPoint:point touchId:touchId];
             }
