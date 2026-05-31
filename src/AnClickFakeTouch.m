@@ -16,6 +16,7 @@
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events;
 + (void)touchDownAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
 + (void)touchMoveAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
++ (void)touchStationaryAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
 + (void)touchUpAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
 @end
 
@@ -76,9 +77,11 @@ static dispatch_source_t AnClickHoldTimer = nil;
             return;
         }
         tick++;
-        CGFloat offset = (tick % 2 == 0) ? 0.25 : -0.25;
-        CGPoint movedPoint = CGPointMake(AnClickHoldPoint.x + offset, AnClickHoldPoint.y + offset);
-        [self touchMoveAtPoint:movedPoint touchId:AnClickHoldTouchId];
+        if (tick % 8 == 0) {
+            [self touchMoveAtPoint:AnClickHoldPoint touchId:AnClickHoldTouchId];
+        } else {
+            [self touchStationaryAtPoint:AnClickHoldPoint touchId:AnClickHoldTouchId];
+        }
     });
     dispatch_resume(AnClickHoldTimer);
 }
@@ -276,6 +279,10 @@ static dispatch_source_t AnClickHoldTimer = nil;
 
 + (void)touchMoveAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
     [PTFakeTouch fakeTouchId:touchId AtPoint:point WithType:PTFakeTouchEventTouchMove];
+}
+
++ (void)touchStationaryAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
+    [PTFakeTouch fakeTouchId:touchId AtPoint:point WithType:PTFakeTouchEventTouchStationary];
 }
 
 + (void)touchUpAtPoint:(CGPoint)point touchId:(NSInteger)touchId {

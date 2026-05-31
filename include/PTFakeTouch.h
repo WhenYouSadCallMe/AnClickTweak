@@ -6,6 +6,7 @@ typedef NS_ENUM(NSInteger, PTFakeTouchEvent) {
     PTFakeTouchEventTouchUp = 1,
     PTFakeTouchEventTouchMove = 2,
     PTFakeTouchEventTouchCancel = 3,
+    PTFakeTouchEventTouchStationary = 4,
 };
 
 @interface PTFakeTouch : NSObject
