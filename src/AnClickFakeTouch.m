@@ -50,12 +50,12 @@ static NSUInteger AnClickHoldGeneration = 0;
 }
 
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration {
-    NSTimeInterval holdDuration = MAX(duration, 5.0);
+    NSTimeInterval holdDuration = MAX(duration, 2.5);
     [self beginHoldAtPoint:point];
     NSUInteger generation = AnClickHoldGeneration;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (AnClickHolding && generation == AnClickHoldGeneration) {
-            [self cancelHold];
+            [self endHold];
         }
     });
 }
@@ -77,22 +77,16 @@ static NSUInteger AnClickHoldGeneration = 0;
     AnClickHoldGeneration++;
     [self touchDownAtPoint:point touchId:AnClickHoldTouchId];
 
-    __block NSUInteger tick = 0;
     AnClickHoldTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
     dispatch_source_set_timer(AnClickHoldTimer,
-                              dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.06 * NSEC_PER_SEC)),
-                              (uint64_t)(0.06 * NSEC_PER_SEC),
-                              (uint64_t)(0.01 * NSEC_PER_SEC));
+                              dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.01 * NSEC_PER_SEC)),
+                              (uint64_t)(0.01 * NSEC_PER_SEC),
+                              (uint64_t)(0.002 * NSEC_PER_SEC));
     dispatch_source_set_event_handler(AnClickHoldTimer, ^{
         if (!AnClickHolding) {
             return;
         }
-        tick++;
-        if (tick % 8 == 0) {
-            [self touchMoveAtPoint:AnClickHoldPoint touchId:AnClickHoldTouchId];
-        } else {
-            [self touchStationaryAtPoint:AnClickHoldPoint touchId:AnClickHoldTouchId];
-        }
+        [self touchStationaryAtPoint:AnClickHoldPoint touchId:AnClickHoldTouchId];
     });
     dispatch_resume(AnClickHoldTimer);
 }
