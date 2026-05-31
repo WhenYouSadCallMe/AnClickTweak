@@ -55,7 +55,7 @@ static NSUInteger AnClickHoldGeneration = 0;
     NSUInteger generation = AnClickHoldGeneration;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (AnClickHolding && generation == AnClickHoldGeneration) {
-            [self endHold];
+            [self cancelHold];
         }
     });
 }
