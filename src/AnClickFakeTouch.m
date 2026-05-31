@@ -30,9 +30,7 @@ static CGPoint AnClickHoldPoint = {0, 0};
 static dispatch_source_t AnClickHoldTimer = nil;
 static NSUInteger AnClickHoldGeneration = 0;
 static const CGFloat AnClickHoldJitter = 0.5;
-static const CGFloat AnClickRecordedLongPressMaxDistance = 30.0;
 static const NSTimeInterval AnClickHoldTickInterval = 0.02;
-static const NSTimeInterval AnClickRecordedLongPressMinDuration = 0.5;
 
 + (void)tapAtPoint:(CGPoint)point {
     NSInteger touchId = 1;
@@ -289,132 +287,62 @@ static const NSTimeInterval AnClickRecordedLongPressMinDuration = 0.5;
     }
 
     NSInteger touchId = 6;
-    NSMutableArray<NSDictionary *> *currentSegment = [NSMutableArray array];
-
-    void (^scheduleRawSegment)(NSArray<NSDictionary *> *) = ^(NSArray<NSDictionary *> *segment) {
-        if (segment.count == 0) {
-            return;
-        }
-
-        BOOL touchIsDown = NO;
-        NSTimeInterval previousTimestamp = 0;
-        CGPoint previousPoint = CGPointZero;
-        NSInteger previousType = -1;
-        BOOL jitterRight = NO;
-
-        for (NSDictionary *event in segment) {
-            NSNumber *typeNumber = event[@"type"];
-            NSNumber *xNumber = event[@"x"];
-            NSNumber *yNumber = event[@"y"];
-            NSNumber *timestampNumber = event[@"timestamp"];
-            if (!typeNumber || !xNumber || !yNumber || !timestampNumber) {
-                continue;
-            }
-
-            NSInteger type = typeNumber.integerValue;
-            CGPoint point = CGPointMake(xNumber.doubleValue, yNumber.doubleValue);
-            NSTimeInterval timestamp = MAX(0, timestampNumber.doubleValue);
-
-            if (touchIsDown && timestamp > previousTimestamp + AnClickHoldTickInterval) {
-                for (NSTimeInterval tick = previousTimestamp + AnClickHoldTickInterval; tick < timestamp - 0.001; tick += AnClickHoldTickInterval) {
-                    jitterRight = !jitterRight;
-                    CGFloat dx = jitterRight ? AnClickHoldJitter : -AnClickHoldJitter;
-                    CGPoint keepAlivePoint = CGPointMake(previousPoint.x + dx, previousPoint.y);
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(tick * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                        [self touchMoveAtPoint:keepAlivePoint touchId:touchId];
-                    });
-                }
-            }
-
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                if (type == 0) {
-                    [self touchDownAtPoint:point touchId:touchId];
-                } else if (type == 1) {
-                    [self touchMoveAtPoint:point touchId:touchId];
-                } else if (type == 3) {
-                    [self touchCancelAtPoint:point touchId:touchId];
-                } else {
-                    [self touchUpAtPoint:point touchId:touchId];
-                }
-            });
-
-            touchIsDown = (type == 0 || type == 1);
-            previousTimestamp = timestamp;
-            previousPoint = point;
-            previousType = type;
-        }
-
-        if (previousType == 0 || previousType == 1) {
-            CGPoint cancelPoint = [self cancelPointAwayFromPoint:previousPoint];
-            NSTimeInterval cancelTimestamp = previousTimestamp + 0.08;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(cancelTimestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [self touchMoveAtPoint:cancelPoint touchId:touchId];
-                [self touchCancelAtPoint:cancelPoint touchId:touchId];
-            });
-        }
-    };
-
-    void (^scheduleSegment)(NSArray<NSDictionary *> *) = ^(NSArray<NSDictionary *> *segment) {
-        if (segment.count == 0) {
-            return;
-        }
-
-        NSDictionary *firstEvent = segment.firstObject;
-        NSDictionary *lastEvent = segment.lastObject;
-        NSInteger firstType = [firstEvent[@"type"] integerValue];
-        NSInteger lastType = [lastEvent[@"type"] integerValue];
-        NSTimeInterval startTimestamp = MAX(0, [firstEvent[@"timestamp"] doubleValue]);
-        NSTimeInterval endTimestamp = MAX(startTimestamp, [lastEvent[@"timestamp"] doubleValue]);
-        CGPoint startPoint = CGPointMake([firstEvent[@"x"] doubleValue], [firstEvent[@"y"] doubleValue]);
-        CGFloat maxDistance = 0;
-
-        for (NSDictionary *event in segment) {
-            NSNumber *xNumber = event[@"x"];
-            NSNumber *yNumber = event[@"y"];
-            if (!xNumber || !yNumber) {
-                continue;
-            }
-            CGPoint point = CGPointMake(xNumber.doubleValue, yNumber.doubleValue);
-            CGFloat dx = point.x - startPoint.x;
-            CGFloat dy = point.y - startPoint.y;
-            maxDistance = MAX(maxDistance, sqrt(dx * dx + dy * dy));
-        }
-
-        NSTimeInterval duration = MAX(0, endTimestamp - startTimestamp);
-        BOOL recordedLongPress = (firstType == 0 &&
-                                  lastType == 2 &&
-                                  duration >= AnClickRecordedLongPressMinDuration &&
-                                  maxDistance <= AnClickRecordedLongPressMaxDistance);
-        if (recordedLongPress) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(startTimestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [self longPressAtPoint:startPoint duration:duration];
-            });
-            return;
-        }
-
-        scheduleRawSegment(segment);
-    };
+    BOOL touchIsDown = NO;
+    NSTimeInterval previousTimestamp = 0;
+    CGPoint previousPoint = CGPointZero;
+    NSInteger previousType = -1;
+    BOOL jitterRight = NO;
 
     for (NSDictionary *event in events) {
         NSNumber *typeNumber = event[@"type"];
-        if (!typeNumber || !event[@"x"] || !event[@"y"] || !event[@"timestamp"]) {
+        NSNumber *xNumber = event[@"x"];
+        NSNumber *yNumber = event[@"y"];
+        NSNumber *timestampNumber = event[@"timestamp"];
+        if (!typeNumber || !xNumber || !yNumber || !timestampNumber) {
             continue;
         }
 
         NSInteger type = typeNumber.integerValue;
-        if (type == 0 && currentSegment.count > 0) {
-            scheduleSegment([currentSegment copy]);
-            [currentSegment removeAllObjects];
+        CGPoint point = CGPointMake(xNumber.doubleValue, yNumber.doubleValue);
+        NSTimeInterval timestamp = MAX(0, timestampNumber.doubleValue);
+
+        if (touchIsDown && timestamp > previousTimestamp + AnClickHoldTickInterval) {
+            for (NSTimeInterval tick = previousTimestamp + AnClickHoldTickInterval; tick < timestamp - 0.001; tick += AnClickHoldTickInterval) {
+                jitterRight = !jitterRight;
+                CGFloat dx = jitterRight ? AnClickHoldJitter : -AnClickHoldJitter;
+                CGPoint keepAlivePoint = CGPointMake(previousPoint.x + dx, previousPoint.y);
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(tick * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    [self touchMoveAtPoint:keepAlivePoint touchId:touchId];
+                });
+            }
         }
 
-        [currentSegment addObject:event];
-        if (type == 2 || type == 3) {
-            scheduleSegment([currentSegment copy]);
-            [currentSegment removeAllObjects];
-        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (type == 0) {
+                [self touchDownAtPoint:point touchId:touchId];
+            } else if (type == 1) {
+                [self touchMoveAtPoint:point touchId:touchId];
+            } else if (type == 3) {
+                [self touchCancelAtPoint:point touchId:touchId];
+            } else {
+                [self touchUpAtPoint:point touchId:touchId];
+            }
+        });
+
+        touchIsDown = (type == 0 || type == 1);
+        previousTimestamp = timestamp;
+        previousPoint = point;
+        previousType = type;
     }
 
-    scheduleSegment([currentSegment copy]);
+    if (previousType == 0 || previousType == 1) {
+        CGPoint cancelPoint = [self cancelPointAwayFromPoint:previousPoint];
+        NSTimeInterval cancelTimestamp = previousTimestamp + 0.08;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(cancelTimestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self touchMoveAtPoint:cancelPoint touchId:touchId];
+            [self touchCancelAtPoint:cancelPoint touchId:touchId];
+        });
+    }
 }
 
 + (void)touchDownAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
