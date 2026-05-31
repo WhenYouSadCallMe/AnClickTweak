@@ -709,9 +709,15 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
             _longPressHolding = NO;
             _statusLabel.text = @"长按已松开";
         } else {
-            [AnClickFakeTouch beginHoldAtPoint:point];
             _longPressHolding = YES;
-            _statusLabel.text = [NSString stringWithFormat:@"长按中 %.0f,%.0f", point.x, point.y];
+            [AnClickFakeTouch longPressAtPoint:point duration:3.0];
+            _statusLabel.text = [NSString stringWithFormat:@"长按3秒 %.0f,%.0f", point.x, point.y];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                self->_longPressHolding = NO;
+                if (self->_actionMode == AnClickActionModeLongPress) {
+                    self->_statusLabel.text = @"长按完成";
+                }
+            });
         }
     } else {
         [AnClickFakeTouch tapAtPoint:point];

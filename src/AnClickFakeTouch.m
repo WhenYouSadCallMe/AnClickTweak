@@ -47,7 +47,13 @@ static dispatch_source_t AnClickHoldTimer = nil;
 }
 
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration {
+    NSTimeInterval holdDuration = MAX(duration, 3.0);
     [self beginHoldAtPoint:point];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (AnClickHolding) {
+            [self endHold];
+        }
+    });
 }
 
 + (void)beginHoldAtPoint:(CGPoint)point {
