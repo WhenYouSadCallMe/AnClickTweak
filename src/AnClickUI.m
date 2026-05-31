@@ -704,21 +704,17 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [AnClickFakeTouch doubleTapAtPoint:point];
         _statusLabel.text = [NSString stringWithFormat:@"双 %.0f,%.0f", point.x, point.y];
     } else if (_actionMode == AnClickActionModeLongPress) {
-        if (_longPressHolding || [AnClickFakeTouch isHolding]) {
-            [AnClickFakeTouch endHold];
-            _longPressHolding = NO;
-            _statusLabel.text = @"长按已松开";
-        } else {
-            _longPressHolding = YES;
-            [AnClickFakeTouch longPressAtPoint:point duration:3.0];
-            _statusLabel.text = [NSString stringWithFormat:@"长按3秒 %.0f,%.0f", point.x, point.y];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                self->_longPressHolding = NO;
-                if (self->_actionMode == AnClickActionModeLongPress) {
-                    self->_statusLabel.text = @"长按完成";
-                }
-            });
-        }
+        _longPressHolding = YES;
+        [AnClickFakeTouch longPressAtPoint:point duration:5.0];
+        _statusLabel.text = [NSString stringWithFormat:@"长按5秒 %.0f,%.0f", point.x, point.y];
+        [self refreshModeButtons];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            self->_longPressHolding = NO;
+            if (self->_actionMode == AnClickActionModeLongPress) {
+                self->_statusLabel.text = @"长按完成";
+                [self refreshModeButtons];
+            }
+        });
     } else {
         [AnClickFakeTouch tapAtPoint:point];
         _statusLabel.text = [NSString stringWithFormat:@"点 %.0f,%.0f", point.x, point.y];

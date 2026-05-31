@@ -26,6 +26,7 @@ static NSInteger AnClickHoldTouchId = 8;
 static BOOL AnClickHolding = NO;
 static CGPoint AnClickHoldPoint = {0, 0};
 static dispatch_source_t AnClickHoldTimer = nil;
+static NSUInteger AnClickHoldGeneration = 0;
 
 + (void)tapAtPoint:(CGPoint)point {
     NSInteger touchId = 1;
@@ -47,10 +48,11 @@ static dispatch_source_t AnClickHoldTimer = nil;
 }
 
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration {
-    NSTimeInterval holdDuration = MAX(duration, 3.0);
+    NSTimeInterval holdDuration = MAX(duration, 5.0);
     [self beginHoldAtPoint:point];
+    NSUInteger generation = AnClickHoldGeneration;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (AnClickHolding) {
+        if (AnClickHolding && generation == AnClickHoldGeneration) {
             [self endHold];
         }
     });
@@ -70,6 +72,7 @@ static dispatch_source_t AnClickHoldTimer = nil;
 
     AnClickHolding = YES;
     AnClickHoldPoint = point;
+    AnClickHoldGeneration++;
     [self touchDownAtPoint:point touchId:AnClickHoldTouchId];
 
     __block NSUInteger tick = 0;
