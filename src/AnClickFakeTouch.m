@@ -29,7 +29,7 @@ static BOOL AnClickHolding = NO;
 static CGPoint AnClickHoldPoint = {0, 0};
 static dispatch_source_t AnClickHoldTimer = nil;
 static NSUInteger AnClickHoldGeneration = 0;
-static const CGFloat AnClickHoldJitter = 0.35;
+static const CGFloat AnClickHoldJitter = 1.2;
 
 + (void)tapAtPoint:(CGPoint)point {
     NSInteger touchId = 1;
@@ -142,6 +142,7 @@ static const CGFloat AnClickHoldJitter = 0.35;
     NSInteger touchId = AnClickHoldTouchId;
     AnClickHolding = NO;
     AnClickHoldGeneration++;
+    [self touchMoveAtPoint:CGPointMake(point.x + AnClickHoldJitter, point.y + AnClickHoldJitter) touchId:touchId];
     [self touchCancelAtPoint:point touchId:touchId];
 }
 

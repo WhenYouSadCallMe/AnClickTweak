@@ -755,6 +755,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return;
     }
 
+    _panelWindow.hidden = YES;
     [_pointPickOverlay removeFromSuperview];
     _pointPickWindow.hidden = YES;
     _pointPickWindow = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
@@ -766,51 +767,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _pointPickWindow.rootViewController = [[UIViewController alloc] init];
 
     UIView *overlay = [[UIView alloc] initWithFrame:_pointPickWindow.bounds];
-    overlay.backgroundColor = [UIColor colorWithWhite:0 alpha:0.08];
+    overlay.backgroundColor = UIColor.clearColor;
     overlay.userInteractionEnabled = YES;
-
-    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(12, 44, overlay.bounds.size.width - 24, 38)];
-    hint.text = _actionMode == AnClickActionModeSwipe ? @"拖动准星选择滑动起点" : [NSString stringWithFormat:@"拖动准星选择%@", [self currentActionName]];
-    hint.textColor = UIColor.whiteColor;
-    hint.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    hint.textAlignment = NSTextAlignmentCenter;
-    hint.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.10 alpha:0.86];
-    hint.layer.cornerRadius = 6;
-    hint.layer.borderWidth = 1;
-    hint.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
-    hint.clipsToBounds = YES;
-    [overlay addSubview:hint];
-
-    CGFloat controlWidth = MIN(330.0, overlay.bounds.size.width - 24.0);
-    UIView *controlPanel = [[UIView alloc] initWithFrame:CGRectMake((overlay.bounds.size.width - controlWidth) * 0.5,
-                                                                    overlay.bounds.size.height - 118.0,
-                                                                    controlWidth,
-                                                                    96.0)];
-    controlPanel.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.10 alpha:0.92];
-    controlPanel.layer.cornerRadius = 6;
-    controlPanel.layer.borderWidth = 1;
-    controlPanel.layer.borderColor = [UIColor colorWithRed:0.33 green:0.58 blue:0.86 alpha:0.45].CGColor;
-    [overlay addSubview:controlPanel];
-
-    _pointCoordinateLabel = [[UILabel alloc] initWithFrame:CGRectMake(10, 8, controlWidth - 20, 24)];
-    _pointCoordinateLabel.textColor = UIColor.whiteColor;
-    _pointCoordinateLabel.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightSemibold];
-    _pointCoordinateLabel.textAlignment = NSTextAlignmentCenter;
-    [controlPanel addSubview:_pointCoordinateLabel];
-
-    CGFloat pickButtonWidth = 82.0;
-    CGFloat pickButtonGap = 12.0;
-    CGFloat pickButtonX = (controlWidth - pickButtonWidth * 2.0 - pickButtonGap) * 0.5;
-
-    UIButton *confirmButton = [self overlayButtonWithTitle:@"确认" action:@selector(confirmPointPicking)];
-    confirmButton.frame = CGRectMake(pickButtonX, 44, pickButtonWidth, 40);
-    confirmButton.backgroundColor = [UIColor colorWithRed:0.93 green:0.57 blue:0.18 alpha:1.0];
-    [confirmButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
-    [controlPanel addSubview:confirmButton];
-
-    UIButton *cancelButton = [self overlayButtonWithTitle:@"取消" action:@selector(cancelPointPicking)];
-    cancelButton.frame = CGRectMake(pickButtonX + pickButtonWidth + pickButtonGap, 44, pickButtonWidth, 40);
-    [controlPanel addSubview:cancelButton];
 
     CGFloat cursorSize = 58.0;
     UIView *cursor = [[UIView alloc] initWithFrame:CGRectMake(0, 0, cursorSize, cursorSize)];
@@ -834,11 +792,16 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [cursor addSubview:dot];
     UIPanGestureRecognizer *cursorPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointCursorPan:)];
     [cursor addGestureRecognizer:cursorPan];
+    UITapGestureRecognizer *cursorTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(confirmPointPicking)];
+    [cursor addGestureRecognizer:cursorTap];
     [overlay addSubview:cursor];
     _pointCursorView = cursor;
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingTap:)];
     [overlay addGestureRecognizer:tap];
+    UITapGestureRecognizer *cancelTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(cancelPointPicking)];
+    cancelTap.numberOfTouchesRequired = 2;
+    [overlay addGestureRecognizer:cancelTap];
     UIPanGestureRecognizer *overlayPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingOverlayPan:)];
     [overlay addGestureRecognizer:overlayPan];
 
@@ -848,7 +811,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _hasPendingPointPickPoint = YES;
     [self updatePointPickCursor];
     _pointPickWindow.hidden = NO;
-    _statusLabel.text = @"移动准星后确认";
+    _statusLabel.text = @"点准星确认";
 }
 
 - (CGPoint)initialPointPickPointInOverlay:(UIView *)overlay {
@@ -862,7 +825,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (CGPoint)clampedPointPickPoint:(CGPoint)point inOverlay:(UIView *)overlay {
-    CGFloat margin = 6.0;
+    CGFloat margin = 0;
     point.x = MIN(MAX(point.x, margin), overlay.bounds.size.width - margin);
     point.y = MIN(MAX(point.y, margin), overlay.bounds.size.height - margin);
     return point;
@@ -885,6 +848,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _hasPendingPointPickPoint = NO;
     _pointPickWindow.hidden = YES;
     _pointPickWindow = nil;
+    [self restorePanelAfterExternalTap];
     _statusLabel.text = @"取消取点";
 }
 
@@ -893,7 +857,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return;
     }
     UIView *hitView = [_pointPickOverlay hitTest:[recognizer locationInView:_pointPickOverlay] withEvent:nil];
-    if ([hitView isKindOfClass:UIControl.class] || [hitView.superview isKindOfClass:UIControl.class]) {
+    if (hitView == _pointCursorView || [hitView isDescendantOfView:_pointCursorView]) {
         return;
     }
     _pendingPointPickPoint = [self clampedPointPickPoint:[recognizer locationInView:_pointPickOverlay] inOverlay:_pointPickOverlay];
@@ -906,9 +870,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return;
     }
     UIView *hitView = [_pointPickOverlay hitTest:[recognizer locationInView:_pointPickOverlay] withEvent:nil];
-    if ([hitView isKindOfClass:UIControl.class] ||
-        [hitView.superview isKindOfClass:UIControl.class] ||
-        hitView == _pointCursorView ||
+    if (hitView == _pointCursorView ||
         [hitView isDescendantOfView:_pointCursorView]) {
         return;
     }
@@ -949,6 +911,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _hasPendingPointPickPoint = NO;
     _pointPickWindow.hidden = YES;
     _pointPickWindow = nil;
+    [self restorePanelAfterExternalTap];
 
     if (_actionMode == AnClickActionModeSwipe) {
         _manualSwipeAnchor = screenPoint;
