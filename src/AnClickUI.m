@@ -73,7 +73,6 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIButton *_editorBackButton;
     UIButton *_imageActionButton;
     UIButton *_previewActionButton;
-    UIButton *_clearConfigButton;
     UIButton *_swipeRecordButton;
     UIButton *_cancelEditButton;
     NSArray<UIButton *> *_modeButtons;
@@ -287,7 +286,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _captureButton.frame = CGRectMake(gap, 120, buttonWidth, 32);
     [_panelView addSubview:_captureButton];
 
-    _playButton = [self panelButtonWithTitle:@"清除" action:@selector(handleSecondaryConfigButton)];
+    _playButton = [self panelButtonWithTitle:@"识别" action:@selector(handleSecondaryConfigButton)];
     _playButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 120, buttonWidth, 32);
     [_panelView addSubview:_playButton];
 
@@ -349,10 +348,6 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _previewActionButton = [self panelButtonWithTitle:@"预览" action:@selector(previewCurrentAction)];
     _previewActionButton.frame = CGRectMake(gap, 234, buttonWidth, 32);
     [_panelView addSubview:_previewActionButton];
-
-    _clearConfigButton = [self panelButtonWithTitle:@"清除" action:@selector(clearCurrentActionConfig)];
-    _clearConfigButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 234, buttonWidth, 32);
-    [_panelView addSubview:_clearConfigButton];
 
     _swipeRecordButton = [self panelButtonWithTitle:@"录制" action:@selector(beginSwipeRecording)];
     _swipeRecordButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 234, buttonWidth, 32);
@@ -623,7 +618,6 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _cancelEditButton.hidden = !visible;
     _imageActionButton.hidden = YES;
     _previewActionButton.hidden = YES;
-    _clearConfigButton.hidden = YES;
     _swipeRecordButton.hidden = YES;
     _descriptionField.hidden = !visible;
     _thresholdField.hidden = YES;
@@ -1409,7 +1403,6 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _testButton.hidden = YES;
     _imageActionButton.hidden = YES;
     _previewActionButton.hidden = YES;
-    _clearConfigButton.hidden = YES;
     _swipeRecordButton.hidden = YES;
     _delayField.hidden = YES;
     _repeatField.hidden = YES;
@@ -1630,11 +1623,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [self updateButtonShadowPath:_pickPointButton];
         [_swipeRecordButton setTitle:@"录制滑动轨迹" forState:UIControlStateNormal];
         [_previewActionButton setTitle:@"预览轨迹" forState:UIControlStateNormal];
-        [_clearConfigButton setTitle:@"清除配置" forState:UIControlStateNormal];
         [self styleNormalButton:_swipeRecordButton];
         [self styleNormalButton:_previewActionButton];
-        [self styleNormalButton:_clearConfigButton];
-        [self layoutButtons:@[_swipeRecordButton, _previewActionButton, _clearConfigButton] x:side y:278 width:contentWidth height:36 gap:8.0];
+        [self layoutButtons:@[_swipeRecordButton, _previewActionButton] x:side y:278 width:contentWidth height:36 gap:10.0];
         [self layoutDoubleTimingFieldsAtY:330];
     } else {
         _saveTaskButton.enabled = YES;
@@ -1652,11 +1643,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [self updateButtonShadowPath:_pickPointButton];
         [_previewActionButton setTitle:@"预览位置" forState:UIControlStateNormal];
         [_runManualButton setTitle:@"测试执行" forState:UIControlStateNormal];
-        [_playButton setTitle:@"清除配置" forState:UIControlStateNormal];
         [self styleNormalButton:_previewActionButton];
         [self styleNormalButton:_runManualButton];
-        [self styleNormalButton:_playButton];
-        [self layoutButtons:@[_previewActionButton, _runManualButton, _playButton] x:side y:278 width:contentWidth height:36 gap:8.0];
+        [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:278 width:contentWidth height:36 gap:10.0];
         [self layoutDoubleTimingFieldsAtY:330];
     }
     [self refreshTemplatePreview];
@@ -1707,9 +1696,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         _imageUsesMatchPoint = YES;
         [self refreshEditorConfigControls];
         [self updateStatusForCurrentConfig];
-        return;
     }
-    [self clearCurrentActionConfig];
 }
 
 - (void)cycleImageActionMode {
@@ -2761,6 +2748,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     if (!task) {
         return;
     }
+    BOOL updatingExistingTask = _selectedTaskIndex >= 0 &&
+        _selectedTaskIndex < (NSInteger)_taskItems.count &&
+        [_taskItems[(NSUInteger)_selectedTaskIndex] count] > 0;
     if (_selectedTaskIndex < 0 || _selectedTaskIndex >= (NSInteger)_taskItems.count) {
         [_taskItems addObject:task];
         _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
@@ -2770,15 +2760,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [self refreshTaskList];
     _revealedDeleteTaskIndex = -1;
     [self showTaskHome];
-    _statusLabel.text = [NSString stringWithFormat:@"已保存任务%ld", (long)_selectedTaskIndex + 1];
+    _statusLabel.text = [NSString stringWithFormat:@"%@任务%ld", updatingExistingTask ? @"已修改" : @"已保存", (long)_selectedTaskIndex + 1];
 }
 
 - (void)selectTaskButton:(UIButton *)sender {
-    if (_revealedDeleteTaskIndex == sender.tag) {
-        _revealedDeleteTaskIndex = -1;
-        [self refreshTaskList];
-        return;
-    }
     _revealedDeleteTaskIndex = -1;
     [self selectTaskAtIndex:sender.tag];
 }
@@ -2789,6 +2774,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
 
     _selectedTaskIndex = index;
+    [self dismissConfigKeyboardAndSync];
     NSDictionary *task = _taskItems[(NSUInteger)index];
     AnClickActionMode mode = [self modeForTask:task];
     [self resetEditorActionState];
@@ -2832,6 +2818,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [self refreshTaskList];
     [self setTaskEditorVisible:YES];
     [self updateStatusForCurrentConfig];
+    _statusLabel.text = [NSString stringWithFormat:@"修改任务%ld  %@", (long)index + 1, _statusLabel.text ?: @""];
 }
 
 - (void)resetRevealedTaskRowsExceptIndex:(NSInteger)index animated:(BOOL)animated {
@@ -3593,43 +3580,6 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         self->_statusLabel.text = [NSString stringWithFormat:@"预览%@ %.0f,%.0f", actionName, point.x, point.y];
         [self restorePanelAfterScreenDelay:previewDuration + 0.1];
     });
-}
-
-- (void)clearCurrentActionConfig {
-    if (_actionMode == AnClickActionModeNone) {
-        _statusLabel.text = @"请选择动作";
-        return;
-    }
-
-    if (_actionMode == AnClickActionModeImage) {
-        _currentTemplatePath = nil;
-        _imageUsesMatchPoint = YES;
-        _hasManualActionPoint[(NSUInteger)AnClickActionModeImage] = NO;
-        _manualActionPoints[(NSUInteger)AnClickActionModeImage] = CGPointZero;
-        [self refreshEditorConfigControls];
-        [self updateStatusForCurrentConfig];
-        return;
-    }
-
-    if (_actionMode == AnClickActionModeSwipe) {
-        [_recordedSwipePoints removeAllObjects];
-        _hasManualSwipeAnchor = NO;
-        _hasManualSwipeEndPoint = NO;
-        _manualSwipeAnchor = CGPointZero;
-        _manualSwipeEndPoint = CGPointZero;
-        [_trajectoryView removeFromSuperview];
-        _statusLabel.text = @"已清滑动";
-        return;
-    }
-
-    if (_actionMode == AnClickActionModeLongPress && (_longPressHolding || [AnClickFakeTouch isHolding])) {
-        [AnClickFakeTouch cancelHold];
-        _longPressHolding = NO;
-    }
-
-    _hasManualActionPoint[(NSUInteger)_actionMode] = NO;
-    _manualActionPoints[(NSUInteger)_actionMode] = CGPointZero;
-    _statusLabel.text = [NSString stringWithFormat:@"已清%@", [self currentActionName]];
 }
 
 - (void)toggleMacroRecording {
