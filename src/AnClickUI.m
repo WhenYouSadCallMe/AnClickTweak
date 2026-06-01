@@ -242,14 +242,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [_collapsedButton addGestureRecognizer:collapsedPan];
 
     _panelView = [[UIView alloc] initWithFrame:_panelWindow.bounds];
-    _panelView.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.075 alpha:0.90];
+    _panelView.backgroundColor = [UIColor colorWithRed:0.115 green:0.112 blue:0.098 alpha:0.95];
     _panelView.layer.cornerRadius = 8;
     _panelView.layer.borderWidth = 1;
-    _panelView.layer.borderColor = [UIColor colorWithRed:0.72 green:0.57 blue:0.32 alpha:0.55].CGColor;
+    _panelView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
     _panelView.layer.shadowColor = UIColor.blackColor.CGColor;
-    _panelView.layer.shadowOpacity = 0.35;
-    _panelView.layer.shadowRadius = 14.0;
-    _panelView.layer.shadowOffset = CGSizeMake(0, 8);
+    _panelView.layer.shadowOpacity = 0.46;
+    _panelView.layer.shadowRadius = 18.0;
+    _panelView.layer.shadowOffset = CGSizeMake(0, 10);
     [controller.view addSubview:_panelView];
 
     UIPanGestureRecognizer *panelPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelPan:)];
@@ -258,7 +258,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     keyboardDismissTap.cancelsTouchesInView = NO;
     [_panelView addGestureRecognizer:keyboardDismissTap];
 
-    CGFloat gap = 7.0;
+    CGFloat gap = 12.0;
     CGFloat modeWidth = floor((panelWidth - gap * 4.0) / 3.0);
     NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"滑动", @"识图"];
     NSArray<NSNumber *> *modeTags = @[
@@ -395,18 +395,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     _descriptionField = [[UITextField alloc] initWithFrame:CGRectMake(8, 142, panelWidth - 16, 34)];
     _descriptionField.placeholder = @"备注/动作说明";
-    _descriptionField.textColor = UIColor.whiteColor;
-    _descriptionField.tintColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:1.0];
-    _descriptionField.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    _descriptionField.backgroundColor = [UIColor colorWithRed:0.13 green:0.13 blue:0.12 alpha:1.0];
-    _descriptionField.layer.cornerRadius = 8;
-    _descriptionField.layer.borderWidth = 1;
-    _descriptionField.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
-    _descriptionField.clearButtonMode = UITextFieldViewModeWhileEditing;
-    _descriptionField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 10, 1)];
-    _descriptionField.leftViewMode = UITextFieldViewModeAlways;
-    _descriptionField.attributedPlaceholder = [[NSAttributedString alloc] initWithString:@"备注/动作说明"
-                                                                              attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.45]}];
+    [self applyObsidianInputStyleToField:_descriptionField placeholder:@"备注/动作说明" monospaced:NO];
     [self configureConfigTextField:_descriptionField];
     [_descriptionField addTarget:self action:@selector(actionDescriptionChanged:) forControlEvents:UIControlEventEditingChanged];
     [_panelView addSubview:_descriptionField];
@@ -430,19 +419,19 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [_panelView addSubview:_thresholdField];
 
     _taskListView = [[UIScrollView alloc] initWithFrame:CGRectMake(8, 84, panelWidth - 16, panelHeight - 92)];
-    _taskListView.backgroundColor = [UIColor colorWithRed:0.11 green:0.11 blue:0.10 alpha:1.0];
+    _taskListView.backgroundColor = [UIColor colorWithRed:0.055 green:0.055 blue:0.05 alpha:0.92];
     _taskListView.layer.cornerRadius = 4;
     _taskListView.layer.borderWidth = 1;
-    _taskListView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
+    _taskListView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
     [_panelView addSubview:_taskListView];
 
     _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 296, panelWidth - 16, MAX(70.0, panelHeight - 304))];
     _previewView.contentMode = UIViewContentModeScaleAspectFit;
     _previewView.clipsToBounds = YES;
-    _previewView.backgroundColor = [UIColor colorWithRed:0.13 green:0.13 blue:0.12 alpha:1.0];
+    _previewView.backgroundColor = [UIColor colorWithRed:0.055 green:0.055 blue:0.05 alpha:1.0];
     _previewView.layer.cornerRadius = 4;
     _previewView.layer.borderWidth = 1;
-    _previewView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
+    _previewView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
     _previewView.hidden = YES;
     [_panelView addSubview:_previewView];
     [self refreshTemplatePreview];
@@ -454,17 +443,70 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     NSLog(@"[AnClick] Panel shown");
 }
 
+- (void)updateButtonShadowPath:(UIButton *)button {
+    if (!button || CGRectIsEmpty(button.bounds)) {
+        return;
+    }
+
+    CGFloat cornerRadius = button.layer.cornerRadius;
+    button.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:button.bounds cornerRadius:cornerRadius].CGPath;
+}
+
+- (void)applyObsidian3DStyleToButton:(UIButton *)button selected:(BOOL)selected {
+    button.layer.cornerRadius = 7;
+    button.layer.borderWidth = 1;
+    button.layer.masksToBounds = NO;
+
+    if (selected) {
+        button.backgroundColor = [UIColor colorWithRed:0.28 green:0.20 blue:0.08 alpha:1.0];
+        button.layer.borderColor = [UIColor colorWithRed:0.98 green:0.70 blue:0.28 alpha:0.94].CGColor;
+        button.layer.shadowColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:1.0].CGColor;
+        button.layer.shadowOffset = CGSizeMake(0, 0);
+        button.layer.shadowRadius = 7.0;
+        button.layer.shadowOpacity = 0.34;
+        [button setTitleColor:[UIColor colorWithRed:1.0 green:0.82 blue:0.45 alpha:1.0] forState:UIControlStateNormal];
+    } else {
+        button.backgroundColor = [UIColor colorWithRed:0.18 green:0.18 blue:0.16 alpha:1.0];
+        button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
+        button.layer.shadowColor = UIColor.blackColor.CGColor;
+        button.layer.shadowOffset = CGSizeMake(0, 2.5);
+        button.layer.shadowRadius = 4.0;
+        button.layer.shadowOpacity = 0.26;
+        [button setTitleColor:[UIColor colorWithWhite:1 alpha:0.90] forState:UIControlStateNormal];
+    }
+
+    [self updateButtonShadowPath:button];
+}
+
+- (void)applyObsidianInputStyleToField:(UITextField *)field placeholder:(NSString *)placeholder monospaced:(BOOL)monospaced {
+    field.textColor = monospaced ? [UIColor colorWithRed:0.96 green:0.70 blue:0.34 alpha:1.0] : UIColor.whiteColor;
+    field.tintColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:1.0];
+    field.font = monospaced
+        ? [UIFont monospacedDigitSystemFontOfSize:16 weight:UIFontWeightBold]
+        : [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    field.backgroundColor = [UIColor colorWithRed:0.055 green:0.055 blue:0.048 alpha:1.0];
+    field.layer.cornerRadius = 6;
+    field.layer.borderWidth = 1;
+    field.layer.borderColor = [UIColor colorWithWhite:0 alpha:0.75].CGColor;
+    field.layer.shadowColor = [UIColor colorWithWhite:1 alpha:0.18].CGColor;
+    field.layer.shadowOffset = CGSizeMake(0, 1);
+    field.layer.shadowRadius = 1.0;
+    field.layer.shadowOpacity = 0.18;
+    field.clearButtonMode = UITextFieldViewModeWhileEditing;
+    field.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 10, 1)];
+    field.leftViewMode = UITextFieldViewModeAlways;
+    field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:placeholder
+                                                                   attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.30]}];
+}
+
 - (UIButton *)panelButtonWithTitle:(NSString *)title action:(SEL)action {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     [button setTitle:title forState:UIControlStateNormal];
     [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    button.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    button.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightBold];
     button.titleLabel.adjustsFontSizeToFitWidth = YES;
     button.titleLabel.minimumScaleFactor = 0.72;
-    button.backgroundColor = [UIColor colorWithRed:0.20 green:0.20 blue:0.18 alpha:1.0];
-    button.layer.cornerRadius = 8;
-    button.layer.borderWidth = 1;
-    button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
+    [self applyObsidian3DStyleToButton:button selected:NO];
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
 }
@@ -472,18 +514,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 - (UITextField *)configTextFieldWithPlaceholder:(NSString *)placeholder {
     UITextField *field = [[UITextField alloc] initWithFrame:CGRectZero];
     field.placeholder = placeholder;
-    field.textColor = UIColor.whiteColor;
-    field.tintColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:1.0];
-    field.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    field.backgroundColor = [UIColor colorWithRed:0.13 green:0.13 blue:0.12 alpha:1.0];
-    field.layer.cornerRadius = 8;
-    field.layer.borderWidth = 1;
-    field.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
-    field.clearButtonMode = UITextFieldViewModeWhileEditing;
-    field.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 10, 1)];
-    field.leftViewMode = UITextFieldViewModeAlways;
-    field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:placeholder
-                                                                   attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.45]}];
+    [self applyObsidianInputStyleToField:field placeholder:placeholder monospaced:YES];
     [self configureConfigTextField:field];
     return field;
 }
@@ -621,9 +652,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         button.frame = CGRectMake(startX + (buttonSize + 26.0) * i, buttonY, buttonSize, buttonSize);
         button.layer.cornerRadius = buttonSize * 0.5;
         button.layer.borderWidth = 0;
+        button.layer.shadowColor = UIColor.blackColor.CGColor;
+        button.layer.shadowOffset = CGSizeMake(0, 4);
+        button.layer.shadowRadius = 7.0;
+        button.layer.shadowOpacity = 0.32;
         button.backgroundColor = colors[i];
         button.titleLabel.font = [UIFont systemFontOfSize:26 weight:UIFontWeightBold];
         [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        [self updateButtonShadowPath:button];
     }
 
     _statusLabel.frame = CGRectMake(10, 10, width - 20, 24);
@@ -652,6 +688,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _editorBackButton.layer.borderWidth = 0;
     _editorBackButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];
     [_editorBackButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
+    [self updateButtonShadowPath:_editorBackButton];
 
     [_collapseButton setTitle:@"×" forState:UIControlStateNormal];
     _collapseButton.titleLabel.font = [UIFont systemFontOfSize:28 weight:UIFontWeightBold];
@@ -660,6 +697,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _collapseButton.layer.borderWidth = 0;
     _collapseButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];
     [_collapseButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
+    [self updateButtonShadowPath:_collapseButton];
 
     _editorTitleLabel.text = (_actionMode == AnClickActionModeNone) ? @"选择动作" : [self currentActionName];
     _editorTitleLabel.frame = CGRectMake(66, 8, width - 132, 40);
@@ -690,6 +728,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _cancelEditButton.frame = CGRectMake(side, bottomButtonY, bottomButtonWidth, 40);
     _saveTaskButton.frame = CGRectMake(side + bottomButtonWidth + 12.0, bottomButtonY, bottomButtonWidth, 40);
     [_saveTaskButton setTitle:@"确定" forState:UIControlStateNormal];
+    [self updateButtonShadowPath:_cancelEditButton];
+    [self updateButtonShadowPath:_saveTaskButton];
+    for (UIButton *button in _modeButtons) {
+        [self updateButtonShadowPath:button];
+    }
 }
 
 - (void)showTaskHome {
@@ -1072,13 +1115,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 - (void)refreshModeButtons {
     for (UIButton *button in _modeButtons) {
         BOOL selected = button.tag == _actionMode;
-        button.backgroundColor = selected
-            ? [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:1.0]
-            : [UIColor colorWithRed:0.20 green:0.20 blue:0.18 alpha:1.0];
-        button.layer.borderColor = selected
-            ? [UIColor colorWithRed:1.0 green:0.82 blue:0.43 alpha:1.0].CGColor
-            : [UIColor colorWithWhite:1 alpha:0.10].CGColor;
-        [button setTitleColor:selected ? UIColor.blackColor : UIColor.whiteColor forState:UIControlStateNormal];
+        [self applyObsidian3DStyleToButton:button selected:selected];
     }
 }
 
@@ -1336,7 +1373,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return;
     }
 
-    CGFloat gap = 7.0;
+    CGFloat gap = 12.0;
     CGFloat width = _panelView.bounds.size.width;
     CGFloat buttonWidth = floor((width - gap * (buttons.count + 1)) / buttons.count);
     CGFloat buttonHeight = 34.0;
@@ -1344,11 +1381,12 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         UIButton *button = buttons[i];
         button.hidden = NO;
         button.frame = CGRectMake(gap + (buttonWidth + gap) * i, y, buttonWidth, buttonHeight);
+        [self updateButtonShadowPath:button];
     }
 }
 
 - (void)layoutTimingFieldsAtY:(CGFloat)y {
-    CGFloat gap = 7.0;
+    CGFloat gap = 12.0;
     CGFloat width = _panelView.bounds.size.width;
     CGFloat fieldWidth = floor((width - gap * 3.0) / 2.0);
     _delayField.hidden = NO;
@@ -1358,19 +1396,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)styleSegmentButton:(UIButton *)button selected:(BOOL)selected {
-    button.backgroundColor = selected
-        ? [UIColor colorWithWhite:1 alpha:0.96]
-        : [UIColor colorWithWhite:1 alpha:0.08];
-    button.layer.borderColor = selected
-        ? [UIColor colorWithWhite:1 alpha:0.96].CGColor
-        : [UIColor colorWithWhite:1 alpha:0.10].CGColor;
-    [button setTitleColor:selected ? UIColor.blackColor : UIColor.whiteColor forState:UIControlStateNormal];
+    [self applyObsidian3DStyleToButton:button selected:selected];
 }
 
 - (void)styleNormalButton:(UIButton *)button {
-    button.backgroundColor = [UIColor colorWithRed:0.20 green:0.20 blue:0.18 alpha:1.0];
-    button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
-    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [self applyObsidian3DStyleToButton:button selected:NO];
 }
 
 - (void)layoutButtons:(NSArray<UIButton *> *)buttons x:(CGFloat)x y:(CGFloat)y width:(CGFloat)width height:(CGFloat)height gap:(CGFloat)gap {
@@ -1383,6 +1413,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         UIButton *button = buttons[i];
         button.hidden = NO;
         button.frame = CGRectMake(x + (buttonWidth + gap) * i, y, buttonWidth, height);
+        [self updateButtonShadowPath:button];
     }
 }
 
@@ -1496,6 +1527,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         _captureButton.backgroundColor = [UIColor colorWithRed:0.31 green:0.22 blue:0.12 alpha:0.82];
         _captureButton.layer.borderColor = [UIColor colorWithRed:0.94 green:0.55 blue:0.12 alpha:0.94].CGColor;
         [_captureButton setTitleColor:[UIColor colorWithRed:1.0 green:0.63 blue:0.16 alpha:1.0] forState:UIControlStateNormal];
+        [self updateButtonShadowPath:_captureButton];
 
         BOOL roomy = _panelView.bounds.size.height >= 580.0;
         CGFloat previewHeight = roomy ? 58.0 : 44.0;
@@ -1544,6 +1576,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [self styleNormalButton:_pickPointButton];
         _pickPointButton.hidden = NO;
         _pickPointButton.frame = CGRectMake(side, 228, contentWidth, 40);
+        [self updateButtonShadowPath:_pickPointButton];
         [_swipeRecordButton setTitle:@"录制滑动轨迹" forState:UIControlStateNormal];
         [_previewActionButton setTitle:@"预览轨迹" forState:UIControlStateNormal];
         [_clearConfigButton setTitle:@"清除配置" forState:UIControlStateNormal];
@@ -1565,6 +1598,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [self styleNormalButton:_pickPointButton];
         _pickPointButton.hidden = NO;
         _pickPointButton.frame = CGRectMake(side, 228, contentWidth, 40);
+        [self updateButtonShadowPath:_pickPointButton];
         [_previewActionButton setTitle:@"预览位置" forState:UIControlStateNormal];
         [_runManualButton setTitle:@"测试执行" forState:UIControlStateNormal];
         [_playButton setTitle:@"清除配置" forState:UIControlStateNormal];
@@ -2563,10 +2597,15 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         deleteButton.layer.cornerRadius = 4;
         deleteButton.layer.borderWidth = 1;
         deleteButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.34 blue:0.30 alpha:0.85].CGColor;
+        deleteButton.layer.shadowColor = UIColor.blackColor.CGColor;
+        deleteButton.layer.shadowOffset = CGSizeMake(0, 2);
+        deleteButton.layer.shadowRadius = 4.0;
+        deleteButton.layer.shadowOpacity = 0.28;
         deleteButton.hidden = (NSInteger)i != _revealedDeleteTaskIndex;
         deleteButton.alpha = deleteButton.hidden ? 0.0 : 1.0;
         [deleteButton addTarget:self action:@selector(deleteTaskButtonAtIndex:) forControlEvents:UIControlEventTouchUpInside];
         [_taskListView addSubview:deleteButton];
+        [self updateButtonShadowPath:deleteButton];
 
         UIButton *row = [UIButton buttonWithType:UIButtonTypeSystem];
         row.tag = (NSInteger)i;
@@ -2580,15 +2619,23 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         row.titleLabel.minimumScaleFactor = 0.62;
         row.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
         row.titleEdgeInsets = UIEdgeInsetsMake(0, 14, 0, 34);
-        row.backgroundColor = ((NSInteger)i == _selectedTaskIndex)
-            ? [UIColor colorWithRed:0.42 green:0.36 blue:0.22 alpha:0.98]
-            : [UIColor colorWithWhite:0.24 alpha:0.96];
+        BOOL selected = (NSInteger)i == _selectedTaskIndex;
+        row.backgroundColor = selected
+            ? [UIColor colorWithRed:0.28 green:0.22 blue:0.11 alpha:0.98]
+            : [UIColor colorWithRed:0.15 green:0.15 blue:0.135 alpha:0.96];
         row.layer.cornerRadius = 8;
         row.layer.borderWidth = 1;
-        row.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.22].CGColor;
+        row.layer.borderColor = selected
+            ? [UIColor colorWithRed:0.98 green:0.70 blue:0.28 alpha:0.78].CGColor
+            : [UIColor colorWithWhite:1 alpha:0.15].CGColor;
+        row.layer.shadowColor = UIColor.blackColor.CGColor;
+        row.layer.shadowOffset = CGSizeMake(0, 2);
+        row.layer.shadowRadius = 4.0;
+        row.layer.shadowOpacity = selected ? 0.30 : 0.18;
         if ((NSInteger)i == _revealedDeleteTaskIndex) {
             row.transform = CGAffineTransformMakeTranslation(-88.0, 0);
         }
+        [self updateButtonShadowPath:row];
         [row addTarget:self action:@selector(selectTaskButton:) forControlEvents:UIControlEventTouchUpInside];
 
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleTaskPan:)];
