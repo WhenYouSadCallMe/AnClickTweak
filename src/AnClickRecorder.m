@@ -1,7 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
-#import <math.h>
 #import <objc/runtime.h>
 
 typedef NS_ENUM(NSInteger, AnClickRecordEventType) {
@@ -43,7 +42,6 @@ typedef NS_ENUM(NSInteger, AnClickRecordEventType) {
 
 static void (*original_sendEvent)(id self, SEL _cmd, UIEvent *event);
 static const NSTimeInterval AnClickRecordKeepAliveInterval = 1.0 / 60.0;
-static const CGFloat AnClickRecordKeepAliveJitter = 0.75;
 
 @implementation AnClickRecorder {
     NSMutableArray<AnClickRecordEvent *> *_events;
@@ -162,20 +160,6 @@ static const CGFloat AnClickRecordKeepAliveJitter = 0.75;
     [_events addObject:record];
 }
 
-- (CGFloat)randomJitterWithRadius:(CGFloat)radius {
-    NSInteger bucket = (NSInteger)arc4random_uniform(2001) - 1000;
-    return ((CGFloat)bucket / 1000.0) * radius;
-}
-
-- (CGPoint)jitteredPointAroundPoint:(CGPoint)point radius:(CGFloat)radius {
-    CGFloat dx = [self randomJitterWithRadius:radius];
-    CGFloat dy = [self randomJitterWithRadius:radius];
-    if (fabs(dx) < 0.05 && fabs(dy) < 0.05) {
-        dx = radius;
-    }
-    return CGPointMake(point.x + dx, point.y + dy);
-}
-
 - (void)appendKeepAliveRecordIfNeeded {
     @synchronized (self) {
         if (!self.isRecording || !_hasActiveTouch) {
@@ -188,8 +172,7 @@ static const CGFloat AnClickRecordKeepAliveJitter = 0.75;
             return;
         }
 
-        CGPoint keepAlivePoint = [self jitteredPointAroundPoint:_activeTouchPoint radius:AnClickRecordKeepAliveJitter];
-        [self appendRecordType:AnClickRecordEventTypeMoved point:keepAlivePoint timestamp:timestamp];
+        [self appendRecordType:AnClickRecordEventTypeMoved point:_activeTouchPoint timestamp:timestamp];
     }
 }
 

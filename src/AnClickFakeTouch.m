@@ -1,6 +1,5 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <math.h>
 #import "../include/PTFakeTouch.h"
 
 @interface AnClickFakeTouch : NSObject
@@ -27,14 +26,10 @@
 static NSInteger AnClickHoldTouchId = 0;
 static BOOL AnClickHolding = NO;
 static CGPoint AnClickHoldPoint = {0, 0};
-static CGPoint AnClickHoldLastMovePoint = {0, 0};
 static dispatch_source_t AnClickHoldTimer = nil;
 static NSUInteger AnClickHoldGeneration = 0;
-static const CGFloat AnClickHoldJitter = 0.75;
 static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
 static const NSTimeInterval AnClickTouchUpDelay = 1.0 / 120.0;
-static const NSTimeInterval AnClickRecordedHoldThreshold = 0.45;
-static const CGFloat AnClickRecordedHoldMoveLimit = 18.0;
 
 + (void)tapAtPoint:(CGPoint)point {
     NSInteger touchId = 1;
@@ -53,20 +48,6 @@ static const CGFloat AnClickRecordedHoldMoveLimit = 18.0;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.22 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self tapAtPoint:point];
     });
-}
-
-+ (CGFloat)randomJitterWithRadius:(CGFloat)radius {
-    NSInteger bucket = (NSInteger)arc4random_uniform(2001) - 1000;
-    return ((CGFloat)bucket / 1000.0) * radius;
-}
-
-+ (CGPoint)jitteredPointAroundPoint:(CGPoint)point radius:(CGFloat)radius {
-    CGFloat dx = [self randomJitterWithRadius:radius];
-    CGFloat dy = [self randomJitterWithRadius:radius];
-    if (fabs(dx) < 0.05 && fabs(dy) < 0.05) {
-        dx = radius;
-    }
-    return CGPointMake(point.x + dx, point.y + dy);
 }
 
 + (void)finishTouchId:(NSInteger)touchId atPoint:(CGPoint)point cancelled:(BOOL)cancelled {
@@ -106,7 +87,6 @@ static const CGFloat AnClickRecordedHoldMoveLimit = 18.0;
 
     AnClickHolding = YES;
     AnClickHoldPoint = point;
-    AnClickHoldLastMovePoint = point;
     AnClickHoldTouchId = [PTFakeTouch getAvailablePointId];
     if (AnClickHoldTouchId <= 0) {
         AnClickHoldTouchId = 8;
@@ -126,9 +106,7 @@ static const CGFloat AnClickRecordedHoldMoveLimit = 18.0;
         if (!AnClickHolding || generation != AnClickHoldGeneration) {
             return;
         }
-        CGPoint movePoint = [self jitteredPointAroundPoint:holdPoint radius:AnClickHoldJitter];
-        AnClickHoldLastMovePoint = movePoint;
-        [self touchMoveAtPoint:movePoint touchId:touchId];
+        [self touchMoveAtPoint:holdPoint touchId:touchId];
     });
     dispatch_resume(AnClickHoldTimer);
 }
@@ -149,11 +127,11 @@ static const CGFloat AnClickRecordedHoldMoveLimit = 18.0;
         dispatch_source_cancel(AnClickHoldTimer);
         AnClickHoldTimer = nil;
     }
-    CGPoint point = AnClickHoldLastMovePoint;
+    CGPoint point = AnClickHoldPoint;
     NSInteger touchId = AnClickHoldTouchId;
     AnClickHolding = NO;
     AnClickHoldGeneration++;
-    [self finishTouchId:touchId atPoint:point cancelled:YES];
+    [self finishTouchId:touchId atPoint:point cancelled:NO];
 }
 
 + (void)cancelHold {
@@ -172,7 +150,7 @@ static const CGFloat AnClickRecordedHoldMoveLimit = 18.0;
         dispatch_source_cancel(AnClickHoldTimer);
         AnClickHoldTimer = nil;
     }
-    CGPoint point = AnClickHoldLastMovePoint;
+    CGPoint point = AnClickHoldPoint;
     NSInteger touchId = AnClickHoldTouchId;
     AnClickHolding = NO;
     AnClickHoldGeneration++;
@@ -310,9 +288,6 @@ static const CGFloat AnClickRecordedHoldMoveLimit = 18.0;
     NSTimeInterval previousTimestamp = 0;
     CGPoint previousPoint = CGPointZero;
     NSInteger previousType = -1;
-    NSTimeInterval contactStartTimestamp = 0;
-    CGPoint contactStartPoint = CGPointZero;
-    CGFloat contactMaxDistance = 0;
 
     for (NSDictionary *event in events) {
         NSNumber *typeNumber = event[@"type"];
@@ -326,29 +301,10 @@ static const CGFloat AnClickRecordedHoldMoveLimit = 18.0;
         NSInteger type = typeNumber.integerValue;
         CGPoint point = CGPointMake(xNumber.doubleValue, yNumber.doubleValue);
         NSTimeInterval timestamp = MAX(0, timestampNumber.doubleValue);
-        NSInteger playbackType = type;
-
-        if (type == 0) {
-            contactStartTimestamp = timestamp;
-            contactStartPoint = point;
-            contactMaxDistance = 0;
-        } else if (touchIsDown) {
-            CGFloat dx = point.x - contactStartPoint.x;
-            CGFloat dy = point.y - contactStartPoint.y;
-            contactMaxDistance = MAX(contactMaxDistance, sqrt(dx * dx + dy * dy));
-        }
-
-        if (type == 2 && touchIsDown) {
-            NSTimeInterval contactDuration = timestamp - contactStartTimestamp;
-            if (contactDuration >= AnClickRecordedHoldThreshold &&
-                contactMaxDistance <= AnClickRecordedHoldMoveLimit) {
-                playbackType = 3;
-            }
-        }
 
         if (touchIsDown && timestamp > previousTimestamp + AnClickHoldTickInterval) {
             for (NSTimeInterval tick = previousTimestamp + AnClickHoldTickInterval; tick < timestamp - 0.001; tick += AnClickHoldTickInterval) {
-                CGPoint keepAlivePoint = [self jitteredPointAroundPoint:previousPoint radius:AnClickHoldJitter];
+                CGPoint keepAlivePoint = previousPoint;
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(tick * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     [self touchMoveAtPoint:keepAlivePoint touchId:touchId];
                 });
@@ -356,21 +312,21 @@ static const CGFloat AnClickRecordedHoldMoveLimit = 18.0;
         }
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (playbackType == 0) {
+            if (type == 0) {
                 [self touchDownAtPoint:point touchId:touchId];
-            } else if (playbackType == 1) {
+            } else if (type == 1) {
                 [self touchMoveAtPoint:point touchId:touchId];
-            } else if (playbackType == 3) {
+            } else if (type == 3) {
                 [self finishTouchId:touchId atPoint:point cancelled:YES];
             } else {
                 [self finishTouchId:touchId atPoint:point cancelled:NO];
             }
         });
 
-        touchIsDown = (playbackType == 0 || playbackType == 1);
+        touchIsDown = (type == 0 || type == 1);
         previousTimestamp = timestamp;
         previousPoint = point;
-        previousType = playbackType;
+        previousType = type;
     }
 
     if (previousType == 0 || previousType == 1) {
