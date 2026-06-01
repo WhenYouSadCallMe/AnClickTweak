@@ -104,6 +104,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIView *_operationTraceView;
     UIView *_trajectoryView;
     CAShapeLayer *_trajectoryLayer;
+    UIView *_functionMenuView;
+    UIScrollView *_configListView;
     NSMutableArray<NSValue *> *_recordedSwipePoints;
     NSMutableArray<NSValue *> *_liveSwipePoints;
     NSArray<NSDictionary *> *_recordedMacroEvents;
@@ -327,7 +329,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _runTasksButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 8, buttonWidth, 38);
     [_panelView addSubview:_runTasksButton];
 
-    _collapseButton = [self panelButtonWithTitle:@"收起" action:@selector(collapsePanel)];
+    _collapseButton = [self panelButtonWithTitle:@"收起" action:@selector(handleMoreOrCloseButton)];
     _collapseButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 8, buttonWidth, 38);
     [_panelView addSubview:_collapseButton];
 
@@ -603,7 +605,6 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     CGFloat buttonY = height - buttonSize - 14.0;
     [_panelView viewWithTag:8811].hidden = YES;
 
-    [_addTaskButton setTitle:[NSString stringWithFormat:@"添加%lu", (unsigned long)_taskItems.count] forState:UIControlStateNormal];
     [_addTaskButton setTitle:@"+" forState:UIControlStateNormal];
     [_deleteTaskButton setTitle:@"-" forState:UIControlStateNormal];
     [_runTasksButton setTitle:@"▶" forState:UIControlStateNormal];
@@ -628,6 +629,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _statusLabel.frame = CGRectMake(10, 10, width - 20, 24);
     _statusLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
     _taskListView.frame = CGRectMake(10, 42, width - 20, MAX(80.0, buttonY - 50.0));
+    if (_functionMenuView) {
+        _functionMenuView.frame = _panelView.bounds;
+    }
 }
 
 - (void)layoutEditorScaffold {
@@ -689,9 +693,301 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)showTaskHome {
+    [self hideFunctionMenu];
     [self setTaskEditorVisible:NO];
     [self refreshTaskList];
     _statusLabel.text = _taskItems.count == 0 ? @"暂无任务" : @"任务列表";
+}
+
+- (void)handleMoreOrCloseButton {
+    if (_taskEditorVisible) {
+        [self collapsePanel];
+        return;
+    }
+
+    [self showFunctionMenu];
+}
+
+- (NSString *)savedTaskConfigsPath {
+    NSURL *documentsURL = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
+    return [[documentsURL path] stringByAppendingPathComponent:@"anclick_task_configs.archive"];
+}
+
+- (NSMutableArray<NSMutableDictionary *> *)savedTaskConfigs {
+    NSString *path = [self savedTaskConfigsPath];
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (data.length == 0) {
+        return [NSMutableArray array];
+    }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    id object = [NSKeyedUnarchiver unarchiveObjectWithData:data];
+#pragma clang diagnostic pop
+    if (![object isKindOfClass:NSArray.class]) {
+        return [NSMutableArray array];
+    }
+
+    NSMutableArray *configs = [NSMutableArray array];
+    for (NSDictionary *config in (NSArray *)object) {
+        if ([config isKindOfClass:NSDictionary.class]) {
+            [configs addObject:[config mutableCopy]];
+        }
+    }
+    return configs;
+}
+
+- (BOOL)writeSavedTaskConfigs:(NSArray *)configs {
+    NSError *error = nil;
+    NSData *data = [NSKeyedArchiver archivedDataWithRootObject:configs requiringSecureCoding:NO error:&error];
+    if (!data || error) {
+        return NO;
+    }
+    return [data writeToFile:[self savedTaskConfigsPath] atomically:YES];
+}
+
+- (NSMutableArray<NSMutableDictionary *> *)copyTaskItemsForSaving {
+    NSMutableArray *tasks = [NSMutableArray arrayWithCapacity:_taskItems.count];
+    for (NSDictionary *task in _taskItems) {
+        [tasks addObject:[task mutableCopy]];
+    }
+    return tasks;
+}
+
+- (NSMutableArray<NSMutableDictionary *> *)mutableTasksFromSavedTasks:(NSArray *)tasks {
+    NSMutableArray *result = [NSMutableArray array];
+    for (NSDictionary *task in tasks) {
+        if ([task isKindOfClass:NSDictionary.class]) {
+            [result addObject:[task mutableCopy]];
+        }
+    }
+    return result;
+}
+
+- (void)hideFunctionMenu {
+    [_functionMenuView removeFromSuperview];
+    _functionMenuView = nil;
+    _configListView = nil;
+}
+
+- (UIButton *)functionMenuRowWithTitle:(NSString *)title subtitle:(NSString *)subtitle color:(UIColor *)color action:(SEL)action tag:(NSInteger)tag {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    button.tag = tag;
+    button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+    button.titleLabel.numberOfLines = 2;
+    button.titleLabel.adjustsFontSizeToFitWidth = YES;
+    button.titleLabel.minimumScaleFactor = 0.65;
+    NSString *text = subtitle.length > 0 ? [NSString stringWithFormat:@"%@\n%@", title, subtitle] : title;
+    NSMutableAttributedString *attributed = [[NSMutableAttributedString alloc] initWithString:text];
+    [attributed addAttribute:NSForegroundColorAttributeName value:UIColor.whiteColor range:NSMakeRange(0, title.length)];
+    [attributed addAttribute:NSFontAttributeName value:[UIFont systemFontOfSize:19 weight:UIFontWeightBold] range:NSMakeRange(0, title.length)];
+    if (subtitle.length > 0) {
+        NSRange subtitleRange = NSMakeRange(title.length + 1, subtitle.length);
+        [attributed addAttribute:NSForegroundColorAttributeName value:[UIColor colorWithWhite:1 alpha:0.58] range:subtitleRange];
+        [attributed addAttribute:NSFontAttributeName value:[UIFont systemFontOfSize:13 weight:UIFontWeightMedium] range:subtitleRange];
+    }
+    [button setAttributedTitle:attributed forState:UIControlStateNormal];
+    button.titleEdgeInsets = UIEdgeInsetsMake(0, 18, 0, 34);
+    button.backgroundColor = color;
+    button.layer.cornerRadius = 8;
+    button.layer.borderWidth = 1;
+    button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
+    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+
+    UILabel *chevron = [[UILabel alloc] initWithFrame:CGRectZero];
+    chevron.tag = 9001;
+    chevron.text = @">";
+    chevron.textColor = [UIColor colorWithWhite:1 alpha:0.55];
+    chevron.font = [UIFont systemFontOfSize:30 weight:UIFontWeightSemibold];
+    chevron.textAlignment = NSTextAlignmentCenter;
+    chevron.userInteractionEnabled = NO;
+    [button addSubview:chevron];
+    return button;
+}
+
+- (void)layoutFunctionMenuRows:(NSArray<UIButton *> *)rows startY:(CGFloat)startY {
+    CGFloat side = 14.0;
+    CGFloat width = _functionMenuView.bounds.size.width - side * 2.0;
+    CGFloat rowHeight = 68.0;
+    CGFloat gap = 12.0;
+    for (NSUInteger i = 0; i < rows.count; i++) {
+        UIButton *row = rows[i];
+        row.frame = CGRectMake(side, startY + (rowHeight + gap) * i, width, rowHeight);
+        UILabel *chevron = (UILabel *)[row viewWithTag:9001];
+        chevron.frame = CGRectMake(width - 44.0, 0, 34.0, rowHeight);
+    }
+}
+
+- (void)showFunctionMenu {
+    [self dismissKeyboard];
+    [self hideFunctionMenu];
+
+    _functionMenuView = [[UIView alloc] initWithFrame:_panelView.bounds];
+    _functionMenuView.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.075 alpha:0.96];
+    _functionMenuView.layer.cornerRadius = _panelView.layer.cornerRadius;
+    _functionMenuView.clipsToBounds = YES;
+    [_panelView addSubview:_functionMenuView];
+
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(18, 14, _functionMenuView.bounds.size.width - 76, 34)];
+    titleLabel.text = @"功能";
+    titleLabel.textColor = UIColor.whiteColor;
+    titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
+    [_functionMenuView addSubview:titleLabel];
+
+    UIButton *closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    closeButton.frame = CGRectMake(_functionMenuView.bounds.size.width - 54, 10, 40, 40);
+    closeButton.layer.cornerRadius = 20;
+    closeButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];
+    closeButton.titleLabel.font = [UIFont systemFontOfSize:27 weight:UIFontWeightBold];
+    [closeButton setTitle:@"×" forState:UIControlStateNormal];
+    [closeButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
+    [closeButton addTarget:self action:@selector(hideFunctionMenu) forControlEvents:UIControlEventTouchUpInside];
+    [_functionMenuView addSubview:closeButton];
+
+    UILabel *caption = [[UILabel alloc] initWithFrame:CGRectMake(18, 70, _functionMenuView.bounds.size.width - 36, 22)];
+    caption.text = @"配置管理";
+    caption.textColor = [UIColor colorWithWhite:1 alpha:0.58];
+    caption.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
+    [_functionMenuView addSubview:caption];
+
+    UIButton *saveRow = [self functionMenuRowWithTitle:@"保存当前任务列表"
+                                             subtitle:@"保存当前所有任务和设置"
+                                                color:[UIColor colorWithRed:0.03 green:0.30 blue:0.52 alpha:0.82]
+                                               action:@selector(saveCurrentTaskConfig)
+                                                  tag:0];
+    UIButton *chooseRow = [self functionMenuRowWithTitle:@"选择任务配置"
+                                               subtitle:@"加载已保存的任务列表"
+                                                  color:[UIColor colorWithRed:0.08 green:0.32 blue:0.16 alpha:0.82]
+                                                 action:@selector(showSavedConfigChooser)
+                                                    tag:0];
+    UIButton *deleteRow = [self functionMenuRowWithTitle:@"删除任务配置"
+                                               subtitle:@"删除已保存的配置文件"
+                                                  color:[UIColor colorWithRed:0.44 green:0.16 blue:0.07 alpha:0.82]
+                                                 action:@selector(showSavedConfigDeleter)
+                                                    tag:0];
+    [_functionMenuView addSubview:saveRow];
+    [_functionMenuView addSubview:chooseRow];
+    [_functionMenuView addSubview:deleteRow];
+    [self layoutFunctionMenuRows:@[saveRow, chooseRow, deleteRow] startY:108.0];
+}
+
+- (void)saveCurrentTaskConfig {
+    if (_taskItems.count == 0) {
+        _statusLabel.text = @"没有任务可保存";
+        [self hideFunctionMenu];
+        return;
+    }
+
+    NSMutableArray *configs = [self savedTaskConfigs];
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateFormat = @"MM-dd HH:mm";
+    NSString *name = [NSString stringWithFormat:@"配置 %@  %lu项", [formatter stringFromDate:[NSDate date]], (unsigned long)_taskItems.count];
+    NSMutableDictionary *config = [@{
+        @"name": name,
+        @"createdAt": @([NSDate date].timeIntervalSince1970),
+        @"tasks": [self copyTaskItemsForSaving],
+    } mutableCopy];
+    [configs insertObject:config atIndex:0];
+    BOOL saved = [self writeSavedTaskConfigs:configs];
+    _statusLabel.text = saved ? @"任务配置已保存" : @"保存失败";
+    [self hideFunctionMenu];
+}
+
+- (void)showSavedConfigChooser {
+    [self showSavedConfigListForDeleting:NO];
+}
+
+- (void)showSavedConfigDeleter {
+    [self showSavedConfigListForDeleting:YES];
+}
+
+- (void)showSavedConfigListForDeleting:(BOOL)deleting {
+    if (!_functionMenuView) {
+        [self showFunctionMenu];
+    }
+    for (UIView *view in _functionMenuView.subviews) {
+        [view removeFromSuperview];
+    }
+
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(18, 14, _functionMenuView.bounds.size.width - 76, 34)];
+    titleLabel.text = deleting ? @"删除任务配置" : @"选择任务配置";
+    titleLabel.textColor = UIColor.whiteColor;
+    titleLabel.font = [UIFont systemFontOfSize:21 weight:UIFontWeightBold];
+    [_functionMenuView addSubview:titleLabel];
+
+    UIButton *backButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    backButton.frame = CGRectMake(_functionMenuView.bounds.size.width - 54, 10, 40, 40);
+    backButton.layer.cornerRadius = 20;
+    backButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];
+    backButton.titleLabel.font = [UIFont systemFontOfSize:24 weight:UIFontWeightBold];
+    [backButton setTitle:@"×" forState:UIControlStateNormal];
+    [backButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
+    [backButton addTarget:self action:@selector(showFunctionMenu) forControlEvents:UIControlEventTouchUpInside];
+    [_functionMenuView addSubview:backButton];
+
+    _configListView = [[UIScrollView alloc] initWithFrame:CGRectMake(12, 66, _functionMenuView.bounds.size.width - 24, _functionMenuView.bounds.size.height - 78)];
+    _configListView.backgroundColor = UIColor.clearColor;
+    [_functionMenuView addSubview:_configListView];
+
+    NSArray *configs = [self savedTaskConfigs];
+    if (configs.count == 0) {
+        UILabel *empty = [[UILabel alloc] initWithFrame:CGRectMake(10, 30, _configListView.bounds.size.width - 20, 60)];
+        empty.text = @"暂无已保存配置";
+        empty.textColor = [UIColor colorWithWhite:1 alpha:0.58];
+        empty.textAlignment = NSTextAlignmentCenter;
+        empty.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+        [_configListView addSubview:empty];
+        return;
+    }
+
+    CGFloat rowHeight = 62.0;
+    for (NSUInteger i = 0; i < configs.count; i++) {
+        NSDictionary *config = configs[i];
+        NSString *name = [config[@"name"] isKindOfClass:NSString.class] ? config[@"name"] : [NSString stringWithFormat:@"配置%lu", (unsigned long)i + 1];
+        NSArray *tasks = [config[@"tasks"] isKindOfClass:NSArray.class] ? config[@"tasks"] : @[];
+        UIButton *row = [self functionMenuRowWithTitle:name
+                                              subtitle:[NSString stringWithFormat:@"%lu 个任务", (unsigned long)tasks.count]
+                                                 color:deleting ? [UIColor colorWithRed:0.46 green:0.11 blue:0.08 alpha:0.86] : [UIColor colorWithWhite:1 alpha:0.10]
+                                                action:deleting ? @selector(deleteSavedConfigButton:) : @selector(loadSavedConfigButton:)
+                                                   tag:(NSInteger)i];
+        row.frame = CGRectMake(0, 4.0 + (rowHeight + 10.0) * i, _configListView.bounds.size.width, rowHeight);
+        UILabel *chevron = (UILabel *)[row viewWithTag:9001];
+        chevron.frame = CGRectMake(_configListView.bounds.size.width - 44.0, 0, 34.0, rowHeight);
+        [_configListView addSubview:row];
+    }
+    _configListView.contentSize = CGSizeMake(_configListView.bounds.size.width, 12.0 + (rowHeight + 10.0) * configs.count);
+}
+
+- (void)loadSavedConfigButton:(UIButton *)sender {
+    NSArray *configs = [self savedTaskConfigs];
+    NSInteger index = sender.tag;
+    if (index < 0 || index >= (NSInteger)configs.count) {
+        _statusLabel.text = @"配置不存在";
+        return;
+    }
+
+    NSDictionary *config = configs[(NSUInteger)index];
+    NSArray *tasks = [config[@"tasks"] isKindOfClass:NSArray.class] ? config[@"tasks"] : @[];
+    _taskItems = [self mutableTasksFromSavedTasks:tasks];
+    _selectedTaskIndex = -1;
+    _revealedDeleteTaskIndex = -1;
+    [self hideFunctionMenu];
+    [self showTaskHome];
+    _statusLabel.text = [NSString stringWithFormat:@"已加载 %lu 个任务", (unsigned long)_taskItems.count];
+}
+
+- (void)deleteSavedConfigButton:(UIButton *)sender {
+    NSMutableArray *configs = [self savedTaskConfigs];
+    NSInteger index = sender.tag;
+    if (index < 0 || index >= (NSInteger)configs.count) {
+        _statusLabel.text = @"配置不存在";
+        return;
+    }
+
+    [configs removeObjectAtIndex:(NSUInteger)index];
+    BOOL saved = [self writeSavedTaskConfigs:configs];
+    _statusLabel.text = saved ? @"配置已删除" : @"删除失败";
+    [self showSavedConfigListForDeleting:YES];
 }
 
 - (void)resetEditorActionState {
@@ -880,6 +1176,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)handlePanelPan:(UIPanGestureRecognizer *)recognizer {
+    if (_panelExpanded) {
+        return;
+    }
+
     CGPoint translation = [recognizer translationInView:_panelWindow];
     CGPoint center = _panelWindow.center;
     center.x += translation.x;
@@ -2225,7 +2525,6 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 - (void)refreshTaskList {
     [self refreshCollapsedButtonTitle];
-    [_addTaskButton setTitle:[NSString stringWithFormat:@"添加%lu", (unsigned long)_taskItems.count] forState:UIControlStateNormal];
     BOOL hasTasks = _taskItems.count > 0;
     _deleteTaskButton.enabled = hasTasks;
     _deleteTaskButton.alpha = hasTasks ? 1.0 : 0.45;
@@ -2256,7 +2555,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         UIButton *deleteButton = [UIButton buttonWithType:UIButtonTypeSystem];
         deleteButton.tag = 50000 + (NSInteger)i;
         deleteButton.accessibilityIdentifier = @"AnClickTaskDelete";
-        deleteButton.frame = CGRectMake(6.0, rowY, 82.0, 68.0);
+        deleteButton.frame = CGRectMake(width - 88.0, rowY, 82.0, 68.0);
         [deleteButton setTitle:@"删除" forState:UIControlStateNormal];
         [deleteButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
         deleteButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
@@ -2288,7 +2587,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         row.layer.borderWidth = 1;
         row.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.22].CGColor;
         if ((NSInteger)i == _revealedDeleteTaskIndex) {
-            row.transform = CGAffineTransformMakeTranslation(88.0, 0);
+            row.transform = CGAffineTransformMakeTranslation(-88.0, 0);
         }
         [row addTarget:self action:@selector(selectTaskButton:) forControlEvents:UIControlEventTouchUpInside];
 
@@ -2516,7 +2815,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         }
 
         if (_taskPanHorizontal) {
-            CGFloat offsetX = MIN(MAX(_taskPanStartOffsetX + translation.x, 0.0), revealWidth);
+            CGFloat offsetX = MIN(MAX(_taskPanStartOffsetX + translation.x, -revealWidth), 0.0);
             row.transform = CGAffineTransformMakeTranslation(offsetX, 0);
         } else {
             row.transform = CGAffineTransformMakeTranslation(0, translation.y);
@@ -2526,13 +2825,13 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
                recognizer.state == UIGestureRecognizerStateFailed) {
         if (_taskPanHorizontal) {
             CGAffineTransform currentTransform = row.transform;
-            CGFloat targetX = currentTransform.tx > revealWidth * 0.45 ? revealWidth : 0.0;
+            CGFloat targetX = currentTransform.tx < -revealWidth * 0.45 ? -revealWidth : 0.0;
             [UIView animateWithDuration:0.16 animations:^{
                 row.transform = CGAffineTransformMakeTranslation(targetX, 0);
             }];
-            _revealedDeleteTaskIndex = targetX > 0.0 ? index : -1;
-            [self setDeleteButtonVisible:targetX > 0.0 forTaskIndex:index animated:YES];
-            if (targetX > 0.0) {
+            _revealedDeleteTaskIndex = targetX < 0.0 ? index : -1;
+            [self setDeleteButtonVisible:targetX < 0.0 forTaskIndex:index animated:YES];
+            if (targetX < 0.0) {
                 _statusLabel.text = [NSString stringWithFormat:@"可删除任务%ld", (long)index + 1];
             }
             _draggingTaskIndex = -1;
