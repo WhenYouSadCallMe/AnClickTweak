@@ -513,6 +513,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     if (@available(iOS 13.0, *)) {
         UIImage *image = [UIImage systemImageNamed:systemName];
         if (image) {
+            UIImageSymbolConfiguration *configuration = [UIImageSymbolConfiguration configurationWithPointSize:fontSize weight:UIImageSymbolWeightBold];
+            image = [image imageWithConfiguration:configuration];
             [button setTitle:nil forState:UIControlStateNormal];
             [button setImage:image forState:UIControlStateNormal];
             button.tintColor = UIColor.whiteColor;
@@ -659,7 +661,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     NSArray<UIButton *> *toolbarButtons = @[_addTaskButton, _deleteTaskButton, _collapseButton, _runTasksButton];
     NSArray<UIColor *> *colors = @[
         [UIColor colorWithRed:0.02 green:0.50 blue:0.95 alpha:0.95],
-        [UIColor colorWithRed:0.94 green:0.58 blue:0.04 alpha:0.95],
+        [UIColor colorWithRed:0.88 green:0.12 blue:0.10 alpha:0.95],
         [UIColor colorWithRed:0.68 green:0.24 blue:0.86 alpha:0.95],
         [UIColor colorWithRed:0.12 green:0.74 blue:0.30 alpha:0.95],
     ];
@@ -679,6 +681,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
 
     [self setCenteredIconForButton:_homeCloseButton systemName:@"xmark" fallbackTitle:@"×" fontSize:19];
+    _homeCloseButton.imageEdgeInsets = UIEdgeInsetsMake(-2.0, 0, 2.0, 0);
+    _homeCloseButton.titleEdgeInsets = UIEdgeInsetsMake(-2.0, 0, 2.0, 0);
     _homeCloseButton.frame = CGRectMake(width - 48.0, 8.0, 36.0, 36.0);
     _homeCloseButton.layer.cornerRadius = 18.0;
     _homeCloseButton.layer.borderWidth = 1.0;
@@ -1310,6 +1314,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 - (void)actionDescriptionChanged:(UITextField *)textField {
     _actionDescription = [self trimmedActionDescription:textField.text];
+    [self autosaveSelectedTaskIfPossible];
 }
 
 - (NSString *)delayFieldText {
@@ -1366,22 +1371,26 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 - (void)actionTimingChanged:(__unused UITextField *)textField {
     [self syncActionTimingFromFields];
+    [self autosaveSelectedTaskIfPossible];
     [self updateStatusForCurrentConfig];
 }
 
 - (void)actionTimingEditingDidEnd:(__unused UITextField *)textField {
     [self syncActionTimingFromFields];
+    [self autosaveSelectedTaskIfPossible];
     [self refreshTimingFieldsIfNeeded];
     [self updateStatusForCurrentConfig];
 }
 
 - (void)actionThresholdChanged:(__unused UITextField *)textField {
     [self syncImageThresholdFromField];
+    [self autosaveSelectedTaskIfPossible];
     [self updateStatusForCurrentConfig];
 }
 
 - (void)actionThresholdEditingDidEnd:(__unused UITextField *)textField {
     [self syncImageThresholdFromField];
+    [self autosaveSelectedTaskIfPossible];
     [self refreshTimingFieldsIfNeeded];
     [self updateStatusForCurrentConfig];
 }
@@ -1696,6 +1705,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         _imageUsesMatchPoint = YES;
         [self refreshEditorConfigControls];
         [self updateStatusForCurrentConfig];
+        [self autosaveSelectedTaskIfPossible];
     }
 }
 
@@ -1712,12 +1722,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _imageActionMode = (AnClickActionMode)[(NSNumber *)modes[nextIndex] integerValue];
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
+    [self autosaveSelectedTaskIfPossible];
 }
 
 - (void)selectImageActionMode:(UIButton *)sender {
     _imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)sender.tag];
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
+    [self autosaveSelectedTaskIfPossible];
 }
 
 - (void)decreaseActionDelay {
@@ -2128,6 +2140,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [self finishTemplateCapture];
     [self refreshTemplatePreview];
     [self refreshEditorConfigControls];
+    [self autosaveSelectedTaskIfPossible];
     _statusLabel.text = saved ? [NSString stringWithFormat:@"模板已保存 %@", [self commonConfigSummary]] : @"保存失败";
 }
 
@@ -2515,6 +2528,22 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         }
     }
     return points;
+}
+
+- (void)autosaveSelectedTaskIfPossible {
+    if (!_taskEditorVisible ||
+        _selectedTaskIndex < 0 ||
+        _selectedTaskIndex >= (NSInteger)_taskItems.count ||
+        [_taskItems[(NSUInteger)_selectedTaskIndex] count] == 0) {
+        return;
+    }
+
+    NSMutableDictionary *task = [self taskDictionaryFromCurrentConfigRequireComplete:NO];
+    if (!task) {
+        return;
+    }
+    _taskItems[(NSUInteger)_selectedTaskIndex] = task;
+    [self refreshCollapsedButtonTitle];
 }
 
 - (NSMutableDictionary *)taskDictionaryFromCurrentConfigRequireComplete:(BOOL)requireComplete {
@@ -3489,14 +3518,17 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         }
         [self refreshEditorConfigControls];
         [self updateStatusForCurrentConfig];
+        [self autosaveSelectedTaskIfPossible];
         return;
     }
 
-    [self finishPointPickingOverlay];
     _manualActionPoints[(NSUInteger)_actionMode] = screenPoint;
     _hasManualActionPoint[(NSUInteger)_actionMode] = YES;
+    [self finishPointPickingOverlay];
+    [self refreshEditorConfigControls];
     [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
     [self updateStatusForCurrentConfig];
+    [self autosaveSelectedTaskIfPossible];
 }
 
 - (void)runManualAction {
