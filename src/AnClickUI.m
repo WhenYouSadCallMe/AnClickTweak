@@ -69,7 +69,6 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIButton *_runTasksButton;
     UIButton *_collapseButton;
     UIButton *_editorBackButton;
-    UIButton *_descriptionButton;
     UIButton *_imageActionButton;
     NSArray<UIButton *> *_modeButtons;
     UIScrollView *_taskListView;
@@ -295,19 +294,15 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [_panelView addSubview:_collapseButton];
 
     _saveTaskButton = [self panelButtonWithTitle:@"保存" action:@selector(saveSelectedTaskFromCurrentConfig)];
-    _saveTaskButton.frame = CGRectMake(gap, 196, buttonWidth, 32);
+    _saveTaskButton.frame = CGRectMake(gap, 120, buttonWidth, 34);
     [_panelView addSubview:_saveTaskButton];
-
-    _descriptionButton = [self panelButtonWithTitle:@"备注" action:@selector(editActionDescription)];
-    _descriptionButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 196, buttonWidth, 32);
-    [_panelView addSubview:_descriptionButton];
 
     _imageActionButton = [self panelButtonWithTitle:@"动作点击" action:@selector(cycleImageActionMode)];
     _imageActionButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 196, buttonWidth, 32);
     [_panelView addSubview:_imageActionButton];
 
     _editorBackButton = [self panelButtonWithTitle:@"返回" action:@selector(showTaskHome)];
-    _editorBackButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 196, buttonWidth, 32);
+    _editorBackButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 120, buttonWidth, 34);
     [_panelView addSubview:_editorBackButton];
 
     _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 52, panelWidth - 16, 24)];
@@ -326,7 +321,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _taskListView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
     [_panelView addSubview:_taskListView];
 
-    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 260, panelWidth - 16, MAX(82.0, panelHeight - 268))];
+    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 188, panelWidth - 16, MAX(82.0, panelHeight - 196))];
     _previewView.contentMode = UIViewContentModeScaleAspectFit;
     _previewView.clipsToBounds = YES;
     _previewView.backgroundColor = [UIColor colorWithRed:0.13 green:0.13 blue:0.12 alpha:1.0];
@@ -382,19 +377,18 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     for (UIButton *button in _modeButtons) {
         button.hidden = !visible;
     }
-    _captureButton.hidden = !visible;
-    _playButton.hidden = !visible;
-    _pickPointButton.hidden = !visible;
-    _runManualButton.hidden = !visible;
-    _recordSwipeButton.hidden = !visible;
-    _previewSwipeButton.hidden = !visible;
-    _clearActionButton.hidden = !visible;
-    _testButton.hidden = !visible;
+    _captureButton.hidden = YES;
+    _playButton.hidden = YES;
+    _pickPointButton.hidden = YES;
+    _runManualButton.hidden = YES;
+    _recordSwipeButton.hidden = YES;
+    _previewSwipeButton.hidden = YES;
+    _clearActionButton.hidden = YES;
+    _testButton.hidden = YES;
     _saveTaskButton.hidden = !visible;
     _editorBackButton.hidden = !visible;
-    _descriptionButton.hidden = !visible;
-    _imageActionButton.hidden = !visible;
-    _previewView.hidden = !visible || _previewView.image == nil;
+    _imageActionButton.hidden = YES;
+    _previewView.hidden = YES;
 
     _addTaskButton.hidden = visible;
     _deleteTaskButton.hidden = visible;
@@ -403,7 +397,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _taskListView.hidden = visible;
 
     CGRect statusFrame = _statusLabel.frame;
-    statusFrame.origin.y = visible ? 232.0 : 52.0;
+    statusFrame.origin.y = visible ? 158.0 : 52.0;
     statusFrame.size.height = visible ? 22.0 : 24.0;
     _statusLabel.frame = statusFrame;
     _statusLabel.font = [UIFont systemFontOfSize:(visible ? 14.0 : 15.0) weight:UIFontWeightMedium];
@@ -490,13 +484,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [self refreshModeButtons];
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
-    if (_actionMode == AnClickActionModeImage && ![self currentTemplateExists]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (self->_taskEditorVisible && self->_actionMode == AnClickActionModeImage && ![self currentTemplateExists]) {
-                [self beginTemplateCapture];
-            }
-        });
-    }
+    [self presentConfigForCurrentMode];
 }
 
 - (void)refreshModeButtons {
@@ -602,17 +590,22 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return;
     }
 
-    BOOL isImage = (_actionMode == AnClickActionModeImage);
-    _captureButton.hidden = !isImage;
-    _imageActionButton.hidden = !isImage;
+    _captureButton.hidden = YES;
+    _playButton.hidden = YES;
+    _pickPointButton.hidden = YES;
+    _runManualButton.hidden = YES;
+    _recordSwipeButton.hidden = YES;
+    _previewSwipeButton.hidden = YES;
+    _clearActionButton.hidden = YES;
+    _testButton.hidden = YES;
+    _imageActionButton.hidden = YES;
     [_captureButton setTitle:@"截图" forState:UIControlStateNormal];
-    [_playButton setTitle:(isImage ? (_imageUsesMatchPoint ? @"识别点" : @"指定点") : @"清除") forState:UIControlStateNormal];
-    [_descriptionButton setTitle:(_actionDescription.length > 0 ? @"备注*" : @"备注") forState:UIControlStateNormal];
+    [_playButton setTitle:(_actionMode == AnClickActionModeImage ? (_imageUsesMatchPoint ? @"识别点" : @"指定点") : @"清除") forState:UIControlStateNormal];
     [_imageActionButton setTitle:[NSString stringWithFormat:@"后%@", [self actionNameForMode:_imageActionMode]] forState:UIControlStateNormal];
     NSString *pickTitle = @"取点";
     if (_actionMode == AnClickActionModeSwipe) {
         pickTitle = (_hasManualSwipeAnchor && !_hasManualSwipeEndPoint) ? @"终点" : @"起点";
-    } else if (isImage) {
+    } else if (_actionMode == AnClickActionModeImage) {
         pickTitle = _imageUsesMatchPoint ? @"取他点" : @"取点";
     }
     [_pickPointButton setTitle:pickTitle forState:UIControlStateNormal];
@@ -625,21 +618,16 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)updateStatusForCurrentConfig {
-    NSString *summary = [self commonConfigSummary];
-    NSString *descPrefix = _actionDescription.length > 0 ? [NSString stringWithFormat:@"%@ ", _actionDescription] : @"";
     if (_actionMode == AnClickActionModeImage) {
         NSString *templateState = [self currentTemplateExists] ? @"有模板" : @"先截图";
-        NSString *targetState = _imageUsesMatchPoint ? @"点识别处" : @"先取点击点";
+        NSString *targetState = _imageUsesMatchPoint ? @"识别点" : @"先取点击点";
         if (!_imageUsesMatchPoint && [self hasManualPointForMode:AnClickActionModeImage]) {
-            CGPoint point = _manualActionPoints[(NSUInteger)AnClickActionModeImage];
-            targetState = [NSString stringWithFormat:@"点%.0f,%.0f", point.x, point.y];
+            targetState = @"已取点击点";
         }
-        _statusLabel.text = [NSString stringWithFormat:@"%@识图 %@ %@ 后%@ %@",
-                             descPrefix,
+        _statusLabel.text = [NSString stringWithFormat:@"识图 %@ %@ 后%@",
                              templateState,
                              targetState,
-                             [self actionNameForMode:_imageActionMode],
-                             summary];
+                             [self actionNameForMode:_imageActionMode]];
         return;
     }
 
@@ -652,16 +640,15 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         } else if (_recordedSwipePoints.count >= 2) {
             state = @"已录轨迹";
         }
-        _statusLabel.text = [NSString stringWithFormat:@"%@滑动 %@ %@", descPrefix, state, summary];
+        _statusLabel.text = [NSString stringWithFormat:@"滑动 %@", state];
         return;
     }
 
     NSString *name = [self currentActionName];
     if ([self hasManualPointForMode:_actionMode]) {
-        CGPoint point = _manualActionPoints[(NSUInteger)_actionMode];
-        _statusLabel.text = [NSString stringWithFormat:@"%@%@ %.0f,%.0f %@", descPrefix, name, point.x, point.y, summary];
+        _statusLabel.text = [NSString stringWithFormat:@"%@ 已取点", name];
     } else {
-        _statusLabel.text = [NSString stringWithFormat:@"%@%@ 先取点 %@", descPrefix, name, summary];
+        _statusLabel.text = [NSString stringWithFormat:@"%@ 先取点", name];
     }
 }
 
@@ -673,6 +660,135 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return;
     }
     [self clearCurrentActionConfig];
+}
+
+- (void)syncActionDescriptionFromAlert:(UIAlertController *)alert {
+    UITextField *textField = alert.textFields.firstObject;
+    if (!textField) {
+        return;
+    }
+    _actionDescription = [self trimmedActionDescription:textField.text];
+}
+
+- (NSString *)configSummaryText {
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    [parts addObject:[self commonConfigSummary]];
+    if (_actionMode == AnClickActionModeImage) {
+        [parts addObject:[self currentTemplateExists] ? @"模板: 已截图" : @"模板: 未截图"];
+        [parts addObject:_imageUsesMatchPoint ? @"点击: 识别点" : @"点击: 指定点"];
+        [parts addObject:[NSString stringWithFormat:@"识别后: %@", [self actionNameForMode:_imageActionMode]]];
+    } else if (_actionMode == AnClickActionModeSwipe) {
+        NSString *state = (_hasManualSwipeAnchor && _hasManualSwipeEndPoint) ? @"滑动: 已设起终点" : (_hasManualSwipeAnchor ? @"滑动: 缺终点" : @"滑动: 缺起点");
+        [parts addObject:state];
+    } else if ([self hasManualPointForMode:_actionMode]) {
+        CGPoint point = _manualActionPoints[(NSUInteger)_actionMode];
+        [parts addObject:[NSString stringWithFormat:@"坐标: %.0f,%.0f", point.x, point.y]];
+    } else {
+        [parts addObject:@"坐标: 未取点"];
+    }
+    return [parts componentsJoinedByString:@"\n"];
+}
+
+- (void)addConfigActionToAlert:(UIAlertController *)alert title:(NSString *)title style:(UIAlertActionStyle)style handler:(void (^)(AnClickUI *ui))handler {
+    __weak UIAlertController *weakAlert = alert;
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:title style:style handler:^(__unused UIAlertAction *action) {
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) {
+            return;
+        }
+        [self syncActionDescriptionFromAlert:weakAlert];
+        if (handler) {
+            handler(self);
+        }
+        [self updateStatusForCurrentConfig];
+    }]];
+}
+
+- (void)presentConfigForCurrentMode {
+    if (!_taskEditorVisible || !_panelWindow.rootViewController || _panelWindow.rootViewController.presentedViewController) {
+        return;
+    }
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"%@配置", [self currentActionName]]
+                                                                   message:[self configSummaryText]
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+        textField.placeholder = @"备注/动作说明";
+        textField.text = self->_actionDescription ?: @"";
+        textField.clearButtonMode = UITextFieldViewModeWhileEditing;
+    }];
+    __weak typeof(self) weakSelf = self;
+
+    if (_actionMode == AnClickActionModeImage) {
+        [self addConfigActionToAlert:alert title:@"截图模板" style:UIAlertActionStyleDefault handler:^(AnClickUI *ui) {
+            [ui beginTemplateCapture];
+        }];
+        [self addConfigActionToAlert:alert title:(_imageUsesMatchPoint ? @"点击指定点" : @"点击识别点") style:UIAlertActionStyleDefault handler:^(AnClickUI *ui) {
+            ui->_imageUsesMatchPoint = !ui->_imageUsesMatchPoint;
+            [ui refreshEditorConfigControls];
+            [ui updateStatusForCurrentConfig];
+        }];
+        [self addConfigActionToAlert:alert title:@"取指定点击点" style:UIAlertActionStyleDefault handler:^(AnClickUI *ui) {
+            ui->_imageUsesMatchPoint = NO;
+            [ui refreshEditorConfigControls];
+            [ui beginPointPicking];
+        }];
+        for (NSNumber *modeNumber in [self imageActionModes]) {
+            AnClickActionMode mode = (AnClickActionMode)modeNumber.integerValue;
+            NSString *title = [NSString stringWithFormat:@"识别后%@", [self actionNameForMode:mode]];
+            [self addConfigActionToAlert:alert title:title style:UIAlertActionStyleDefault handler:^(AnClickUI *ui) {
+                ui->_imageActionMode = mode;
+                [ui refreshEditorConfigControls];
+                [ui updateStatusForCurrentConfig];
+            }];
+        }
+    } else if (_actionMode == AnClickActionModeSwipe) {
+        [self addConfigActionToAlert:alert title:(_hasManualSwipeAnchor && !_hasManualSwipeEndPoint ? @"取终点" : @"取起点") style:UIAlertActionStyleDefault handler:^(AnClickUI *ui) {
+            [ui beginPointPicking];
+        }];
+        [self addConfigActionToAlert:alert title:@"录制滑动" style:UIAlertActionStyleDefault handler:^(AnClickUI *ui) {
+            [ui beginSwipeRecording];
+        }];
+    } else {
+        [self addConfigActionToAlert:alert title:@"取点" style:UIAlertActionStyleDefault handler:^(AnClickUI *ui) {
+            [ui beginPointPicking];
+        }];
+    }
+
+    [self addConfigActionToAlert:alert title:@"预览" style:UIAlertActionStyleDefault handler:^(AnClickUI *ui) {
+        [ui previewCurrentAction];
+    }];
+    [self addConfigActionToAlert:alert title:@"执行测试" style:UIAlertActionStyleDefault handler:^(AnClickUI *ui) {
+        [ui runManualAction];
+    }];
+    [self addConfigActionToAlert:alert title:@"延时 -0.1" style:UIAlertActionStyleDefault handler:^(AnClickUI *ui) {
+        [ui decreaseActionDelay];
+    }];
+    [self addConfigActionToAlert:alert title:@"延时 +0.1" style:UIAlertActionStyleDefault handler:^(AnClickUI *ui) {
+        [ui increaseActionDelay];
+    }];
+    [self addConfigActionToAlert:alert title:@"次数 -1" style:UIAlertActionStyleDefault handler:^(AnClickUI *ui) {
+        [ui decreaseActionRepeatCount];
+    }];
+    [self addConfigActionToAlert:alert title:@"次数 +1" style:UIAlertActionStyleDefault handler:^(AnClickUI *ui) {
+        [ui increaseActionRepeatCount];
+    }];
+    [self addConfigActionToAlert:alert title:@"清除配置" style:UIAlertActionStyleDestructive handler:^(AnClickUI *ui) {
+        [ui clearCurrentActionConfig];
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction *action) {
+        [weakSelf syncActionDescriptionFromAlert:alert];
+        [weakSelf updateStatusForCurrentConfig];
+    }]];
+
+    UIPopoverPresentationController *popover = alert.popoverPresentationController;
+    if (popover) {
+        popover.sourceView = _panelView;
+        popover.sourceRect = _panelView.bounds;
+        popover.permittedArrowDirections = 0;
+    }
+    [_panelWindow.rootViewController presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)cycleImageActionMode {
@@ -688,31 +804,6 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _imageActionMode = (AnClickActionMode)[(NSNumber *)modes[nextIndex] integerValue];
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
-}
-
-- (void)editActionDescription {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"任务备注"
-                                                                   message:nil
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-        textField.placeholder = @"例如：领取奖励";
-        textField.text = self->_actionDescription ?: @"";
-        textField.clearButtonMode = UITextFieldViewModeWhileEditing;
-    }];
-    __weak typeof(self) weakSelf = self;
-    __weak UIAlertController *weakAlert = alert;
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        __strong typeof(weakSelf) self = weakSelf;
-        if (!self) {
-            return;
-        }
-        UITextField *textField = weakAlert.textFields.firstObject;
-        self->_actionDescription = [self trimmedActionDescription:textField.text];
-        [self refreshEditorConfigControls];
-        [self updateStatusForCurrentConfig];
-    }]];
-    [_panelWindow.rootViewController presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)decreaseActionDelay {
