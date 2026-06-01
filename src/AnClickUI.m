@@ -53,6 +53,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 @implementation AnClickUI {
     UIWindow *_panelWindow;
     UIView *_panelView;
+    UIButton *_collapsedButton;
     UIButton *_captureButton;
     UIButton *_playButton;
     UIButton *_testButton;
@@ -61,7 +62,12 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIButton *_runManualButton;
     UIButton *_previewSwipeButton;
     UIButton *_clearActionButton;
+    UIButton *_addTaskButton;
+    UIButton *_saveTaskButton;
+    UIButton *_runTasksButton;
+    UIButton *_collapseButton;
     NSArray<UIButton *> *_modeButtons;
+    UIScrollView *_taskListView;
     UILabel *_statusLabel;
     UIView *_captureOverlay;
     UIView *_selectionView;
@@ -80,6 +86,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     NSMutableArray<NSValue *> *_recordedSwipePoints;
     NSMutableArray<NSValue *> *_liveSwipePoints;
     NSArray<NSDictionary *> *_recordedMacroEvents;
+    NSMutableArray<NSMutableDictionary *> *_taskItems;
+    NSInteger _selectedTaskIndex;
+    NSInteger _draggingTaskIndex;
     CGPoint _manualActionPoints[AnClickActionModeCount];
     BOOL _hasManualActionPoint[AnClickActionModeCount];
     CGPoint _manualSwipeAnchor;
@@ -94,6 +103,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     BOOL _templateSearchInProgress;
     BOOL _captureDrawingSelection;
     CGPoint _captureDragStartPoint;
+    BOOL _panelExpanded;
     AnClickActionMode _actionMode;
 }
 
@@ -111,6 +121,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         if (self->_panelWindow) {
             [self attachPanelWindowToActiveSceneIfNeeded];
             self->_panelWindow.hidden = NO;
+            [self refreshCollapsedButtonTitle];
             return;
         }
         [self buildPanel];
@@ -151,10 +162,15 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 - (void)buildPanel {
     CGFloat panelWidth = MIN(348.0, UIScreen.mainScreen.bounds.size.width - 16.0);
-    CGFloat panelHeight = 292.0;
+    CGFloat panelHeight = MIN(420.0, UIScreen.mainScreen.bounds.size.height - 72.0);
     _actionMode = AnClickActionModeTap;
+    _selectedTaskIndex = -1;
+    _draggingTaskIndex = -1;
     if (!_recordedSwipePoints) {
         _recordedSwipePoints = [NSMutableArray array];
+    }
+    if (!_taskItems) {
+        _taskItems = [NSMutableArray array];
     }
 
     _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(8, 118, panelWidth, panelHeight)];
@@ -165,6 +181,23 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     UIViewController *controller = [[UIViewController alloc] init];
     _panelWindow.rootViewController = controller;
+
+    _collapsedButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _collapsedButton.frame = CGRectMake(0, 0, 48, 48);
+    _collapsedButton.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.075 alpha:0.92];
+    _collapsedButton.layer.cornerRadius = 6;
+    _collapsedButton.layer.borderWidth = 1;
+    _collapsedButton.layer.borderColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:0.82].CGColor;
+    _collapsedButton.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightBold];
+    [_collapsedButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [_collapsedButton addTarget:self action:@selector(handleCollapsedTap) forControlEvents:UIControlEventTouchUpInside];
+    [controller.view addSubview:_collapsedButton];
+
+    UILongPressGestureRecognizer *collapsedLongPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleCollapsedLongPress:)];
+    collapsedLongPress.minimumPressDuration = 0.45;
+    [_collapsedButton addGestureRecognizer:collapsedLongPress];
+    UIPanGestureRecognizer *collapsedPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelPan:)];
+    [_collapsedButton addGestureRecognizer:collapsedPan];
 
     _panelView = [[UIView alloc] initWithFrame:_panelWindow.bounds];
     _panelView.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.075 alpha:0.94];
@@ -217,7 +250,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _recordSwipeButton.frame = CGRectMake(gap, 123, buttonWidth, 32);
     [_panelView addSubview:_recordSwipeButton];
 
-    _previewSwipeButton = [self panelButtonWithTitle:@"回放" action:@selector(playRecordedMacro)];
+    _previewSwipeButton = [self panelButtonWithTitle:@"预览" action:@selector(previewCurrentAction)];
     _previewSwipeButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 123, buttonWidth, 32);
     [_panelView addSubview:_previewSwipeButton];
 
@@ -225,11 +258,27 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _clearActionButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 123, buttonWidth, 32);
     [_panelView addSubview:_clearActionButton];
 
-    _testButton = [self panelButtonWithTitle:@"测试" action:@selector(testCenterTap)];
+    _testButton = [self panelButtonWithTitle:@"回放" action:@selector(playRecordedMacro)];
     _testButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 123, buttonWidth, 32);
     [_panelView addSubview:_testButton];
 
-    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 163, panelWidth - 16, 22)];
+    _addTaskButton = [self panelButtonWithTitle:@"＋0" action:@selector(addTaskFromCurrentConfig)];
+    _addTaskButton.frame = CGRectMake(gap, 162, buttonWidth, 32);
+    [_panelView addSubview:_addTaskButton];
+
+    _saveTaskButton = [self panelButtonWithTitle:@"保存" action:@selector(saveSelectedTaskFromCurrentConfig)];
+    _saveTaskButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 162, buttonWidth, 32);
+    [_panelView addSubview:_saveTaskButton];
+
+    _runTasksButton = [self panelButtonWithTitle:@"运行" action:@selector(runTaskList)];
+    _runTasksButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 162, buttonWidth, 32);
+    [_panelView addSubview:_runTasksButton];
+
+    _collapseButton = [self panelButtonWithTitle:@"收起" action:@selector(collapsePanel)];
+    _collapseButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 162, buttonWidth, 32);
+    [_panelView addSubview:_collapseButton];
+
+    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 202, panelWidth - 16, 22)];
     _statusLabel.text = @"待机";
     _statusLabel.textColor = UIColor.whiteColor;
     _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
@@ -238,7 +287,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _statusLabel.textAlignment = NSTextAlignmentCenter;
     [_panelView addSubview:_statusLabel];
 
-    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 191, panelWidth - 16, 93)];
+    _taskListView = [[UIScrollView alloc] initWithFrame:CGRectMake(8, 230, panelWidth - 16, 88)];
+    _taskListView.backgroundColor = [UIColor colorWithRed:0.11 green:0.11 blue:0.10 alpha:1.0];
+    _taskListView.layer.cornerRadius = 4;
+    _taskListView.layer.borderWidth = 1;
+    _taskListView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
+    [_panelView addSubview:_taskListView];
+
+    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 326, panelWidth - 16, MAX(54.0, panelHeight - 334))];
     _previewView.contentMode = UIViewContentModeScaleAspectFit;
     _previewView.clipsToBounds = YES;
     _previewView.backgroundColor = [UIColor colorWithRed:0.13 green:0.13 blue:0.12 alpha:1.0];
@@ -248,8 +304,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _previewView.hidden = YES;
     [_panelView addSubview:_previewView];
     [self refreshTemplatePreview];
+    [self refreshTaskList];
 
     _panelWindow.hidden = NO;
+    [self collapsePanel];
     NSLog(@"[AnClick] Panel shown");
 }
 
@@ -266,6 +324,66 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
+}
+
+- (CGSize)expandedPanelSize {
+    CGFloat width = MIN(348.0, UIScreen.mainScreen.bounds.size.width - 16.0);
+    CGFloat height = MIN(420.0, UIScreen.mainScreen.bounds.size.height - 72.0);
+    return CGSizeMake(width, MAX(340.0, height));
+}
+
+- (CGRect)clampedPanelFrame:(CGRect)frame {
+    CGRect bounds = UIScreen.mainScreen.bounds;
+    frame.origin.x = MIN(MAX(frame.origin.x, 4.0), bounds.size.width - frame.size.width - 4.0);
+    frame.origin.y = MIN(MAX(frame.origin.y, 24.0), bounds.size.height - frame.size.height - 4.0);
+    return frame;
+}
+
+- (void)refreshCollapsedButtonTitle {
+    [_collapsedButton setTitle:[NSString stringWithFormat:@"＋%lu", (unsigned long)_taskItems.count] forState:UIControlStateNormal];
+}
+
+- (void)collapsePanel {
+    if (!_panelWindow || !_collapsedButton || !_panelView) {
+        return;
+    }
+
+    _panelExpanded = NO;
+    CGRect frame = _panelWindow.frame;
+    frame.size = CGSizeMake(48.0, 48.0);
+    _panelWindow.frame = [self clampedPanelFrame:frame];
+    _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
+    _collapsedButton.frame = _panelWindow.bounds;
+    _collapsedButton.hidden = NO;
+    _panelView.hidden = YES;
+    [self refreshCollapsedButtonTitle];
+}
+
+- (void)expandPanel {
+    if (!_panelWindow || !_collapsedButton || !_panelView) {
+        return;
+    }
+
+    _panelExpanded = YES;
+    CGRect frame = _panelWindow.frame;
+    frame.size = [self expandedPanelSize];
+    _panelWindow.frame = [self clampedPanelFrame:frame];
+    _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
+    _panelView.frame = _panelWindow.bounds;
+    _collapsedButton.hidden = YES;
+    _panelView.hidden = NO;
+    [self refreshTaskList];
+    [self refreshTemplatePreview];
+}
+
+- (void)handleCollapsedTap {
+    [self refreshCollapsedButtonTitle];
+}
+
+- (void)handleCollapsedLongPress:(UILongPressGestureRecognizer *)recognizer {
+    if (recognizer.state == UIGestureRecognizerStateBegan) {
+        [self expandPanel];
+    }
 }
 
 - (void)selectActionMode:(UIButton *)sender {
@@ -305,8 +423,15 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (NSString *)currentActionName {
+    return [self actionNameForMode:_actionMode];
+}
+
+- (NSString *)actionNameForMode:(AnClickActionMode)mode {
     NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动", @"二指", @"缩小", @"放大", @"旋转"];
-    return names[(NSUInteger)_actionMode];
+    if (mode < AnClickActionModeTap || mode >= AnClickActionModeCount) {
+        return @"动作";
+    }
+    return names[(NSUInteger)mode];
 }
 
 - (BOOL)hasManualPointForMode:(AnClickActionMode)mode {
@@ -396,21 +521,12 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [_captureOverlay addSubview:hint];
 
     _selectionView = [[UIView alloc] initWithFrame:CGRectZero];
-    _selectionView.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    _selectionView.backgroundColor = UIColor.clearColor;
     _selectionView.layer.borderColor = UIColor.systemYellowColor.CGColor;
     _selectionView.layer.borderWidth = 2.0;
     _selectionView.userInteractionEnabled = YES;
     _selectionView.hidden = YES;
     [_captureOverlay addSubview:_selectionView];
-
-    UILabel *selectionLabel = [[UILabel alloc] initWithFrame:_selectionView.bounds];
-    selectionLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    selectionLabel.text = @"模板区域";
-    selectionLabel.textColor = UIColor.whiteColor;
-    selectionLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
-    selectionLabel.textAlignment = NSTextAlignmentCenter;
-    [_selectionView addSubview:selectionLabel];
-    [self addCornerHandles];
 
     UIPanGestureRecognizer *movePan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleSelectionPan:)];
     [_selectionView addGestureRecognizer:movePan];
@@ -661,6 +777,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [hostWindow makeKeyWindow];
     }
     if (_panelWindow) {
+        [self collapsePanel];
         _panelWindow.alpha = 1.0;
         _panelWindow.userInteractionEnabled = YES;
         _panelWindow.hidden = NO;
@@ -677,6 +794,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _panelWindow.alpha = 1.0;
     _panelWindow.userInteractionEnabled = YES;
     _panelWindow.hidden = NO;
+    if (_panelExpanded) {
+        [self expandPanel];
+    } else {
+        [self collapsePanel];
+    }
 }
 
 - (void)showTapMarkerAtScreenPoint:(CGPoint)screenPoint inWindow:(UIWindow *)hostWindow {
@@ -989,6 +1111,302 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         }
     }
     return points;
+}
+
+- (NSMutableDictionary *)taskDictionaryFromCurrentConfigRequireComplete:(BOOL)requireComplete {
+    NSMutableDictionary *task = [@{@"mode": @(_actionMode)} mutableCopy];
+    if (_actionMode == AnClickActionModeSwipe) {
+        NSArray<NSValue *> *path = [self manualSwipePath];
+        if (path.count >= 2) {
+            task[@"path"] = [path copy];
+        } else if (requireComplete) {
+            _statusLabel.text = _hasManualSwipeAnchor ? @"先取终点" : @"先取起点";
+            return nil;
+        }
+        return task;
+    }
+
+    if ([self hasManualPointForMode:_actionMode]) {
+        task[@"point"] = [NSValue valueWithCGPoint:_manualActionPoints[(NSUInteger)_actionMode]];
+    } else if (requireComplete) {
+        _statusLabel.text = @"先取点";
+        return nil;
+    }
+    return task;
+}
+
+- (NSString *)titleForTask:(NSDictionary *)task index:(NSUInteger)index {
+    AnClickActionMode mode = (AnClickActionMode)[task[@"mode"] integerValue];
+    NSString *name = [self actionNameForMode:mode];
+    if (mode == AnClickActionModeSwipe) {
+        NSArray<NSValue *> *path = task[@"path"];
+        if (path.count >= 2) {
+            CGPoint start = path.firstObject.CGPointValue;
+            CGPoint end = path.lastObject.CGPointValue;
+            return [NSString stringWithFormat:@"%lu  %@ %.0f,%.0f→%.0f,%.0f",
+                    (unsigned long)index + 1,
+                    name,
+                    start.x,
+                    start.y,
+                    end.x,
+                    end.y];
+        }
+        return [NSString stringWithFormat:@"%lu  %@ 未设置", (unsigned long)index + 1, name];
+    }
+
+    NSValue *pointValue = task[@"point"];
+    if (pointValue) {
+        CGPoint point = pointValue.CGPointValue;
+        return [NSString stringWithFormat:@"%lu  %@ %.0f,%.0f",
+                (unsigned long)index + 1,
+                name,
+                point.x,
+                point.y];
+    }
+    return [NSString stringWithFormat:@"%lu  %@ 未取点", (unsigned long)index + 1, name];
+}
+
+- (void)refreshTaskList {
+    [self refreshCollapsedButtonTitle];
+    [_addTaskButton setTitle:[NSString stringWithFormat:@"＋%lu", (unsigned long)_taskItems.count] forState:UIControlStateNormal];
+    if (!_taskListView) {
+        return;
+    }
+
+    for (UIView *view in _taskListView.subviews) {
+        [view removeFromSuperview];
+    }
+
+    CGFloat rowHeight = 34.0;
+    CGFloat width = _taskListView.bounds.size.width;
+    for (NSUInteger i = 0; i < _taskItems.count; i++) {
+        UIButton *row = [UIButton buttonWithType:UIButtonTypeSystem];
+        row.tag = (NSInteger)i;
+        row.frame = CGRectMake(6.0, 5.0 + rowHeight * i, width - 12.0, 29.0);
+        [row setTitle:[self titleForTask:_taskItems[i] index:i] forState:UIControlStateNormal];
+        [row setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        row.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+        row.titleLabel.adjustsFontSizeToFitWidth = YES;
+        row.titleLabel.minimumScaleFactor = 0.62;
+        row.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+        row.titleEdgeInsets = UIEdgeInsetsMake(0, 8, 0, 8);
+        row.backgroundColor = ((NSInteger)i == _selectedTaskIndex)
+            ? [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:0.88]
+            : [UIColor colorWithWhite:1 alpha:0.08];
+        row.layer.cornerRadius = 4;
+        row.layer.borderWidth = 1;
+        row.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
+        [row addTarget:self action:@selector(selectTaskButton:) forControlEvents:UIControlEventTouchUpInside];
+
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleTaskPan:)];
+        pan.cancelsTouchesInView = NO;
+        [row addGestureRecognizer:pan];
+        [_taskListView addSubview:row];
+    }
+    _taskListView.contentSize = CGSizeMake(width, MAX(_taskListView.bounds.size.height + 1.0, 10.0 + rowHeight * _taskItems.count));
+}
+
+- (void)addTaskFromCurrentConfig {
+    NSMutableDictionary *task = [self taskDictionaryFromCurrentConfigRequireComplete:NO];
+    if (!task) {
+        task = [@{@"mode": @(_actionMode)} mutableCopy];
+    }
+    [_taskItems addObject:task];
+    _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
+    [self refreshTaskList];
+    _statusLabel.text = [NSString stringWithFormat:@"已加任务%lu", (unsigned long)_taskItems.count];
+}
+
+- (void)saveSelectedTaskFromCurrentConfig {
+    NSMutableDictionary *task = [self taskDictionaryFromCurrentConfigRequireComplete:YES];
+    if (!task) {
+        return;
+    }
+    if (_selectedTaskIndex < 0 || _selectedTaskIndex >= (NSInteger)_taskItems.count) {
+        [_taskItems addObject:task];
+        _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
+    } else {
+        _taskItems[(NSUInteger)_selectedTaskIndex] = task;
+    }
+    [self refreshTaskList];
+    _statusLabel.text = [NSString stringWithFormat:@"已保存任务%ld", (long)_selectedTaskIndex + 1];
+}
+
+- (void)selectTaskButton:(UIButton *)sender {
+    [self selectTaskAtIndex:sender.tag];
+}
+
+- (void)selectTaskAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)_taskItems.count) {
+        return;
+    }
+
+    _selectedTaskIndex = index;
+    NSDictionary *task = _taskItems[(NSUInteger)index];
+    AnClickActionMode mode = (AnClickActionMode)[task[@"mode"] integerValue];
+    if (mode < AnClickActionModeTap || mode >= AnClickActionModeCount) {
+        mode = AnClickActionModeTap;
+    }
+    _actionMode = mode;
+
+    if (mode == AnClickActionModeSwipe) {
+        NSArray<NSValue *> *path = task[@"path"];
+        if (path.count >= 2) {
+            _recordedSwipePoints = [path mutableCopy];
+            _manualSwipeAnchor = path.firstObject.CGPointValue;
+            _manualSwipeEndPoint = path.lastObject.CGPointValue;
+            _hasManualSwipeAnchor = YES;
+            _hasManualSwipeEndPoint = YES;
+        }
+    } else {
+        NSValue *pointValue = task[@"point"];
+        if (pointValue) {
+            _manualActionPoints[(NSUInteger)mode] = pointValue.CGPointValue;
+            _hasManualActionPoint[(NSUInteger)mode] = YES;
+        }
+    }
+
+    [self refreshModeButtons];
+    [self refreshTaskList];
+    _statusLabel.text = [NSString stringWithFormat:@"选择任务%ld %@", (long)index + 1, [self actionNameForMode:mode]];
+}
+
+- (void)handleTaskPan:(UIPanGestureRecognizer *)recognizer {
+    UIView *row = recognizer.view;
+    if (!row) {
+        return;
+    }
+
+    NSInteger index = row.tag;
+    if (index < 0 || index >= (NSInteger)_taskItems.count) {
+        return;
+    }
+
+    CGPoint translation = [recognizer translationInView:_taskListView];
+    CGFloat rowHeight = 34.0;
+    if (recognizer.state == UIGestureRecognizerStateBegan) {
+        _draggingTaskIndex = index;
+        [_taskListView bringSubviewToFront:row];
+    } else if (recognizer.state == UIGestureRecognizerStateChanged) {
+        row.transform = CGAffineTransformMakeTranslation(0, translation.y);
+    } else if (recognizer.state == UIGestureRecognizerStateEnded ||
+               recognizer.state == UIGestureRecognizerStateCancelled ||
+               recognizer.state == UIGestureRecognizerStateFailed) {
+        NSInteger targetIndex = index + (NSInteger)llround(translation.y / rowHeight);
+        targetIndex = MIN(MAX(targetIndex, 0), (NSInteger)_taskItems.count - 1);
+        row.transform = CGAffineTransformIdentity;
+        if (targetIndex != index) {
+            NSMutableDictionary *task = _taskItems[(NSUInteger)index];
+            [_taskItems removeObjectAtIndex:(NSUInteger)index];
+            [_taskItems insertObject:task atIndex:(NSUInteger)targetIndex];
+            if (_selectedTaskIndex == index) {
+                _selectedTaskIndex = targetIndex;
+            } else if (_selectedTaskIndex > index && _selectedTaskIndex <= targetIndex) {
+                _selectedTaskIndex--;
+            } else if (_selectedTaskIndex < index && _selectedTaskIndex >= targetIndex) {
+                _selectedTaskIndex++;
+            }
+        }
+        _draggingTaskIndex = -1;
+        [self refreshTaskList];
+    }
+}
+
+- (NSTimeInterval)durationForTaskMode:(AnClickActionMode)mode {
+    if (mode == AnClickActionModeLongPress) {
+        return 5.35;
+    }
+    if (mode == AnClickActionModeSwipe) {
+        return 0.78;
+    }
+    if (mode == AnClickActionModeDoubleTap) {
+        return 0.55;
+    }
+    if (mode == AnClickActionModePinchIn || mode == AnClickActionModePinchOut) {
+        return 0.72;
+    }
+    if (mode == AnClickActionModeRotate) {
+        return 0.86;
+    }
+    return 0.30;
+}
+
+- (NSTimeInterval)performTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow {
+    AnClickActionMode mode = (AnClickActionMode)[task[@"mode"] integerValue];
+    if (mode == AnClickActionModeSwipe) {
+        NSArray<NSValue *> *path = task[@"path"];
+        if (path.count < 2) {
+            _statusLabel.text = @"任务滑动未设置";
+            return 0;
+        }
+        [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:0.75];
+        [AnClickFakeTouch playPath:path duration:0.55];
+        return [self durationForTaskMode:mode];
+    }
+
+    NSValue *pointValue = task[@"point"];
+    if (!pointValue) {
+        _statusLabel.text = @"任务未取点";
+        return 0;
+    }
+
+    CGPoint point = pointValue.CGPointValue;
+    NSTimeInterval duration = [self durationForTaskMode:mode];
+    [self showOperationTraceForMode:mode atPoint:point inWindow:hostWindow duration:duration];
+    if (mode == AnClickActionModeDoubleTap) {
+        [AnClickFakeTouch doubleTapAtPoint:point];
+    } else if (mode == AnClickActionModeLongPress) {
+        _longPressHolding = YES;
+        [AnClickFakeTouch longPressAtPoint:point duration:5.0];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            self->_longPressHolding = NO;
+        });
+    } else if (mode == AnClickActionModeTwoFingerTap) {
+        [AnClickFakeTouch twoFingerTapAtPoint:point distance:72.0];
+    } else if (mode == AnClickActionModePinchIn) {
+        [AnClickFakeTouch pinchAtPoint:point fromDistance:168.0 toDistance:58.0 duration:0.46];
+    } else if (mode == AnClickActionModePinchOut) {
+        [AnClickFakeTouch pinchAtPoint:point fromDistance:58.0 toDistance:168.0 duration:0.46];
+    } else if (mode == AnClickActionModeRotate) {
+        [AnClickFakeTouch rotateAtPoint:point radius:64.0 startAngle:(CGFloat)(-M_PI / 4.0) endAngle:(CGFloat)(M_PI * 0.75) duration:0.58];
+    } else {
+        [AnClickFakeTouch tapAtPoint:point];
+    }
+    return duration;
+}
+
+- (void)runTaskList {
+    if (_taskItems.count == 0) {
+        _statusLabel.text = @"先加任务";
+        return;
+    }
+
+    UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        _statusLabel.text = @"无窗口";
+        return;
+    }
+
+    [self collapsePanel];
+    [self runTaskAtIndex:0 inWindow:hostWindow];
+}
+
+- (void)runTaskAtIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow {
+    if (index >= _taskItems.count) {
+        _statusLabel.text = @"任务完成";
+        return;
+    }
+
+    UIWindow *currentHostWindow = [self hostWindow] ?: hostWindow;
+    NSTimeInterval duration = [self performTask:_taskItems[index] inWindow:currentHostWindow];
+    if (duration <= 0) {
+        [self expandPanel];
+        return;
+    }
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration + 0.12) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self runTaskAtIndex:index + 1 inWindow:currentHostWindow];
+    });
 }
 
 - (void)beginPointPicking {
