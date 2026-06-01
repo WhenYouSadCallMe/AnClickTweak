@@ -47,7 +47,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 @property (nonatomic, assign, getter=isRecording) BOOL recording;
 @end
 
-@interface AnClickUI : NSObject
+@interface AnClickUI : NSObject <UITextFieldDelegate>
 + (instancetype)shared;
 - (void)show;
 @end
@@ -252,6 +252,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     UIPanGestureRecognizer *panelPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelPan:)];
     [_panelView addGestureRecognizer:panelPan];
+    UITapGestureRecognizer *keyboardDismissTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelTapToDismissKeyboard:)];
+    keyboardDismissTap.cancelsTouchesInView = NO;
+    [_panelView addGestureRecognizer:keyboardDismissTap];
 
     CGFloat gap = 7.0;
     CGFloat modeWidth = floor((panelWidth - gap * 4.0) / 3.0);
@@ -402,6 +405,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _descriptionField.leftViewMode = UITextFieldViewModeAlways;
     _descriptionField.attributedPlaceholder = [[NSAttributedString alloc] initWithString:@"备注/动作说明"
                                                                               attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.45]}];
+    [self configureConfigTextField:_descriptionField];
     [_descriptionField addTarget:self action:@selector(actionDescriptionChanged:) forControlEvents:UIControlEventEditingChanged];
     [_panelView addSubview:_descriptionField];
 
@@ -478,7 +482,24 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     field.leftViewMode = UITextFieldViewModeAlways;
     field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:placeholder
                                                                    attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.45]}];
+    [self configureConfigTextField:field];
     return field;
+}
+
+- (UIView *)keyboardAccessoryView {
+    UIToolbar *toolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, UIScreen.mainScreen.bounds.size.width, 44.0)];
+    toolbar.barStyle = UIBarStyleBlack;
+    toolbar.translucent = YES;
+    UIBarButtonItem *space = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
+    UIBarButtonItem *done = [[UIBarButtonItem alloc] initWithTitle:@"完成" style:UIBarButtonItemStyleDone target:self action:@selector(dismissKeyboard)];
+    toolbar.items = @[space, done];
+    return toolbar;
+}
+
+- (void)configureConfigTextField:(UITextField *)field {
+    field.delegate = self;
+    field.returnKeyType = UIReturnKeyDone;
+    field.inputAccessoryView = [self keyboardAccessoryView];
 }
 
 - (UILabel *)configCaptionLabelWithText:(NSString *)text {
@@ -822,6 +843,40 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return NO;
     }
     return _hasManualActionPoint[(NSUInteger)mode];
+}
+
+- (void)dismissConfigKeyboardAndSync {
+    [self syncActionDescriptionFromField];
+    [self syncActionTimingFromFields];
+    [self syncImageThresholdFromField];
+    [_panelView endEditing:YES];
+}
+
+- (void)dismissKeyboard {
+    [self dismissConfigKeyboardAndSync];
+    [self refreshTimingFieldsIfNeeded];
+    [self updateStatusForCurrentConfig];
+}
+
+- (BOOL)textFieldShouldReturn:(UITextField *)textField {
+    [textField resignFirstResponder];
+    [self dismissKeyboard];
+    return YES;
+}
+
+- (void)handlePanelTapToDismissKeyboard:(UITapGestureRecognizer *)recognizer {
+    if (recognizer.state != UIGestureRecognizerStateEnded) {
+        return;
+    }
+
+    CGPoint point = [recognizer locationInView:_panelView];
+    NSArray<UITextField *> *fields = @[_descriptionField, _delayField, _repeatField, _thresholdField];
+    for (UITextField *field in fields) {
+        if (!field.hidden && CGRectContainsPoint(field.frame, point)) {
+            return;
+        }
+    }
+    [self dismissKeyboard];
 }
 
 - (void)handlePanelPan:(UIPanGestureRecognizer *)recognizer {
@@ -1368,13 +1423,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
 
     _statusLabel.text = @"截图中";
-    if (hostWindow && !hostWindow.isKeyWindow) {
-        [hostWindow makeKeyWindow];
-    }
-    if (_panelWindow) {
-        _panelWindow.userInteractionEnabled = NO;
-        _panelWindow.hidden = YES;
-    }
+    [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.16 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         self->_captureSnapshot = [AnClickCore captureCurrentWindowImage];
         if (!self->_captureSnapshot.CGImage) {
@@ -1732,6 +1781,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)preparePanelForExternalTapWithHostWindow:(UIWindow *)hostWindow {
+    [self dismissConfigKeyboardAndSync];
     if (hostWindow && !hostWindow.isKeyWindow) {
         [hostWindow makeKeyWindow];
     }
@@ -1741,6 +1791,24 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         _panelWindow.userInteractionEnabled = YES;
         _panelWindow.hidden = NO;
     }
+}
+
+- (void)hidePanelForScreenInteractionWithHostWindow:(UIWindow *)hostWindow {
+    [self dismissConfigKeyboardAndSync];
+    if (hostWindow && !hostWindow.isKeyWindow) {
+        [hostWindow makeKeyWindow];
+    }
+    if (_panelWindow) {
+        _panelWindow.alpha = 1.0;
+        _panelWindow.userInteractionEnabled = NO;
+        _panelWindow.hidden = YES;
+    }
+}
+
+- (void)restorePanelAfterScreenDelay:(NSTimeInterval)delay {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(delay, 0.05) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self restorePanelAfterExternalTap];
+    });
 }
 
 - (void)restorePanelAfterExternalTap {
@@ -2727,7 +2795,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         }
     }
 
-    _panelWindow.hidden = YES;
+    [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
     [_pointPickOverlay removeFromSuperview];
     _pointPickWindow.hidden = YES;
     _pointPickWindow = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
@@ -3070,8 +3138,13 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
             _statusLabel.text = _hasManualSwipeAnchor ? @"先取终点" : @"先取起点";
             return;
         }
-        [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:1.2];
-        _statusLabel.text = (_hasManualSwipeAnchor && _hasManualSwipeEndPoint) ? @"预览起终点" : @"预览原轨迹";
+        NSTimeInterval previewDuration = 1.2;
+        [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:previewDuration];
+            self->_statusLabel.text = (self->_hasManualSwipeAnchor && self->_hasManualSwipeEndPoint) ? @"预览起终点" : @"预览原轨迹";
+            [self restorePanelAfterScreenDelay:previewDuration + 0.1];
+        });
         return;
     }
 
@@ -3085,8 +3158,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
             return;
         }
         CGPoint point = _manualActionPoints[(NSUInteger)AnClickActionModeImage];
-        [self showOperationTraceForMode:_imageActionMode atPoint:point inWindow:hostWindow duration:1.0];
-        _statusLabel.text = [NSString stringWithFormat:@"预览识图%@ %.0f,%.0f", [self actionNameForMode:_imageActionMode], point.x, point.y];
+        NSTimeInterval previewDuration = 1.0;
+        AnClickActionMode imageActionMode = _imageActionMode;
+        [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self showOperationTraceForMode:imageActionMode atPoint:point inWindow:hostWindow duration:previewDuration];
+            self->_statusLabel.text = [NSString stringWithFormat:@"预览识图%@ %.0f,%.0f", [self actionNameForMode:imageActionMode], point.x, point.y];
+            [self restorePanelAfterScreenDelay:previewDuration + 0.1];
+        });
         return;
     }
 
@@ -3096,8 +3175,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
     CGPoint point = _manualActionPoints[(NSUInteger)_actionMode];
     NSTimeInterval previewDuration = (_actionMode == AnClickActionModeLongPress) ? 2.0 : 1.0;
-    [self showOperationTraceForMode:_actionMode atPoint:point inWindow:hostWindow duration:previewDuration];
-    _statusLabel.text = [NSString stringWithFormat:@"预览%@ %.0f,%.0f", [self currentActionName], point.x, point.y];
+    AnClickActionMode actionMode = _actionMode;
+    NSString *actionName = [self currentActionName];
+    [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:previewDuration];
+        self->_statusLabel.text = [NSString stringWithFormat:@"预览%@ %.0f,%.0f", actionName, point.x, point.y];
+        [self restorePanelAfterScreenDelay:previewDuration + 0.1];
+    });
 }
 
 - (void)clearCurrentActionConfig {
@@ -3185,6 +3270,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return;
     }
 
+    [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
     [_trajectoryView removeFromSuperview];
     _liveSwipePoints = [NSMutableArray array];
 
@@ -3249,9 +3335,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
             [self refreshModeButtons];
             _statusLabel.text = [NSString stringWithFormat:@"已录 %lu点", (unsigned long)_recordedSwipePoints.count];
             [self showTrajectoryForScreenPoints:_recordedSwipePoints inWindow:hostWindow duration:1.0];
+            [self restorePanelAfterScreenDelay:1.1];
         } else {
             _statusLabel.text = @"录制失败";
             [_trajectoryView removeFromSuperview];
+            [self restorePanelAfterScreenDelay:0.1];
         }
         _liveSwipePoints = nil;
         return;
