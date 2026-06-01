@@ -12,7 +12,7 @@ AnClick_FILES = \
 	src/AnClickFakeTouch.m \
 	src/AnClickRecorder.m \
 	src/AnClickUI.m \
-	vendor/PTFakeTouch.m
+	vendor/HammerTouch.m
 
 AnClick_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
 AnClick_OBJCFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)

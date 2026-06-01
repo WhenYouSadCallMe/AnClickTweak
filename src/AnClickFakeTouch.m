@@ -1,6 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import "../include/PTFakeTouch.h"
+#import "../include/HammerTouch.h"
 
 @interface AnClickFakeTouch : NSObject
 + (void)tapAtPoint:(CGPoint)point;
@@ -83,11 +83,11 @@ static const NSTimeInterval AnClickTouchUpDelay = 1.0 / 120.0;
     if (AnClickHolding) {
         [self cancelHold];
     }
-    [PTFakeTouch cancelAllActiveTouches];
+    [AnClickHammerTouch cancelAllActiveTouches];
 
     AnClickHolding = YES;
     AnClickHoldPoint = point;
-    AnClickHoldTouchId = [PTFakeTouch getAvailablePointId];
+    AnClickHoldTouchId = [AnClickHammerTouch availableTouchId];
     if (AnClickHoldTouchId <= 0) {
         AnClickHoldTouchId = 8;
     }
@@ -338,23 +338,23 @@ static const NSTimeInterval AnClickTouchUpDelay = 1.0 / 120.0;
 }
 
 + (void)touchDownAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
-    [PTFakeTouch fakeTouchId:touchId AtPoint:point WithType:PTFakeTouchEventTouchDown];
+    [AnClickHammerTouch sendTouchId:touchId atPoint:point phase:AnClickHammerTouchPhaseBegan];
 }
 
 + (void)touchMoveAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
-    [PTFakeTouch fakeTouchId:touchId AtPoint:point WithType:PTFakeTouchEventTouchMove];
+    [AnClickHammerTouch sendTouchId:touchId atPoint:point phase:AnClickHammerTouchPhaseMoved];
 }
 
 + (void)touchStationaryAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
-    [PTFakeTouch fakeTouchId:touchId AtPoint:point WithType:PTFakeTouchEventTouchStationary];
+    [AnClickHammerTouch sendTouchId:touchId atPoint:point phase:AnClickHammerTouchPhaseStationary];
 }
 
 + (void)touchCancelAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
-    [PTFakeTouch fakeTouchId:touchId AtPoint:point WithType:PTFakeTouchEventTouchCancel];
+    [AnClickHammerTouch sendTouchId:touchId atPoint:point phase:AnClickHammerTouchPhaseCancelled];
 }
 
 + (void)touchUpAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
-    [PTFakeTouch fakeTouchId:touchId AtPoint:point WithType:PTFakeTouchEventTouchUp];
+    [AnClickHammerTouch sendTouchId:touchId atPoint:point phase:AnClickHammerTouchPhaseEnded];
 }
 
 @end
