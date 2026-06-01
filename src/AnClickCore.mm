@@ -11,6 +11,7 @@
 
 @interface AnClickCore : NSObject
 + (UIImage *)captureCurrentWindowImage;
++ (NSDictionary *)findTemplateImageMatch:(UIImage *)templateImage threshold:(double)threshold;
 + (NSValue *)findTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 + (BOOL)findAndTapTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 @end
@@ -123,7 +124,7 @@ static cv::Mat AnClickMatFromUIImage(UIImage *image) {
     return AnClickCaptureActiveWindowImage(NULL);
 }
 
-+ (NSValue *)findTemplateImage:(UIImage *)templateImage threshold:(double)threshold {
++ (NSDictionary *)findTemplateImageMatch:(UIImage *)templateImage threshold:(double)threshold {
     UIWindow *sourceWindow = nil;
     UIImage *sourceImage = AnClickCaptureActiveWindowImage(&sourceWindow);
     if (!sourceImage || !templateImage) {
@@ -147,16 +148,37 @@ static cv::Mat AnClickMatFromUIImage(UIImage *image) {
     }
 
     CGFloat scale = UIScreen.mainScreen.scale;
-    CGPoint windowPoint = CGPointMake(((CGFloat)bestLocation.x + (CGFloat)templ.cols * 0.5) / scale,
-                                      ((CGFloat)bestLocation.y + (CGFloat)templ.rows * 0.5) / scale);
-    CGPoint screenPoint = sourceWindow ? [sourceWindow convertPoint:windowPoint toWindow:nil] : windowPoint;
-    NSLog(@"[AnClick] OpenCV match score %.3f window=(%.1f, %.1f) screen=(%.1f, %.1f)",
+    CGPoint topLeftWindowPoint = CGPointMake((CGFloat)bestLocation.x / scale,
+                                             (CGFloat)bestLocation.y / scale);
+    CGPoint bottomRightWindowPoint = CGPointMake(((CGFloat)bestLocation.x + (CGFloat)templ.cols) / scale,
+                                                 ((CGFloat)bestLocation.y + (CGFloat)templ.rows) / scale);
+    CGPoint centerWindowPoint = CGPointMake((topLeftWindowPoint.x + bottomRightWindowPoint.x) * 0.5,
+                                            (topLeftWindowPoint.y + bottomRightWindowPoint.y) * 0.5);
+    CGPoint topLeftScreenPoint = sourceWindow ? [sourceWindow convertPoint:topLeftWindowPoint toWindow:nil] : topLeftWindowPoint;
+    CGPoint bottomRightScreenPoint = sourceWindow ? [sourceWindow convertPoint:bottomRightWindowPoint toWindow:nil] : bottomRightWindowPoint;
+    CGPoint screenPoint = sourceWindow ? [sourceWindow convertPoint:centerWindowPoint toWindow:nil] : centerWindowPoint;
+    CGRect screenRect = CGRectStandardize(CGRectMake(topLeftScreenPoint.x,
+                                                     topLeftScreenPoint.y,
+                                                     bottomRightScreenPoint.x - topLeftScreenPoint.x,
+                                                     bottomRightScreenPoint.y - topLeftScreenPoint.y));
+    NSLog(@"[AnClick] OpenCV match score %.3f rect=(%.1f, %.1f, %.1f, %.1f) screen=(%.1f, %.1f)",
           bestScore,
-          windowPoint.x,
-          windowPoint.y,
+          screenRect.origin.x,
+          screenRect.origin.y,
+          screenRect.size.width,
+          screenRect.size.height,
           screenPoint.x,
           screenPoint.y);
-    return [NSValue valueWithCGPoint:screenPoint];
+    return @{
+        @"point": [NSValue valueWithCGPoint:screenPoint],
+        @"rect": [NSValue valueWithCGRect:screenRect],
+        @"score": @(bestScore),
+    };
+}
+
++ (NSValue *)findTemplateImage:(UIImage *)templateImage threshold:(double)threshold {
+    NSDictionary *match = [self findTemplateImageMatch:templateImage threshold:threshold];
+    return match[@"point"];
 }
 
 + (BOOL)findAndTapTemplateImage:(UIImage *)templateImage threshold:(double)threshold {

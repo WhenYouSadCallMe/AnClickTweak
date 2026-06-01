@@ -17,6 +17,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 @interface AnClickCore : NSObject
 + (UIImage *)captureCurrentWindowImage;
++ (NSDictionary *)findTemplateImageMatch:(UIImage *)templateImage threshold:(double)threshold;
 + (NSValue *)findTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 + (BOOL)findAndTapTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 @end
@@ -72,6 +73,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIImage *_captureSnapshot;
     UIImageView *_previewView;
     UIView *_tapMarkerView;
+    UIView *_recognitionBoxView;
+    UIView *_operationTraceView;
     UIView *_trajectoryView;
     CAShapeLayer *_trajectoryLayer;
     NSMutableArray<NSValue *> *_recordedSwipePoints;
@@ -88,6 +91,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     CGPoint _pendingPointPickPoint;
     BOOL _hasPendingPointPickPoint;
     BOOL _longPressHolding;
+    BOOL _templateSearchInProgress;
+    BOOL _captureDrawingSelection;
+    CGPoint _captureDragStartPoint;
     AnClickActionMode _actionMode;
 }
 
@@ -145,7 +151,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 - (void)buildPanel {
     CGFloat panelWidth = MIN(348.0, UIScreen.mainScreen.bounds.size.width - 16.0);
-    CGFloat panelHeight = 232.0;
+    CGFloat panelHeight = 292.0;
     _actionMode = AnClickActionModeTap;
     if (!_recordedSwipePoints) {
         _recordedSwipePoints = [NSMutableArray array];
@@ -232,7 +238,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _statusLabel.textAlignment = NSTextAlignmentCenter;
     [_panelView addSubview:_statusLabel];
 
-    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 193, panelWidth - 16, 31)];
+    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 191, panelWidth - 16, 93)];
     _previewView.contentMode = UIViewContentModeScaleAspectFit;
     _previewView.clipsToBounds = YES;
     _previewView.backgroundColor = [UIColor colorWithRed:0.13 green:0.13 blue:0.12 alpha:1.0];
@@ -382,23 +388,19 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _captureOverlay.userInteractionEnabled = YES;
 
     UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(12, 54, hostWindow.bounds.size.width - 24, 42)];
-    hint.text = @"拖动方框选择区域，双指缩放大小";
+    hint.text = @"按住拖动框选模板区域";
     hint.textColor = UIColor.whiteColor;
     hint.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     hint.adjustsFontSizeToFitWidth = YES;
     hint.textAlignment = NSTextAlignmentCenter;
     [_captureOverlay addSubview:hint];
 
-    CGFloat side = MIN(150.0, MIN(hostWindow.bounds.size.width, hostWindow.bounds.size.height) - 40.0);
-    CGRect selectionFrame = CGRectMake((hostWindow.bounds.size.width - side) * 0.5,
-                                       (hostWindow.bounds.size.height - side) * 0.5,
-                                       side,
-                                       side);
-    _selectionView = [[UIView alloc] initWithFrame:selectionFrame];
+    _selectionView = [[UIView alloc] initWithFrame:CGRectZero];
     _selectionView.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
     _selectionView.layer.borderColor = UIColor.systemYellowColor.CGColor;
     _selectionView.layer.borderWidth = 2.0;
     _selectionView.userInteractionEnabled = YES;
+    _selectionView.hidden = YES;
     [_captureOverlay addSubview:_selectionView];
 
     UILabel *selectionLabel = [[UILabel alloc] initWithFrame:_selectionView.bounds];
@@ -412,6 +414,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     UIPanGestureRecognizer *movePan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleSelectionPan:)];
     [_selectionView addGestureRecognizer:movePan];
+
+    UIPanGestureRecognizer *drawPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleCaptureDrawPan:)];
+    drawPan.cancelsTouchesInView = NO;
+    [_captureOverlay addGestureRecognizer:drawPan];
 
     UIButton *saveButton = [self overlayButtonWithTitle:@"保存" action:@selector(saveSelectedTemplate)];
     saveButton.frame = CGRectMake(16, hostWindow.bounds.size.height - 70, 86, 44);
@@ -459,6 +465,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 - (void)layoutCornerHandles {
     for (UIView *handle in _selectionView.subviews) {
+        if (handle.tag < 1 || handle.tag > 4) {
+            continue;
+        }
         if (handle.tag == 1) {
             handle.center = CGPointMake(0, 0);
         } else if (handle.tag == 2) {
@@ -473,14 +482,69 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 - (CGRect)clampedSelectionFrame:(CGRect)frame {
     CGRect bounds = _captureOverlay.bounds;
-    CGFloat minSide = 40.0;
-    CGFloat maxWidth = MAX(minSide, bounds.size.width - 20.0);
-    CGFloat maxHeight = MAX(minSide, bounds.size.height - 20.0);
+    CGFloat minSide = 8.0;
+    CGFloat maxWidth = MAX(minSide, bounds.size.width);
+    CGFloat maxHeight = MAX(minSide, bounds.size.height);
     frame.size.width = MIN(MAX(frame.size.width, minSide), maxWidth);
     frame.size.height = MIN(MAX(frame.size.height, minSide), maxHeight);
-    frame.origin.x = MIN(MAX(frame.origin.x, 10.0), bounds.size.width - frame.size.width - 10.0);
-    frame.origin.y = MIN(MAX(frame.origin.y, 10.0), bounds.size.height - frame.size.height - 10.0);
+    frame.origin.x = MIN(MAX(frame.origin.x, 0.0), bounds.size.width - frame.size.width);
+    frame.origin.y = MIN(MAX(frame.origin.y, 0.0), bounds.size.height - frame.size.height);
     return frame;
+}
+
+- (CGRect)selectionFrameFromPoint:(CGPoint)startPoint toPoint:(CGPoint)endPoint {
+    CGRect rawFrame = CGRectStandardize(CGRectMake(startPoint.x,
+                                                   startPoint.y,
+                                                   endPoint.x - startPoint.x,
+                                                   endPoint.y - startPoint.y));
+    return [self clampedSelectionFrame:rawFrame];
+}
+
+- (BOOL)capturePointHitsBottomControls:(CGPoint)point {
+    return _captureOverlay && point.y >= _captureOverlay.bounds.size.height - 92.0;
+}
+
+- (void)handleCaptureDrawPan:(UIPanGestureRecognizer *)recognizer {
+    if (!_captureOverlay || !_selectionView) {
+        return;
+    }
+
+    CGPoint point = [recognizer locationInView:_captureOverlay];
+    if (recognizer.state == UIGestureRecognizerStateBegan) {
+        if ([self capturePointHitsBottomControls:point] ||
+            (!_selectionView.hidden && CGRectContainsPoint(_selectionView.frame, point))) {
+            _captureDrawingSelection = NO;
+            return;
+        }
+        _captureDrawingSelection = YES;
+        _captureDragStartPoint = point;
+        _selectionView.hidden = NO;
+        _selectionView.frame = CGRectMake(point.x, point.y, 1.0, 1.0);
+        [self layoutCornerHandles];
+        return;
+    }
+
+    if (!_captureDrawingSelection) {
+        return;
+    }
+
+    if (recognizer.state == UIGestureRecognizerStateChanged ||
+        recognizer.state == UIGestureRecognizerStateEnded) {
+        CGRect frame = [self selectionFrameFromPoint:_captureDragStartPoint toPoint:point];
+        _selectionView.frame = frame;
+        _selectionView.hidden = CGRectGetWidth(frame) < 2.0 || CGRectGetHeight(frame) < 2.0;
+        [self layoutCornerHandles];
+    }
+
+    if (recognizer.state == UIGestureRecognizerStateEnded ||
+        recognizer.state == UIGestureRecognizerStateCancelled ||
+        recognizer.state == UIGestureRecognizerStateFailed) {
+        _captureDrawingSelection = NO;
+        if (_selectionView.frame.size.width < 8.0 || _selectionView.frame.size.height < 8.0) {
+            _selectionView.hidden = YES;
+            _selectionView.frame = CGRectZero;
+        }
+    }
 }
 
 - (void)handleSelectionPan:(UIPanGestureRecognizer *)recognizer {
@@ -535,9 +599,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)saveSelectedTemplate {
-    if (!_captureSnapshot.CGImage || !_selectionView) {
+    if (!_captureSnapshot.CGImage || !_selectionView || _selectionView.hidden || CGRectIsEmpty(_selectionView.frame)) {
         [self cancelTemplateCapture];
-        _statusLabel.text = @"截图失败";
+        _statusLabel.text = @"先框选区域";
         return;
     }
 
@@ -581,6 +645,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _captureOverlay = nil;
     _selectionView = nil;
     _captureSnapshot = nil;
+    _captureDrawingSelection = NO;
     [self restorePanelAfterExternalTap];
 }
 
@@ -615,6 +680,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)showTapMarkerAtScreenPoint:(CGPoint)screenPoint inWindow:(UIWindow *)hostWindow {
+    [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow duration:0.75];
+}
+
+- (void)showTapMarkerAtScreenPoint:(CGPoint)screenPoint inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
     [_tapMarkerView removeFromSuperview];
     if (!hostWindow) {
         return;
@@ -628,24 +697,136 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     marker.backgroundColor = UIColor.clearColor;
     marker.layer.cornerRadius = size * 0.5;
     marker.layer.borderWidth = 2.0;
-    marker.layer.borderColor = UIColor.systemRedColor.CGColor;
+    marker.layer.borderColor = UIColor.systemOrangeColor.CGColor;
 
-    UIView *horizontal = [[UIView alloc] initWithFrame:CGRectMake(4, size * 0.5 - 1, size - 8, 2)];
-    horizontal.backgroundColor = UIColor.systemRedColor;
-    horizontal.userInteractionEnabled = NO;
-    [marker addSubview:horizontal];
-
-    UIView *vertical = [[UIView alloc] initWithFrame:CGRectMake(size * 0.5 - 1, 4, 2, size - 8)];
-    vertical.backgroundColor = UIColor.systemRedColor;
-    vertical.userInteractionEnabled = NO;
-    [marker addSubview:vertical];
+    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(size * 0.5 - 3, size * 0.5 - 3, 6, 6)];
+    dot.backgroundColor = UIColor.systemOrangeColor;
+    dot.layer.cornerRadius = 3;
+    dot.userInteractionEnabled = NO;
+    [marker addSubview:dot];
 
     [hostWindow addSubview:marker];
     _tapMarkerView = marker;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.75 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(duration, 0.4) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [marker removeFromSuperview];
         if (self->_tapMarkerView == marker) {
             self->_tapMarkerView = nil;
+        }
+    });
+}
+
+- (void)showRecognitionBoxForScreenRect:(CGRect)screenRect score:(double)score inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
+    [_recognitionBoxView removeFromSuperview];
+    if (!hostWindow || CGRectIsEmpty(screenRect)) {
+        return;
+    }
+
+    CGPoint topLeft = [hostWindow convertPoint:screenRect.origin fromWindow:nil];
+    CGPoint bottomRight = [hostWindow convertPoint:CGPointMake(CGRectGetMaxX(screenRect), CGRectGetMaxY(screenRect)) fromWindow:nil];
+    CGRect windowRect = CGRectStandardize(CGRectMake(topLeft.x,
+                                                     topLeft.y,
+                                                     bottomRight.x - topLeft.x,
+                                                     bottomRight.y - topLeft.y));
+
+    UIView *overlay = [[UIView alloc] initWithFrame:hostWindow.bounds];
+    overlay.userInteractionEnabled = NO;
+    overlay.backgroundColor = UIColor.clearColor;
+
+    UIView *box = [[UIView alloc] initWithFrame:CGRectInset(windowRect, -2, -2)];
+    box.userInteractionEnabled = NO;
+    box.backgroundColor = [UIColor colorWithRed:1.0 green:0.0 blue:0.0 alpha:0.08];
+    box.layer.borderColor = UIColor.systemRedColor.CGColor;
+    box.layer.borderWidth = 3.0;
+    box.layer.cornerRadius = 3;
+    [overlay addSubview:box];
+
+    UILabel *scoreLabel = [[UILabel alloc] initWithFrame:CGRectMake(MAX(4.0, CGRectGetMinX(windowRect)),
+                                                                    MAX(4.0, CGRectGetMinY(windowRect) - 24.0),
+                                                                    108.0,
+                                                                    20.0)];
+    scoreLabel.text = [NSString stringWithFormat:@"%.2f", score];
+    scoreLabel.textColor = UIColor.whiteColor;
+    scoreLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightBold];
+    scoreLabel.textAlignment = NSTextAlignmentCenter;
+    scoreLabel.backgroundColor = [UIColor colorWithRed:0.82 green:0.06 blue:0.05 alpha:0.88];
+    scoreLabel.layer.cornerRadius = 4;
+    scoreLabel.clipsToBounds = YES;
+    [overlay addSubview:scoreLabel];
+
+    [hostWindow addSubview:overlay];
+    _recognitionBoxView = overlay;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(duration, 0.6) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [overlay removeFromSuperview];
+        if (self->_recognitionBoxView == overlay) {
+            self->_recognitionBoxView = nil;
+        }
+    });
+}
+
+- (void)showOperationTraceForMode:(AnClickActionMode)mode atPoint:(CGPoint)screenPoint inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
+    [_operationTraceView removeFromSuperview];
+    if (!hostWindow) {
+        return;
+    }
+
+    if (mode == AnClickActionModeTap ||
+        mode == AnClickActionModeDoubleTap ||
+        mode == AnClickActionModeLongPress ||
+        mode == AnClickActionModeSwipe) {
+        [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow duration:duration];
+        return;
+    }
+
+    UIView *overlay = [[UIView alloc] initWithFrame:hostWindow.bounds];
+    overlay.userInteractionEnabled = NO;
+    overlay.backgroundColor = UIColor.clearColor;
+
+    CAShapeLayer *layer = [CAShapeLayer layer];
+    layer.frame = overlay.bounds;
+    layer.strokeColor = UIColor.systemOrangeColor.CGColor;
+    layer.fillColor = UIColor.clearColor.CGColor;
+    layer.lineWidth = 3.0;
+    layer.lineCap = kCALineCapRound;
+    layer.lineJoin = kCALineJoinRound;
+
+    UIBezierPath *path = [UIBezierPath bezierPath];
+    CGPoint center = [hostWindow convertPoint:screenPoint fromWindow:nil];
+    if (mode == AnClickActionModeTwoFingerTap) {
+        CGFloat distance = 72.0;
+        CGPoint left = CGPointMake(center.x - distance * 0.5, center.y);
+        CGPoint right = CGPointMake(center.x + distance * 0.5, center.y);
+        [path moveToPoint:left];
+        [path addLineToPoint:right];
+        [path appendPath:[UIBezierPath bezierPathWithOvalInRect:CGRectMake(left.x - 8, left.y - 8, 16, 16)]];
+        [path appendPath:[UIBezierPath bezierPathWithOvalInRect:CGRectMake(right.x - 8, right.y - 8, 16, 16)]];
+    } else if (mode == AnClickActionModePinchIn || mode == AnClickActionModePinchOut) {
+        CGFloat fromDistance = (mode == AnClickActionModePinchIn) ? 168.0 : 58.0;
+        CGFloat toDistance = (mode == AnClickActionModePinchIn) ? 58.0 : 168.0;
+        CGPoint startA = CGPointMake(center.x - fromDistance * 0.5, center.y);
+        CGPoint endA = CGPointMake(center.x - toDistance * 0.5, center.y);
+        CGPoint startB = CGPointMake(center.x + fromDistance * 0.5, center.y);
+        CGPoint endB = CGPointMake(center.x + toDistance * 0.5, center.y);
+        [path moveToPoint:startA];
+        [path addLineToPoint:endA];
+        [path moveToPoint:startB];
+        [path addLineToPoint:endB];
+        [path appendPath:[UIBezierPath bezierPathWithOvalInRect:CGRectMake(endA.x - 5, endA.y - 5, 10, 10)]];
+        [path appendPath:[UIBezierPath bezierPathWithOvalInRect:CGRectMake(endB.x - 5, endB.y - 5, 10, 10)]];
+    } else if (mode == AnClickActionModeRotate) {
+        [path addArcWithCenter:center radius:64.0 startAngle:(CGFloat)(-M_PI / 4.0) endAngle:(CGFloat)(M_PI * 0.75) clockwise:YES];
+        CGPoint start = CGPointMake(center.x + cos(-M_PI / 4.0) * 64.0,
+                                    center.y + sin(-M_PI / 4.0) * 64.0);
+        [path appendPath:[UIBezierPath bezierPathWithOvalInRect:CGRectMake(start.x - 5, start.y - 5, 10, 10)]];
+    }
+
+    layer.path = path.CGPath;
+    [overlay.layer addSublayer:layer];
+    [hostWindow addSubview:overlay];
+    _operationTraceView = overlay;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(duration, 0.6) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [overlay removeFromSuperview];
+        if (self->_operationTraceView == overlay) {
+            self->_operationTraceView = nil;
         }
     });
 }
@@ -738,7 +919,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return;
     }
 
-    [self showTapMarkerAtScreenPoint:point inWindow:hostWindow];
+    NSTimeInterval operationTraceDuration = (_actionMode == AnClickActionModeLongPress) ? 5.2 : 1.0;
+    [self showOperationTraceForMode:_actionMode atPoint:point inWindow:hostWindow duration:operationTraceDuration];
     if (_actionMode == AnClickActionModeDoubleTap) {
         [AnClickFakeTouch doubleTapAtPoint:point];
         _statusLabel.text = [NSString stringWithFormat:@"双 %.0f,%.0f", point.x, point.y];
@@ -786,6 +968,27 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return [self recordedSwipePointsAnchoredAtPoint:_manualSwipeAnchor];
     }
     return [_recordedSwipePoints copy];
+}
+
+- (NSArray<NSValue *> *)recordedMacroTrajectoryPoints {
+    if (_recordedMacroEvents.count == 0) {
+        return @[];
+    }
+
+    NSMutableArray<NSValue *> *points = [NSMutableArray array];
+    for (NSDictionary *event in _recordedMacroEvents) {
+        NSNumber *typeNumber = event[@"type"];
+        NSNumber *xNumber = event[@"x"];
+        NSNumber *yNumber = event[@"y"];
+        if (!typeNumber || !xNumber || !yNumber) {
+            continue;
+        }
+        NSInteger type = typeNumber.integerValue;
+        if (type == 0 || type == 1 || type == 2) {
+            [points addObject:[NSValue valueWithCGPoint:CGPointMake(xNumber.doubleValue, yNumber.doubleValue)]];
+        }
+    }
+    return points;
 }
 
 - (void)beginPointPicking {
@@ -1159,7 +1362,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return;
     }
     CGPoint point = _manualActionPoints[(NSUInteger)_actionMode];
-    [self showTapMarkerAtScreenPoint:point inWindow:hostWindow];
+    NSTimeInterval previewDuration = (_actionMode == AnClickActionModeLongPress) ? 2.0 : 1.0;
+    [self showOperationTraceForMode:_actionMode atPoint:point inWindow:hostWindow duration:previewDuration];
     _statusLabel.text = [NSString stringWithFormat:@"预览%@ %.0f,%.0f", [self currentActionName], point.x, point.y];
 }
 
@@ -1216,6 +1420,12 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
 
     [self preparePanelForExternalTapWithHostWindow:hostWindow];
+    NSArray<NSValue *> *trajectory = [self recordedMacroTrajectoryPoints];
+    if (trajectory.count >= 2) {
+        [self showTrajectoryForScreenPoints:trajectory inWindow:hostWindow duration:1.2];
+    } else if (trajectory.count == 1) {
+        [self showTapMarkerAtScreenPoint:trajectory.firstObject.CGPointValue inWindow:hostWindow];
+    }
     [AnClickFakeTouch playRecordedEvents:_recordedMacroEvents];
     _statusLabel.text = [NSString stringWithFormat:@"回放 %lu步", (unsigned long)_recordedMacroEvents.count];
 }
@@ -1302,7 +1512,21 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [self updateLiveTrajectoryInWindow:hostWindow];
 }
 
+- (dispatch_queue_t)templateSearchQueue {
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        queue = dispatch_queue_create("com.anclick.template-search", DISPATCH_QUEUE_SERIAL);
+    });
+    return queue;
+}
+
 - (void)playTemplateTap {
+    if (_templateSearchInProgress) {
+        _statusLabel.text = @"识图中";
+        return;
+    }
+
     NSString *path = [self templatePath];
     UIImage *templateImage = [[NSFileManager defaultManager] fileExistsAtPath:path] ? [UIImage imageWithContentsOfFile:path] : nil;
     if (!templateImage) {
@@ -1312,19 +1536,43 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     _statusLabel.text = @"寻找";
     UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        _statusLabel.text = @"无窗口";
+        return;
+    }
+    _templateSearchInProgress = YES;
+    _playButton.enabled = NO;
+    _playButton.alpha = 0.55;
     [self preparePanelForExternalTapWithHostWindow:hostWindow];
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSValue *pointValue = [AnClickCore findTemplateImage:templateImage threshold:0.86];
+    dispatch_async([self templateSearchQueue], ^{
+        NSDictionary *match = [AnClickCore findTemplateImageMatch:templateImage threshold:0.86];
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (!pointValue) {
+            self->_templateSearchInProgress = NO;
+            self->_playButton.enabled = YES;
+            self->_playButton.alpha = 1.0;
+            if (!match) {
                 [self restorePanelAfterExternalTap];
                 self->_statusLabel.text = @"未找到";
                 return;
             }
+            NSValue *pointValue = match[@"point"];
+            NSValue *rectValue = match[@"rect"];
+            NSNumber *scoreNumber = match[@"score"];
+            if (!pointValue || !rectValue) {
+                [self restorePanelAfterExternalTap];
+                self->_statusLabel.text = @"识别异常";
+                return;
+            }
             CGPoint point = pointValue.CGPointValue;
+            CGRect rect = rectValue.CGRectValue;
             UIWindow *currentHostWindow = [self hostWindow] ?: hostWindow;
             [self preparePanelForExternalTapWithHostWindow:currentHostWindow];
+            [self showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.6];
             [self performSelectedActionAtPoint:point inWindow:currentHostWindow];
+            self->_statusLabel.text = [NSString stringWithFormat:@"识别 %.2f  %.0f,%.0f",
+                                      scoreNumber.doubleValue,
+                                      point.x,
+                                      point.y];
         });
     });
 }
