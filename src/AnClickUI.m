@@ -4,6 +4,7 @@
 #import <math.h>
 
 typedef NS_ENUM(NSInteger, AnClickActionMode) {
+    AnClickActionModeNone = -1,
     AnClickActionModeTap = 0,
     AnClickActionModeDoubleTap = 1,
     AnClickActionModeLongPress = 2,
@@ -180,7 +181,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 - (void)buildPanel {
     CGFloat panelWidth = MIN(348.0, UIScreen.mainScreen.bounds.size.width - 16.0);
     CGFloat panelHeight = MIN(420.0, UIScreen.mainScreen.bounds.size.height - 72.0);
-    _actionMode = AnClickActionModeTap;
+    _actionMode = AnClickActionModeNone;
     _selectedTaskIndex = -1;
     _draggingTaskIndex = -1;
     _imageUsesMatchPoint = YES;
@@ -236,11 +237,18 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     CGFloat gap = 7.0;
     CGFloat modeWidth = floor((panelWidth - gap * 4.0) / 3.0);
-    NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"滑动", @"二指", @"缩小", @"放大", @"旋转", @"识图"];
+    NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"滑动", @"识图"];
+    NSArray<NSNumber *> *modeTags = @[
+        @(AnClickActionModeTap),
+        @(AnClickActionModeDoubleTap),
+        @(AnClickActionModeLongPress),
+        @(AnClickActionModeSwipe),
+        @(AnClickActionModeImage),
+    ];
     NSMutableArray<UIButton *> *modeButtons = [NSMutableArray array];
     for (NSUInteger i = 0; i < modeTitles.count; i++) {
         UIButton *button = [self panelButtonWithTitle:modeTitles[i] action:@selector(selectActionMode:)];
-        button.tag = (NSInteger)i;
+        button.tag = [modeTags[i] integerValue];
         NSUInteger row = i / 3;
         NSUInteger column = i % 3;
         button.frame = CGRectMake(gap + (modeWidth + gap) * column, 8 + row * 36, modeWidth, 30);
@@ -584,15 +592,29 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     return names[(NSUInteger)mode];
 }
 
+- (BOOL)isSelectableActionMode:(AnClickActionMode)mode {
+    return mode == AnClickActionModeTap ||
+        mode == AnClickActionModeDoubleTap ||
+        mode == AnClickActionModeLongPress ||
+        mode == AnClickActionModeSwipe ||
+        mode == AnClickActionModeImage;
+}
+
+- (AnClickActionMode)modeForTask:(NSDictionary *)task {
+    NSNumber *modeNumber = task[@"mode"];
+    if (!modeNumber) {
+        return AnClickActionModeNone;
+    }
+
+    AnClickActionMode mode = (AnClickActionMode)modeNumber.integerValue;
+    return [self isSelectableActionMode:mode] ? mode : AnClickActionModeNone;
+}
+
 - (NSArray<NSNumber *> *)imageActionModes {
     return @[
         @(AnClickActionModeTap),
         @(AnClickActionModeDoubleTap),
         @(AnClickActionModeLongPress),
-        @(AnClickActionModeTwoFingerTap),
-        @(AnClickActionModePinchIn),
-        @(AnClickActionModePinchOut),
-        @(AnClickActionModeRotate),
     ];
 }
 
@@ -786,7 +808,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [_clearConfigButton setTitle:@"清除" forState:UIControlStateNormal];
     [_swipeRecordButton setTitle:@"录制" forState:UIControlStateNormal];
 
-    if (_actionMode == AnClickActionModeImage) {
+    if (_actionMode == AnClickActionModeNone) {
+        [self layoutConfigButtons:@[_editorBackButton] y:180.0];
+    } else if (_actionMode == AnClickActionModeImage) {
         [self layoutConfigButtons:@[_captureButton, _playButton, _pickPointButton, _imageActionButton] y:180.0];
         [self layoutTimingFieldsAtY:218.0];
         [self layoutConfigButtons:@[_previewActionButton, _runManualButton, _saveTaskButton, _editorBackButton] y:256.0];
@@ -803,6 +827,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)updateStatusForCurrentConfig {
+    if (_actionMode == AnClickActionModeNone) {
+        _statusLabel.text = @"请选择动作";
+        return;
+    }
+
     if (_actionMode == AnClickActionModeImage) {
         NSString *templateState = [self currentTemplateExists] ? @"有模板" : @"先截图";
         NSString *targetState = _imageUsesMatchPoint ? @"识别点" : @"先取点击点";
@@ -917,6 +946,12 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)beginTemplateCapture {
+    if (_actionMode == AnClickActionModeNone) {
+        _actionMode = AnClickActionModeImage;
+        _imageUsesMatchPoint = YES;
+        [self refreshModeButtons];
+        [self refreshEditorConfigControls];
+    }
     if (_actionMode != AnClickActionModeImage) {
         _actionMode = AnClickActionModeImage;
         _imageUsesMatchPoint = YES;
@@ -1547,6 +1582,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)performSelectedActionAtPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow {
+    if (_actionMode == AnClickActionModeNone) {
+        _statusLabel.text = @"先选择动作";
+        return;
+    }
+
     [self preparePanelForExternalTapWithHostWindow:hostWindow];
 
     if (_actionMode == AnClickActionModeSwipe) {
@@ -1637,6 +1677,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 - (NSMutableDictionary *)taskDictionaryFromCurrentConfigRequireComplete:(BOOL)requireComplete {
     [self syncActionDescriptionFromField];
+    [self syncActionTimingFromFields];
+    if (_actionMode == AnClickActionModeNone) {
+        if (requireComplete) {
+            _statusLabel.text = @"先选择动作";
+        }
+        return nil;
+    }
+
     NSMutableDictionary *task = [@{
         @"mode": @(_actionMode),
         @"delay": @(_actionDelay),
@@ -1696,10 +1744,16 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (NSString *)titleForTask:(NSDictionary *)task index:(NSUInteger)index {
-    AnClickActionMode mode = (AnClickActionMode)[task[@"mode"] integerValue];
+    AnClickActionMode mode = [self modeForTask:task];
     NSString *name = [self actionNameForMode:mode];
     NSString *desc = [self trimmedActionDescription:task[@"desc"]];
     NSString *suffix = [self commonSuffixForTask:task];
+    if (mode == AnClickActionModeNone) {
+        return [NSString stringWithFormat:@"%lu  %@未选择动作%@",
+                (unsigned long)index + 1,
+                desc.length > 0 ? [NSString stringWithFormat:@"%@ ", desc] : @"",
+                suffix];
+    }
     if (mode == AnClickActionModeImage) {
         NSString *templatePath = task[@"templatePath"];
         BOOL hasTemplate = templatePath.length > 0 && [[NSFileManager defaultManager] fileExistsAtPath:templatePath];
@@ -1819,11 +1873,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)addTaskFromCurrentConfig {
-    NSMutableDictionary *task = [@{
-        @"mode": @(AnClickActionModeTap),
-        @"delay": @(0),
-        @"repeat": @(1),
-    } mutableCopy];
+    NSMutableDictionary *task = [NSMutableDictionary dictionary];
     [_taskItems addObject:task];
     _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
     [self showTaskHome];
@@ -1869,17 +1919,16 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     _selectedTaskIndex = index;
     NSDictionary *task = _taskItems[(NSUInteger)index];
-    AnClickActionMode mode = (AnClickActionMode)[task[@"mode"] integerValue];
-    if (mode < AnClickActionModeTap || mode >= AnClickActionModeCount) {
-        mode = AnClickActionModeTap;
-    }
-    _actionMode = mode;
+    AnClickActionMode mode = [self modeForTask:task];
     [self resetEditorActionState];
+    _actionMode = mode;
     _actionDelay = MAX(0.0, [task[@"delay"] doubleValue]);
     _actionRepeatCount = MAX(1, [task[@"repeat"] integerValue]);
     _actionDescription = [self trimmedActionDescription:task[@"desc"]];
 
-    if (mode == AnClickActionModeImage) {
+    if (mode == AnClickActionModeNone) {
+        _statusLabel.text = @"请选择动作";
+    } else if (mode == AnClickActionModeImage) {
         _currentTemplatePath = task[@"templatePath"];
         NSNumber *useMatchPointNumber = task[@"useMatchPoint"];
         _imageUsesMatchPoint = useMatchPointNumber ? useMatchPointNumber.boolValue : YES;
@@ -1898,7 +1947,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
             _hasManualSwipeAnchor = YES;
             _hasManualSwipeEndPoint = YES;
         }
-    } else {
+    } else if ([self isSelectableActionMode:mode] && mode != AnClickActionModeSwipe && mode != AnClickActionModeImage) {
         NSValue *pointValue = task[@"point"];
         if (pointValue) {
             _manualActionPoints[(NSUInteger)mode] = pointValue.CGPointValue;
@@ -2049,9 +2098,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (BOOL)taskIsComplete:(NSDictionary *)task {
-    AnClickActionMode mode = (AnClickActionMode)[task[@"mode"] integerValue];
-    if (mode < AnClickActionModeTap || mode >= AnClickActionModeCount) {
-        _statusLabel.text = @"任务模式错误";
+    AnClickActionMode mode = [self modeForTask:task];
+    if (mode == AnClickActionModeNone) {
+        _statusLabel.text = @"任务未选择动作";
         return NO;
     }
     if (mode == AnClickActionModeSwipe) {
@@ -2089,7 +2138,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return 0;
     }
 
-    AnClickActionMode mode = (AnClickActionMode)[task[@"mode"] integerValue];
+    AnClickActionMode mode = [self modeForTask:task];
     NSInteger repeatCount = [self repeatCountForTask:task];
     NSTimeInterval delay = [self delayForTask:task];
     NSTimeInterval duration = [self durationForTaskMode:mode];
@@ -2154,6 +2203,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)beginPointPicking {
+    if (_actionMode == AnClickActionModeNone) {
+        _statusLabel.text = @"先选择动作";
+        return;
+    }
+
     UIWindow *hostWindow = [self hostWindow];
     if (!hostWindow) {
         _statusLabel.text = @"无窗口";
@@ -2438,6 +2492,12 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     CGPoint screenPoint = _pendingPointPickPoint;
 
+    if (_actionMode == AnClickActionModeNone) {
+        [self cancelPointPicking];
+        _statusLabel.text = @"先选择动作";
+        return;
+    }
+
     if (_actionMode == AnClickActionModeSwipe) {
         if (!_pickingSwipeEndPoint) {
             _manualSwipeAnchor = screenPoint;
@@ -2495,6 +2555,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)previewCurrentAction {
+    if (_actionMode == AnClickActionModeNone) {
+        _statusLabel.text = @"先选择动作";
+        return;
+    }
+
     UIWindow *hostWindow = [self hostWindow];
     if (!hostWindow) {
         _statusLabel.text = @"无窗口";
@@ -2538,6 +2603,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)clearCurrentActionConfig {
+    if (_actionMode == AnClickActionModeNone) {
+        _statusLabel.text = @"请选择动作";
+        return;
+    }
+
     if (_actionMode == AnClickActionModeImage) {
         _currentTemplatePath = nil;
         _imageUsesMatchPoint = YES;
