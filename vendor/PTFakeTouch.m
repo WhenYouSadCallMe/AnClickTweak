@@ -53,6 +53,19 @@ extern IOHIDEventRef IOHIDEventCreateDigitizerFingerEventWithQuality(CFAllocator
                                                                      Boolean range,
                                                                      Boolean touch,
                                                                      IOOptionBits options);
+extern IOHIDEventRef IOHIDEventCreateDigitizerFingerEvent(CFAllocatorRef allocator,
+                                                          uint64_t timeStamp,
+                                                          uint32_t identity,
+                                                          uint32_t index,
+                                                          uint32_t eventMask,
+                                                          IOHIDFloat x,
+                                                          IOHIDFloat y,
+                                                          IOHIDFloat z,
+                                                          IOHIDFloat tipPressure,
+                                                          IOHIDFloat twist,
+                                                          Boolean range,
+                                                          Boolean touch,
+                                                          IOOptionBits options);
 extern void IOHIDEventAppendEvent(IOHIDEventRef event, IOHIDEventRef childEvent, IOOptionBits options);
 extern void IOHIDEventSetIntegerValue(IOHIDEventRef event, IOHIDEventField field, int value);
 extern void IOHIDEventSetSenderID(IOHIDEventRef event, uint64_t sender);
@@ -322,38 +335,25 @@ static void AnClickPrepareHIDEventForWindow(IOHIDEventRef event, UIWindow *windo
 }
 
 static uint32_t AnClickDigitizerEventMaskForPhase(UITouchPhase phase) {
-    if (phase == UITouchPhaseBegan) {
-        return kIOHIDDigitizerEventPosition |
-               kIOHIDDigitizerEventIdentity |
-               kIOHIDDigitizerEventRange |
-               kIOHIDDigitizerEventTouch |
-               kIOHIDDigitizerEventAttribute |
-               kIOHIDDigitizerEventStart;
+    uint32_t mask = 0;
+    if (phase == UITouchPhaseBegan || phase == UITouchPhaseEnded || phase == UITouchPhaseCancelled) {
+        mask |= kIOHIDDigitizerEventRange | kIOHIDDigitizerEventTouch;
     }
     if (phase == UITouchPhaseMoved) {
-        return kIOHIDDigitizerEventPosition |
-               kIOHIDDigitizerEventIdentity;
-    }
-    if (phase == UITouchPhaseEnded) {
-        return kIOHIDDigitizerEventPosition |
-               kIOHIDDigitizerEventIdentity |
-               kIOHIDDigitizerEventRange |
-               kIOHIDDigitizerEventTouch |
-               kIOHIDDigitizerEventAttribute |
-               kIOHIDDigitizerEventStop;
+        mask |= kIOHIDDigitizerEventPosition;
     }
     if (phase == UITouchPhaseCancelled) {
-        return kIOHIDDigitizerEventPosition |
-               kIOHIDDigitizerEventIdentity |
-               kIOHIDDigitizerEventRange |
-               kIOHIDDigitizerEventTouch |
-               kIOHIDDigitizerEventAttribute |
-               kIOHIDDigitizerEventCancel |
-               kIOHIDDigitizerEventStop;
+        mask |= kIOHIDDigitizerEventCancel;
     }
-    return kIOHIDDigitizerEventIdentity |
-           kIOHIDDigitizerEventRange |
-           kIOHIDDigitizerEventTouch;
+    if (mask == 0) {
+        mask = kIOHIDDigitizerEventIdentity;
+    }
+    return mask;
+}
+
+static uint32_t AnClickHandEventMaskForPhase(UITouchPhase phase) {
+    uint32_t fingerMask = AnClickDigitizerEventMaskForPhase(phase);
+    return fingerMask & (kIOHIDDigitizerEventTouch | kIOHIDDigitizerEventAttribute);
 }
 
 static IOHIDEventRef AnClickIOHIDEventWithTouches(NSArray<UITouch *> *touches) {
@@ -419,7 +419,8 @@ static IOHIDEventRef AnClickIOHIDEventWithTouches(NSArray<UITouch *> *touches) {
 
 static IOHIDEventRef AnClickCreateScreenHIDEvent(CGPoint screenPoint, NSInteger touchId, UITouchPhase phase) CF_RETURNS_RETAINED {
     BOOL touching = phase != UITouchPhaseEnded && phase != UITouchPhaseCancelled;
-    uint32_t eventMask = AnClickDigitizerEventMaskForPhase(phase);
+    uint32_t handEventMask = AnClickHandEventMaskForPhase(phase);
+    uint32_t fingerEventMask = AnClickDigitizerEventMaskForPhase(phase);
 
     uint64_t timeStamp = mach_absolute_time();
     uint32_t identity = (uint32_t)MAX(1, touchId);
@@ -430,15 +431,15 @@ static IOHIDEventRef AnClickCreateScreenHIDEvent(CGPoint screenPoint, NSInteger 
                                                              timeStamp,
                                                              kIOHIDDigitizerTransducerTypeHand,
                                                              0,
-                                                             identity,
-                                                             eventMask,
+                                                             0,
+                                                             handEventMask,
                                                              0,
                                                              0,
                                                              0,
                                                              0,
                                                              0,
                                                              0,
-                                                             touching,
+                                                             false,
                                                              touching,
                                                              0);
     if (!handEvent) {
@@ -448,24 +449,19 @@ static IOHIDEventRef AnClickCreateScreenHIDEvent(CGPoint screenPoint, NSInteger 
     IOHIDEventSetIntegerValue(handEvent, kIOHIDEventFieldDigitizerIsDisplayIntegrated, 1);
     IOHIDEventSetSenderID(handEvent, 0x8000000817319373ULL);
 
-    IOHIDEventRef fingerEvent = IOHIDEventCreateDigitizerFingerEventWithQuality(kCFAllocatorDefault,
-                                                                                timeStamp,
-                                                                                1,
-                                                                                identity,
-                                                                                eventMask,
-                                                                                x,
-                                                                                y,
-                                                                                0,
-                                                                                touching ? 0.5 : 0,
-                                                                                0,
-                                                                                5,
-                                                                                5,
-                                                                                1,
-                                                                                1,
-                                                                                1,
-                                                                                touching,
-                                                                                touching,
-                                                                                0);
+    IOHIDEventRef fingerEvent = IOHIDEventCreateDigitizerFingerEvent(kCFAllocatorDefault,
+                                                                     timeStamp,
+                                                                     identity,
+                                                                     1,
+                                                                     fingerEventMask,
+                                                                     x,
+                                                                     y,
+                                                                     0,
+                                                                     touching ? 0.5 : 0,
+                                                                     0,
+                                                                     touching,
+                                                                     touching,
+                                                                     0);
     if (fingerEvent) {
         IOHIDEventSetIntegerValue(fingerEvent, kIOHIDEventFieldDigitizerIsDisplayIntegrated, 1);
         IOHIDEventSetSenderID(fingerEvent, 0x8000000817319373ULL);
@@ -476,10 +472,10 @@ static IOHIDEventRef AnClickCreateScreenHIDEvent(CGPoint screenPoint, NSInteger 
     return handEvent;
 }
 
-static void AnClickEnqueueApplicationHIDTouch(CGPoint screenPoint, NSInteger touchId, UITouchPhase phase, UIWindow *window) {
+static BOOL AnClickEnqueueApplicationHIDTouch(CGPoint screenPoint, NSInteger touchId, UITouchPhase phase, UIWindow *window) {
     UIApplication *application = UIApplication.sharedApplication;
     if (![application respondsToSelector:@selector(_enqueueHIDEvent:)]) {
-        return;
+        return NO;
     }
 
     IOHIDEventRef pointEvent = AnClickCreateScreenHIDEvent(screenPoint, touchId, phase);
@@ -487,7 +483,9 @@ static void AnClickEnqueueApplicationHIDTouch(CGPoint screenPoint, NSInteger tou
         AnClickPrepareHIDEventForWindow(pointEvent, window);
         [application _enqueueHIDEvent:pointEvent];
         CFRelease(pointEvent);
+        return YES;
     }
+    return NO;
 }
 
 static IOHIDEventSystemClientRef AnClickSystemClient(void) {
@@ -643,13 +641,15 @@ static void AnClickSetEventWithTouches(UIEvent *event, NSArray<UITouch *> *touch
 
     uint32_t identity = [touch anclick_identity] ?: (uint32_t)MAX(1, pointId);
     UIWindow *eventWindow = touch.window;
-    UIEvent *event = [UIApplication.sharedApplication respondsToSelector:@selector(_touchesEvent)]
-        ? [UIApplication.sharedApplication _touchesEvent]
-        : [[UIEvent alloc] init];
-    AnClickSetEventWithTouches(event, @[touch]);
-    [UIApplication.sharedApplication sendEvent:event];
-    AnClickEnqueueApplicationHIDTouch(point, identity, phase, eventWindow);
-    AnClickDispatchSystemTouch(point, identity, phase, eventWindow);
+    BOOL enqueuedHID = AnClickEnqueueApplicationHIDTouch(point, identity, phase, eventWindow);
+    if (!enqueuedHID) {
+        UIEvent *event = [UIApplication.sharedApplication respondsToSelector:@selector(_touchesEvent)]
+            ? [UIApplication.sharedApplication _touchesEvent]
+            : [[UIEvent alloc] init];
+        AnClickSetEventWithTouches(event, @[touch]);
+        [UIApplication.sharedApplication sendEvent:event];
+        AnClickDispatchSystemTouch(point, identity, phase, eventWindow);
+    }
 
     if (phase != UITouchPhaseStationary) {
         NSString *phaseName = @"ended";
