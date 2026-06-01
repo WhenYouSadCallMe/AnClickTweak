@@ -69,6 +69,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIButton *_runTasksButton;
     UIButton *_collapseButton;
     UIButton *_editorBackButton;
+    UIButton *_descriptionButton;
+    UIButton *_imageActionButton;
     NSArray<UIButton *> *_modeButtons;
     UIScrollView *_taskListView;
     UILabel *_statusLabel;
@@ -112,7 +114,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     NSTimeInterval _actionDelay;
     NSInteger _actionRepeatCount;
     NSString *_currentTemplatePath;
+    NSString *_actionDescription;
     AnClickActionMode _actionMode;
+    AnClickActionMode _imageActionMode;
 }
 
 + (instancetype)shared {
@@ -175,6 +179,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _selectedTaskIndex = -1;
     _draggingTaskIndex = -1;
     _imageUsesMatchPoint = YES;
+    _imageActionMode = AnClickActionModeTap;
     _actionDelay = 0;
     _actionRepeatCount = 1;
     if (!_recordedSwipePoints) {
@@ -293,8 +298,16 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _saveTaskButton.frame = CGRectMake(gap, 196, buttonWidth, 32);
     [_panelView addSubview:_saveTaskButton];
 
+    _descriptionButton = [self panelButtonWithTitle:@"备注" action:@selector(editActionDescription)];
+    _descriptionButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 196, buttonWidth, 32);
+    [_panelView addSubview:_descriptionButton];
+
+    _imageActionButton = [self panelButtonWithTitle:@"动作点击" action:@selector(cycleImageActionMode)];
+    _imageActionButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 196, buttonWidth, 32);
+    [_panelView addSubview:_imageActionButton];
+
     _editorBackButton = [self panelButtonWithTitle:@"返回" action:@selector(showTaskHome)];
-    _editorBackButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 196, buttonWidth, 32);
+    _editorBackButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 196, buttonWidth, 32);
     [_panelView addSubview:_editorBackButton];
 
     _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 52, panelWidth - 16, 24)];
@@ -379,6 +392,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _testButton.hidden = !visible;
     _saveTaskButton.hidden = !visible;
     _editorBackButton.hidden = !visible;
+    _descriptionButton.hidden = !visible;
+    _imageActionButton.hidden = !visible;
     _previewView.hidden = !visible || _previewView.image == nil;
 
     _addTaskButton.hidden = visible;
@@ -417,6 +432,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
     _currentTemplatePath = nil;
     _imageUsesMatchPoint = YES;
+    _imageActionMode = AnClickActionModeTap;
+    _actionDescription = nil;
     _actionDelay = 0;
     _actionRepeatCount = 1;
 }
@@ -507,6 +524,32 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     return names[(NSUInteger)mode];
 }
 
+- (NSArray<NSNumber *> *)imageActionModes {
+    return @[
+        @(AnClickActionModeTap),
+        @(AnClickActionModeDoubleTap),
+        @(AnClickActionModeLongPress),
+        @(AnClickActionModeTwoFingerTap),
+        @(AnClickActionModePinchIn),
+        @(AnClickActionModePinchOut),
+        @(AnClickActionModeRotate),
+    ];
+}
+
+- (AnClickActionMode)normalizedImageActionMode:(AnClickActionMode)mode {
+    for (NSNumber *modeNumber in [self imageActionModes]) {
+        if (modeNumber.integerValue == mode) {
+            return mode;
+        }
+    }
+    return AnClickActionModeTap;
+}
+
+- (NSString *)trimmedActionDescription:(NSString *)text {
+    NSString *trimmed = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return trimmed.length > 0 ? trimmed : nil;
+}
+
 - (BOOL)hasManualPointForMode:(AnClickActionMode)mode {
     if (mode < AnClickActionModeTap || mode >= AnClickActionModeCount || mode == AnClickActionModeSwipe) {
         return NO;
@@ -561,8 +604,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     BOOL isImage = (_actionMode == AnClickActionModeImage);
     _captureButton.hidden = !isImage;
+    _imageActionButton.hidden = !isImage;
     [_captureButton setTitle:@"截图" forState:UIControlStateNormal];
     [_playButton setTitle:(isImage ? (_imageUsesMatchPoint ? @"识别点" : @"指定点") : @"清除") forState:UIControlStateNormal];
+    [_descriptionButton setTitle:(_actionDescription.length > 0 ? @"备注*" : @"备注") forState:UIControlStateNormal];
+    [_imageActionButton setTitle:[NSString stringWithFormat:@"后%@", [self actionNameForMode:_imageActionMode]] forState:UIControlStateNormal];
     NSString *pickTitle = @"取点";
     if (_actionMode == AnClickActionModeSwipe) {
         pickTitle = (_hasManualSwipeAnchor && !_hasManualSwipeEndPoint) ? @"终点" : @"起点";
@@ -580,6 +626,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 - (void)updateStatusForCurrentConfig {
     NSString *summary = [self commonConfigSummary];
+    NSString *descPrefix = _actionDescription.length > 0 ? [NSString stringWithFormat:@"%@ ", _actionDescription] : @"";
     if (_actionMode == AnClickActionModeImage) {
         NSString *templateState = [self currentTemplateExists] ? @"有模板" : @"先截图";
         NSString *targetState = _imageUsesMatchPoint ? @"点识别处" : @"先取点击点";
@@ -587,7 +634,12 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
             CGPoint point = _manualActionPoints[(NSUInteger)AnClickActionModeImage];
             targetState = [NSString stringWithFormat:@"点%.0f,%.0f", point.x, point.y];
         }
-        _statusLabel.text = [NSString stringWithFormat:@"识图 %@ %@ %@", templateState, targetState, summary];
+        _statusLabel.text = [NSString stringWithFormat:@"%@识图 %@ %@ 后%@ %@",
+                             descPrefix,
+                             templateState,
+                             targetState,
+                             [self actionNameForMode:_imageActionMode],
+                             summary];
         return;
     }
 
@@ -600,16 +652,16 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         } else if (_recordedSwipePoints.count >= 2) {
             state = @"已录轨迹";
         }
-        _statusLabel.text = [NSString stringWithFormat:@"滑动 %@ %@", state, summary];
+        _statusLabel.text = [NSString stringWithFormat:@"%@滑动 %@ %@", descPrefix, state, summary];
         return;
     }
 
     NSString *name = [self currentActionName];
     if ([self hasManualPointForMode:_actionMode]) {
         CGPoint point = _manualActionPoints[(NSUInteger)_actionMode];
-        _statusLabel.text = [NSString stringWithFormat:@"%@ %.0f,%.0f %@", name, point.x, point.y, summary];
+        _statusLabel.text = [NSString stringWithFormat:@"%@%@ %.0f,%.0f %@", descPrefix, name, point.x, point.y, summary];
     } else {
-        _statusLabel.text = [NSString stringWithFormat:@"%@ 先取点 %@", name, summary];
+        _statusLabel.text = [NSString stringWithFormat:@"%@%@ 先取点 %@", descPrefix, name, summary];
     }
 }
 
@@ -621,6 +673,46 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return;
     }
     [self clearCurrentActionConfig];
+}
+
+- (void)cycleImageActionMode {
+    NSArray<NSNumber *> *modes = [self imageActionModes];
+    NSUInteger currentIndex = 0;
+    for (NSUInteger i = 0; i < modes.count; i++) {
+        if ([(NSNumber *)modes[i] integerValue] == _imageActionMode) {
+            currentIndex = i;
+            break;
+        }
+    }
+    NSUInteger nextIndex = (currentIndex + 1) % modes.count;
+    _imageActionMode = (AnClickActionMode)[(NSNumber *)modes[nextIndex] integerValue];
+    [self refreshEditorConfigControls];
+    [self updateStatusForCurrentConfig];
+}
+
+- (void)editActionDescription {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"任务备注"
+                                                                   message:nil
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+        textField.placeholder = @"例如：领取奖励";
+        textField.text = self->_actionDescription ?: @"";
+        textField.clearButtonMode = UITextFieldViewModeWhileEditing;
+    }];
+    __weak typeof(self) weakSelf = self;
+    __weak UIAlertController *weakAlert = alert;
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) {
+            return;
+        }
+        UITextField *textField = weakAlert.textFields.firstObject;
+        self->_actionDescription = [self trimmedActionDescription:textField.text];
+        [self refreshEditorConfigControls];
+        [self updateStatusForCurrentConfig];
+    }]];
+    [_panelWindow.rootViewController presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)decreaseActionDelay {
@@ -1402,6 +1494,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         @"delay": @(_actionDelay),
         @"repeat": @(MAX(1, _actionRepeatCount)),
     } mutableCopy];
+    if (_actionDescription.length > 0) {
+        task[@"desc"] = _actionDescription;
+    }
     if (_actionMode == AnClickActionModeImage) {
         NSString *templatePath = [self activeTemplatePath];
         if (templatePath.length > 0 && [[NSFileManager defaultManager] fileExistsAtPath:templatePath]) {
@@ -1411,6 +1506,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
             return nil;
         }
         task[@"useMatchPoint"] = @(_imageUsesMatchPoint);
+        task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
         if (!_imageUsesMatchPoint) {
             if ([self hasManualPointForMode:AnClickActionModeImage]) {
                 task[@"point"] = [NSValue valueWithCGPoint:_manualActionPoints[(NSUInteger)AnClickActionModeImage]];
@@ -1454,38 +1550,47 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 - (NSString *)titleForTask:(NSDictionary *)task index:(NSUInteger)index {
     AnClickActionMode mode = (AnClickActionMode)[task[@"mode"] integerValue];
     NSString *name = [self actionNameForMode:mode];
+    NSString *desc = [self trimmedActionDescription:task[@"desc"]];
     NSString *suffix = [self commonSuffixForTask:task];
     if (mode == AnClickActionModeImage) {
         NSString *templatePath = task[@"templatePath"];
         BOOL hasTemplate = templatePath.length > 0 && [[NSFileManager defaultManager] fileExistsAtPath:templatePath];
         BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
+        AnClickActionMode imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+        NSString *imageActionName = [self actionNameForMode:imageActionMode];
+        NSString *prefix = desc.length > 0 ? [NSString stringWithFormat:@"%@ ", desc] : @"";
         if (useMatchPoint) {
-            return [NSString stringWithFormat:@"%lu  %@ %@ 识别点%@",
+            return [NSString stringWithFormat:@"%lu  %@%@ %@ 识别点 后%@%@",
                     (unsigned long)index + 1,
+                    prefix,
                     name,
                     hasTemplate ? @"有模板" : @"未截图",
+                    imageActionName,
                     suffix];
         }
         NSValue *pointValue = task[@"point"];
         if (pointValue) {
             CGPoint point = pointValue.CGPointValue;
-            return [NSString stringWithFormat:@"%lu  %@ %@ %.0f,%.0f%@",
+            return [NSString stringWithFormat:@"%lu  %@%@ %@ %.0f,%.0f 后%@%@",
                     (unsigned long)index + 1,
+                    prefix,
                     name,
                     hasTemplate ? @"有模板" : @"未截图",
                     point.x,
                     point.y,
+                    imageActionName,
                     suffix];
         }
-        return [NSString stringWithFormat:@"%lu  %@ %@ 未取点%@", (unsigned long)index + 1, name, hasTemplate ? @"有模板" : @"未截图", suffix];
+        return [NSString stringWithFormat:@"%lu  %@%@ %@ 未取点 后%@%@", (unsigned long)index + 1, prefix, name, hasTemplate ? @"有模板" : @"未截图", imageActionName, suffix];
     }
     if (mode == AnClickActionModeSwipe) {
         NSArray<NSValue *> *path = task[@"path"];
         if (path.count >= 2) {
             CGPoint start = path.firstObject.CGPointValue;
             CGPoint end = path.lastObject.CGPointValue;
-            return [NSString stringWithFormat:@"%lu  %@ %.0f,%.0f→%.0f,%.0f%@",
+            return [NSString stringWithFormat:@"%lu  %@%@ %.0f,%.0f→%.0f,%.0f%@",
                     (unsigned long)index + 1,
+                    desc.length > 0 ? [NSString stringWithFormat:@"%@ ", desc] : @"",
                     name,
                     start.x,
                     start.y,
@@ -1493,20 +1598,21 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
                     end.y,
                     suffix];
         }
-        return [NSString stringWithFormat:@"%lu  %@ 未设置%@", (unsigned long)index + 1, name, suffix];
+        return [NSString stringWithFormat:@"%lu  %@%@ 未设置%@", (unsigned long)index + 1, desc.length > 0 ? [NSString stringWithFormat:@"%@ ", desc] : @"", name, suffix];
     }
 
     NSValue *pointValue = task[@"point"];
     if (pointValue) {
         CGPoint point = pointValue.CGPointValue;
-        return [NSString stringWithFormat:@"%lu  %@ %.0f,%.0f%@",
+        return [NSString stringWithFormat:@"%lu  %@%@ %.0f,%.0f%@",
                 (unsigned long)index + 1,
+                desc.length > 0 ? [NSString stringWithFormat:@"%@ ", desc] : @"",
                 name,
                 point.x,
                 point.y,
                 suffix];
     }
-    return [NSString stringWithFormat:@"%lu  %@ 未取点%@", (unsigned long)index + 1, name, suffix];
+    return [NSString stringWithFormat:@"%lu  %@%@ 未取点%@", (unsigned long)index + 1, desc.length > 0 ? [NSString stringWithFormat:@"%@ ", desc] : @"", name, suffix];
 }
 
 - (void)refreshTaskList {
@@ -1623,11 +1729,13 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [self resetEditorActionState];
     _actionDelay = MAX(0.0, [task[@"delay"] doubleValue]);
     _actionRepeatCount = MAX(1, [task[@"repeat"] integerValue]);
+    _actionDescription = [self trimmedActionDescription:task[@"desc"]];
 
     if (mode == AnClickActionModeImage) {
         _currentTemplatePath = task[@"templatePath"];
         NSNumber *useMatchPointNumber = task[@"useMatchPoint"];
         _imageUsesMatchPoint = useMatchPointNumber ? useMatchPointNumber.boolValue : YES;
+        _imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
         NSValue *pointValue = task[@"point"];
         if (pointValue) {
             _manualActionPoints[(NSUInteger)AnClickActionModeImage] = pointValue.CGPointValue;
@@ -1714,7 +1822,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return 0.86;
     }
     if (mode == AnClickActionModeImage) {
-        return 0.85;
+        return 1.45;
     }
     return 0.30;
 }
@@ -1760,6 +1868,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
 
     BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
+    AnClickActionMode imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
     NSValue *customPointValue = task[@"point"];
     _templateSearchInProgress = YES;
     dispatch_async([self templateSearchQueue], ^{
@@ -1781,9 +1890,12 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
             CGRect rect = rectValue.CGRectValue;
             [self showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.2];
             CGPoint actionPoint = useMatchPoint ? matchPointValue.CGPointValue : customPointValue.CGPointValue;
-            [self showOperationTraceForMode:AnClickActionModeTap atPoint:actionPoint inWindow:currentHostWindow duration:0.8];
-            [AnClickFakeTouch tapAtPoint:actionPoint];
-            self->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f 点%.0f,%.0f", scoreNumber.doubleValue, actionPoint.x, actionPoint.y];
+            [self performPointActionMode:imageActionMode atPoint:actionPoint inWindow:currentHostWindow];
+            self->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f %@ %.0f,%.0f",
+                                      scoreNumber.doubleValue,
+                                      [self actionNameForMode:imageActionMode],
+                                      actionPoint.x,
+                                      actionPoint.y];
         });
     });
 }
@@ -1833,6 +1945,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     NSInteger repeatCount = [self repeatCountForTask:task];
     NSTimeInterval delay = [self delayForTask:task];
     NSTimeInterval duration = [self durationForTaskMode:mode];
+    if (mode == AnClickActionModeImage) {
+        AnClickActionMode imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+        duration = 0.75 + [self durationForTaskMode:imageActionMode];
+    }
     NSTimeInterval interval = duration + 0.12;
 
     for (NSInteger i = 0; i < repeatCount; i++) {
@@ -2258,8 +2374,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
             return;
         }
         CGPoint point = _manualActionPoints[(NSUInteger)AnClickActionModeImage];
-        [self showOperationTraceForMode:AnClickActionModeTap atPoint:point inWindow:hostWindow duration:1.0];
-        _statusLabel.text = [NSString stringWithFormat:@"预览识图点 %.0f,%.0f", point.x, point.y];
+        [self showOperationTraceForMode:_imageActionMode atPoint:point inWindow:hostWindow duration:1.0];
+        _statusLabel.text = [NSString stringWithFormat:@"预览识图%@ %.0f,%.0f", [self actionNameForMode:_imageActionMode], point.x, point.y];
         return;
     }
 
