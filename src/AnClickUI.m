@@ -194,8 +194,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)buildPanel {
-    CGFloat panelWidth = MIN(390.0, UIScreen.mainScreen.bounds.size.width - 8.0);
-    CGFloat panelHeight = MIN(700.0, UIScreen.mainScreen.bounds.size.height - 48.0);
+    CGSize initialPanelSize = [self expandedPanelSizeForEditorVisible:NO];
+    CGFloat panelWidth = initialPanelSize.width;
+    CGFloat panelHeight = initialPanelSize.height;
     _actionMode = AnClickActionModeNone;
     _selectedTaskIndex = -1;
     _draggingTaskIndex = -1;
@@ -491,10 +492,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (CGSize)expandedPanelSize {
-    CGFloat width = MIN(390.0, UIScreen.mainScreen.bounds.size.width - 8.0);
-    CGFloat availableHeight = UIScreen.mainScreen.bounds.size.height - 48.0;
-    CGFloat preferredHeight = MIN(700.0, availableHeight);
-    CGFloat minHeight = MIN(520.0, availableHeight);
+    return [self expandedPanelSizeForEditorVisible:_taskEditorVisible];
+}
+
+- (CGSize)expandedPanelSizeForEditorVisible:(BOOL)editorVisible {
+    CGFloat width = MIN(340.0, UIScreen.mainScreen.bounds.size.width - 10.0);
+    CGFloat availableHeight = UIScreen.mainScreen.bounds.size.height - 60.0;
+    CGFloat preferredHeight = MIN(editorVisible ? 590.0 : 420.0, availableHeight);
+    CGFloat minHeight = MIN(editorVisible ? 520.0 : 340.0, availableHeight);
     return CGSizeMake(width, MAX(minHeight, preferredHeight));
 }
 
@@ -511,6 +516,13 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 - (void)setTaskEditorVisible:(BOOL)visible {
     _taskEditorVisible = visible;
+    if (_panelExpanded && _panelWindow && _panelView) {
+        CGRect frame = _panelWindow.frame;
+        frame.size = [self expandedPanelSizeForEditorVisible:visible];
+        _panelWindow.frame = [self clampedPanelFrame:frame];
+        _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
+        _panelView.frame = _panelWindow.bounds;
+    }
 
     for (UIButton *button in _modeButtons) {
         button.hidden = !visible;
@@ -564,20 +576,37 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     CGFloat width = _panelView.bounds.size.width;
     CGFloat height = _panelView.bounds.size.height;
-    CGFloat gap = 8.0;
-    CGFloat buttonWidth = floor((width - gap * 5.0) / 4.0);
+    CGFloat buttonSize = 46.0;
+    CGFloat totalWidth = buttonSize * 4.0 + 26.0 * 3.0;
+    CGFloat startX = MAX(12.0, (width - totalWidth) * 0.5);
+    CGFloat buttonY = height - buttonSize - 14.0;
     [_panelView viewWithTag:8811].hidden = YES;
 
     [_addTaskButton setTitle:[NSString stringWithFormat:@"添加%lu", (unsigned long)_taskItems.count] forState:UIControlStateNormal];
-    [_collapseButton setTitle:@"收起" forState:UIControlStateNormal];
-    _addTaskButton.frame = CGRectMake(gap, 8, buttonWidth, 38);
-    _deleteTaskButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 8, buttonWidth, 38);
-    _runTasksButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 8, buttonWidth, 38);
-    _collapseButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 8, buttonWidth, 38);
+    [_addTaskButton setTitle:@"+" forState:UIControlStateNormal];
+    [_deleteTaskButton setTitle:@"-" forState:UIControlStateNormal];
+    [_runTasksButton setTitle:@"▶" forState:UIControlStateNormal];
+    [_collapseButton setTitle:@"…" forState:UIControlStateNormal];
+    NSArray<UIButton *> *toolbarButtons = @[_addTaskButton, _deleteTaskButton, _collapseButton, _runTasksButton];
+    NSArray<UIColor *> *colors = @[
+        [UIColor colorWithRed:0.02 green:0.50 blue:0.95 alpha:0.95],
+        [UIColor colorWithRed:0.94 green:0.58 blue:0.04 alpha:0.95],
+        [UIColor colorWithRed:0.68 green:0.24 blue:0.86 alpha:0.95],
+        [UIColor colorWithRed:0.12 green:0.74 blue:0.30 alpha:0.95],
+    ];
+    for (NSUInteger i = 0; i < toolbarButtons.count; i++) {
+        UIButton *button = toolbarButtons[i];
+        button.frame = CGRectMake(startX + (buttonSize + 26.0) * i, buttonY, buttonSize, buttonSize);
+        button.layer.cornerRadius = buttonSize * 0.5;
+        button.layer.borderWidth = 0;
+        button.backgroundColor = colors[i];
+        button.titleLabel.font = [UIFont systemFontOfSize:26 weight:UIFontWeightBold];
+        [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    }
 
-    _statusLabel.frame = CGRectMake(10, 54, width - 20, 24);
+    _statusLabel.frame = CGRectMake(10, 10, width - 20, 24);
     _statusLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    _taskListView.frame = CGRectMake(8, 86, width - 16, height - 94);
+    _taskListView.frame = CGRectMake(10, 42, width - 20, MAX(80.0, buttonY - 50.0));
 }
 
 - (void)layoutEditorScaffold {
@@ -594,10 +623,18 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [_editorBackButton setTitle:@"‹" forState:UIControlStateNormal];
     _editorBackButton.titleLabel.font = [UIFont systemFontOfSize:34 weight:UIFontWeightBold];
     _editorBackButton.frame = CGRectMake(12, 8, 42, 40);
+    _editorBackButton.layer.cornerRadius = 20.0;
+    _editorBackButton.layer.borderWidth = 0;
+    _editorBackButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];
+    [_editorBackButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
 
     [_collapseButton setTitle:@"×" forState:UIControlStateNormal];
     _collapseButton.titleLabel.font = [UIFont systemFontOfSize:28 weight:UIFontWeightBold];
     _collapseButton.frame = CGRectMake(width - 54, 8, 42, 40);
+    _collapseButton.layer.cornerRadius = 20.0;
+    _collapseButton.layer.borderWidth = 0;
+    _collapseButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];
+    [_collapseButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
 
     _editorTitleLabel.text = (_actionMode == AnClickActionModeNone) ? @"选择动作" : [self currentActionName];
     _editorTitleLabel.frame = CGRectMake(66, 8, width - 132, 40);
@@ -614,19 +651,19 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     for (NSUInteger i = 0; i < _modeButtons.count; i++) {
         UIButton *button = _modeButtons[i];
-        button.frame = CGRectMake(side + (modeWidth + modeGap) * i, 68, modeWidth, 38);
+        button.frame = CGRectMake(side + (modeWidth + modeGap) * i, 64, modeWidth, 34);
     }
 
-    _statusLabel.frame = CGRectMake(16, 112, width - 32, 24);
+    _statusLabel.frame = CGRectMake(16, 102, width - 32, 22);
     _statusLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
 
-    _descriptionCaptionLabel.frame = CGRectMake(side, 146, width - side * 2.0, 22);
-    _descriptionField.frame = CGRectMake(side, 172, width - side * 2.0, 46);
+    _descriptionCaptionLabel.frame = CGRectMake(side, 130, width - side * 2.0, 20);
+    _descriptionField.frame = CGRectMake(side, 152, width - side * 2.0, 40);
 
-    CGFloat bottomButtonY = height - 58.0;
+    CGFloat bottomButtonY = height - 52.0;
     CGFloat bottomButtonWidth = floor((width - side * 2.0 - 12.0) / 2.0);
-    _cancelEditButton.frame = CGRectMake(side, bottomButtonY, bottomButtonWidth, 44);
-    _saveTaskButton.frame = CGRectMake(side + bottomButtonWidth + 12.0, bottomButtonY, bottomButtonWidth, 44);
+    _cancelEditButton.frame = CGRectMake(side, bottomButtonY, bottomButtonWidth, 40);
+    _saveTaskButton.frame = CGRectMake(side + bottomButtonWidth + 12.0, bottomButtonY, bottomButtonWidth, 40);
     [_saveTaskButton setTitle:@"确定" forState:UIControlStateNormal];
 }
 
@@ -1035,12 +1072,12 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _repeatCaptionLabel.text = @"执行次数（次数）";
     _delayCaptionLabel.hidden = NO;
     _repeatCaptionLabel.hidden = NO;
-    _delayCaptionLabel.frame = CGRectMake(side, y, fieldWidth, 22);
-    _repeatCaptionLabel.frame = CGRectMake(side + fieldWidth + gap, y, fieldWidth, 22);
+    _delayCaptionLabel.frame = CGRectMake(side, y, fieldWidth, 20);
+    _repeatCaptionLabel.frame = CGRectMake(side + fieldWidth + gap, y, fieldWidth, 20);
     _delayField.hidden = NO;
     _repeatField.hidden = NO;
-    _delayField.frame = CGRectMake(side, y + 26.0, fieldWidth, 46);
-    _repeatField.frame = CGRectMake(side + fieldWidth + gap, y + 26.0, fieldWidth, 46);
+    _delayField.frame = CGRectMake(side, y + 22.0, fieldWidth, 40);
+    _repeatField.frame = CGRectMake(side + fieldWidth + gap, y + 22.0, fieldWidth, 40);
 }
 
 - (void)layoutImageFieldsAtY:(CGFloat)y {
@@ -1057,9 +1094,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         CGFloat x = side + (fieldWidth + gap) * i;
         caption.text = titles[i];
         caption.hidden = NO;
-        caption.frame = CGRectMake(x, y, fieldWidth, 22);
+        caption.frame = CGRectMake(x, y, fieldWidth, 20);
         field.hidden = NO;
-        field.frame = CGRectMake(x, y + 26.0, fieldWidth, 46);
+        field.frame = CGRectMake(x, y + 22.0, fieldWidth, 38);
     }
 }
 
@@ -1097,42 +1134,46 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         CGFloat contentWidth = width - side * 2.0;
         _primaryConfigLabel.text = @"识别图像";
         _primaryConfigLabel.hidden = NO;
-        _primaryConfigLabel.frame = CGRectMake(side, 230, contentWidth, 22);
+        _primaryConfigLabel.frame = CGRectMake(side, 206, contentWidth, 20);
         [_captureButton setTitle:@"截图选择识别图像" forState:UIControlStateNormal];
         _captureButton.hidden = NO;
-        _captureButton.frame = CGRectMake(side, 256, contentWidth, 46);
+        _captureButton.frame = CGRectMake(side, 228, contentWidth, 40);
         _captureButton.backgroundColor = [UIColor colorWithRed:0.31 green:0.22 blue:0.12 alpha:0.82];
         _captureButton.layer.borderColor = [UIColor colorWithRed:0.94 green:0.55 blue:0.12 alpha:0.94].CGColor;
         [_captureButton setTitleColor:[UIColor colorWithRed:1.0 green:0.63 blue:0.16 alpha:1.0] forState:UIControlStateNormal];
 
-        BOOL roomy = _panelView.bounds.size.height >= 690.0;
-        CGFloat previewHeight = roomy ? 88.0 : 66.0;
-        CGFloat previewY = 306.0;
+        BOOL roomy = _panelView.bounds.size.height >= 580.0;
+        CGFloat previewHeight = roomy ? 58.0 : 44.0;
+        CGFloat previewY = 274.0;
         _previewView.hidden = NO;
         _previewView.frame = CGRectMake(side, previewY, contentWidth, previewHeight);
 
         _secondaryConfigLabel.text = @"点击模式";
         _secondaryConfigLabel.hidden = NO;
-        CGFloat modeLabelY = previewY + previewHeight + 8.0;
-        _secondaryConfigLabel.frame = CGRectMake(side, modeLabelY, contentWidth, 22);
+        CGFloat modeLabelY = previewY + previewHeight + 6.0;
+        _secondaryConfigLabel.frame = CGRectMake(side, modeLabelY, contentWidth, 20);
         [_playButton setTitle:@"识别图像位置" forState:UIControlStateNormal];
         [_pickPointButton setTitle:_imageUsesMatchPoint ? @"自定义位置" : [self pointSummaryForMode:AnClickActionModeImage emptyTitle:@"自定义位置"] forState:UIControlStateNormal];
-        CGFloat modeButtonY = modeLabelY + 24.0;
-        [self layoutButtons:@[_playButton, _pickPointButton] x:side y:modeButtonY width:contentWidth height:38 gap:10.0];
+        CGFloat modeButtonY = modeLabelY + 22.0;
+        [self layoutButtons:@[_playButton, _pickPointButton] x:side y:modeButtonY width:contentWidth height:34 gap:10.0];
         [self styleSegmentButton:_playButton selected:_imageUsesMatchPoint];
         [self styleSegmentButton:_pickPointButton selected:!_imageUsesMatchPoint];
 
         _tertiaryConfigLabel.text = @"成功后动作类型";
         _tertiaryConfigLabel.hidden = NO;
-        CGFloat actionLabelY = modeButtonY + 46.0;
-        _tertiaryConfigLabel.frame = CGRectMake(side, actionLabelY, contentWidth, 22);
-        CGFloat actionButtonY = actionLabelY + 24.0;
-        [self layoutButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton] x:side y:actionButtonY width:contentWidth height:38 gap:8.0];
+        CGFloat actionLabelY = modeButtonY + 40.0;
+        _tertiaryConfigLabel.frame = CGRectMake(side, actionLabelY, contentWidth, 20);
+        CGFloat actionButtonY = actionLabelY + 22.0;
+        [self layoutButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton] x:side y:actionButtonY width:contentWidth height:34 gap:8.0];
         [self styleSegmentButton:_recordSwipeButton selected:_imageActionMode == AnClickActionModeTap];
         [self styleSegmentButton:_previewSwipeButton selected:_imageActionMode == AnClickActionModeDoubleTap];
         [self styleSegmentButton:_clearActionButton selected:_imageActionMode == AnClickActionModeLongPress];
 
-        CGFloat fieldsY = actionButtonY + 44.0;
+        CGFloat fieldsY = actionButtonY + 40.0;
+        CGFloat bottomLimit = CGRectGetMinY(_saveTaskButton.frame) - 8.0;
+        if (fieldsY + 60.0 > bottomLimit) {
+            fieldsY = MAX(actionButtonY + 8.0, bottomLimit - 60.0);
+        }
         [self layoutImageFieldsAtY:fieldsY];
     } else if (_actionMode == AnClickActionModeSwipe) {
         _saveTaskButton.enabled = YES;
@@ -1142,20 +1183,20 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         CGFloat contentWidth = width - side * 2.0;
         _primaryConfigLabel.text = @"自定义位置";
         _primaryConfigLabel.hidden = NO;
-        _primaryConfigLabel.frame = CGRectMake(side, 230, contentWidth, 22);
+        _primaryConfigLabel.frame = CGRectMake(side, 206, contentWidth, 20);
         NSString *pickTitle = (_hasManualSwipeAnchor && !_hasManualSwipeEndPoint) ? @"继续选择终点" : [self pointSummaryForMode:AnClickActionModeSwipe emptyTitle:@"选择滑动起点"];
         [_pickPointButton setTitle:pickTitle forState:UIControlStateNormal];
         [self styleNormalButton:_pickPointButton];
         _pickPointButton.hidden = NO;
-        _pickPointButton.frame = CGRectMake(side, 256, contentWidth, 46);
+        _pickPointButton.frame = CGRectMake(side, 228, contentWidth, 40);
         [_swipeRecordButton setTitle:@"录制滑动轨迹" forState:UIControlStateNormal];
         [_previewActionButton setTitle:@"预览轨迹" forState:UIControlStateNormal];
         [_clearConfigButton setTitle:@"清除配置" forState:UIControlStateNormal];
         [self styleNormalButton:_swipeRecordButton];
         [self styleNormalButton:_previewActionButton];
         [self styleNormalButton:_clearConfigButton];
-        [self layoutButtons:@[_swipeRecordButton, _previewActionButton, _clearConfigButton] x:side y:312 width:contentWidth height:40 gap:8.0];
-        [self layoutDoubleTimingFieldsAtY:372];
+        [self layoutButtons:@[_swipeRecordButton, _previewActionButton, _clearConfigButton] x:side y:278 width:contentWidth height:36 gap:8.0];
+        [self layoutDoubleTimingFieldsAtY:330];
     } else {
         _saveTaskButton.enabled = YES;
         _saveTaskButton.alpha = 1.0;
@@ -1164,19 +1205,19 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         CGFloat contentWidth = width - side * 2.0;
         _primaryConfigLabel.text = @"自定义位置";
         _primaryConfigLabel.hidden = NO;
-        _primaryConfigLabel.frame = CGRectMake(side, 230, contentWidth, 22);
+        _primaryConfigLabel.frame = CGRectMake(side, 206, contentWidth, 20);
         [_pickPointButton setTitle:[self pointSummaryForMode:_actionMode emptyTitle:@"选择点击位置"] forState:UIControlStateNormal];
         [self styleNormalButton:_pickPointButton];
         _pickPointButton.hidden = NO;
-        _pickPointButton.frame = CGRectMake(side, 256, contentWidth, 46);
+        _pickPointButton.frame = CGRectMake(side, 228, contentWidth, 40);
         [_previewActionButton setTitle:@"预览位置" forState:UIControlStateNormal];
         [_runManualButton setTitle:@"测试执行" forState:UIControlStateNormal];
         [_playButton setTitle:@"清除配置" forState:UIControlStateNormal];
         [self styleNormalButton:_previewActionButton];
         [self styleNormalButton:_runManualButton];
         [self styleNormalButton:_playButton];
-        [self layoutButtons:@[_previewActionButton, _runManualButton, _playButton] x:side y:312 width:contentWidth height:40 gap:8.0];
-        [self layoutDoubleTimingFieldsAtY:372];
+        [self layoutButtons:@[_previewActionButton, _runManualButton, _playButton] x:side y:278 width:contentWidth height:36 gap:8.0];
+        [self layoutDoubleTimingFieldsAtY:330];
     }
     [self refreshTemplatePreview];
 }
@@ -2108,8 +2149,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 - (NSString *)titleForTask:(NSDictionary *)task index:(NSUInteger)index {
     AnClickActionMode mode = [self modeForTask:task];
-    NSString *name = (mode == AnClickActionModeNone) ? @"未选择动作" : [self actionNameForMode:mode];
-    return [NSString stringWithFormat:@"%lu  %@", (unsigned long)index + 1, name];
+    NSString *name = (mode == AnClickActionModeNone) ? @"未设置" : [self actionNameForMode:mode];
+    NSString *desc = [self trimmedActionDescription:task[@"desc"]];
+    NSString *subtitle = desc.length > 0 ? desc : (mode == AnClickActionModeNone ? @"未设置" : @"已设置");
+    return [NSString stringWithFormat:@"任务 %lu - %@\n%@", (unsigned long)index + 1, name, subtitle];
 }
 
 - (void)refreshTaskList {
@@ -2128,7 +2171,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [view removeFromSuperview];
     }
 
-    CGFloat rowHeight = 42.0;
+    CGFloat rowHeight = 78.0;
     CGFloat width = _taskListView.bounds.size.width;
     if (_taskItems.count == 0) {
         UILabel *emptyLabel = [[UILabel alloc] initWithFrame:CGRectMake(12.0, 18.0, width - 24.0, 46.0)];
@@ -2141,11 +2184,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [_taskListView addSubview:emptyLabel];
     }
     for (NSUInteger i = 0; i < _taskItems.count; i++) {
-        CGFloat rowY = 6.0 + rowHeight * i;
+        CGFloat rowY = 8.0 + rowHeight * i;
         UIButton *deleteButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        deleteButton.tag = (NSInteger)i;
+        deleteButton.tag = 50000 + (NSInteger)i;
         deleteButton.accessibilityIdentifier = @"AnClickTaskDelete";
-        deleteButton.frame = CGRectMake(6.0, rowY, 78.0, 36.0);
+        deleteButton.frame = CGRectMake(6.0, rowY, 82.0, 68.0);
         [deleteButton setTitle:@"删除" forState:UIControlStateNormal];
         [deleteButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
         deleteButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
@@ -2153,26 +2196,29 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         deleteButton.layer.cornerRadius = 4;
         deleteButton.layer.borderWidth = 1;
         deleteButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.34 blue:0.30 alpha:0.85].CGColor;
+        deleteButton.hidden = (NSInteger)i != _revealedDeleteTaskIndex;
+        deleteButton.alpha = deleteButton.hidden ? 0.0 : 1.0;
         [deleteButton addTarget:self action:@selector(deleteTaskButtonAtIndex:) forControlEvents:UIControlEventTouchUpInside];
         [_taskListView addSubview:deleteButton];
 
         UIButton *row = [UIButton buttonWithType:UIButtonTypeSystem];
         row.tag = (NSInteger)i;
         row.accessibilityIdentifier = @"AnClickTaskRow";
-        row.frame = CGRectMake(6.0, rowY, width - 12.0, 36.0);
+        row.frame = CGRectMake(6.0, rowY, width - 12.0, 68.0);
         [row setTitle:[self titleForTask:_taskItems[i] index:i] forState:UIControlStateNormal];
         [row setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-        row.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+        row.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightBold];
+        row.titleLabel.numberOfLines = 2;
         row.titleLabel.adjustsFontSizeToFitWidth = YES;
         row.titleLabel.minimumScaleFactor = 0.62;
         row.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
-        row.titleEdgeInsets = UIEdgeInsetsMake(0, 8, 0, 8);
+        row.titleEdgeInsets = UIEdgeInsetsMake(0, 14, 0, 34);
         row.backgroundColor = ((NSInteger)i == _selectedTaskIndex)
-            ? [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:0.88]
-            : [UIColor colorWithWhite:1 alpha:0.08];
-        row.layer.cornerRadius = 4;
+            ? [UIColor colorWithRed:0.42 green:0.36 blue:0.22 alpha:0.98]
+            : [UIColor colorWithWhite:0.24 alpha:0.96];
+        row.layer.cornerRadius = 8;
         row.layer.borderWidth = 1;
-        row.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
+        row.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.22].CGColor;
         if ((NSInteger)i == _revealedDeleteTaskIndex) {
             row.transform = CGAffineTransformMakeTranslation(88.0, 0);
         }
@@ -2183,7 +2229,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [row addGestureRecognizer:pan];
         [_taskListView addSubview:row];
     }
-    _taskListView.contentSize = CGSizeMake(width, MAX(_taskListView.bounds.size.height + 1.0, 12.0 + rowHeight * _taskItems.count));
+    _taskListView.contentSize = CGSizeMake(width, MAX(_taskListView.bounds.size.height + 1.0, 16.0 + rowHeight * _taskItems.count));
 }
 
 - (void)addTaskFromCurrentConfig {
@@ -2229,7 +2275,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)deleteTaskButtonAtIndex:(UIButton *)sender {
-    [self deleteTaskAtIndex:sender.tag];
+    [self deleteTaskAtIndex:sender.tag - 50000];
 }
 
 - (void)saveSelectedTaskFromCurrentConfig {
@@ -2250,6 +2296,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)selectTaskButton:(UIButton *)sender {
+    if (_revealedDeleteTaskIndex == sender.tag) {
+        _revealedDeleteTaskIndex = -1;
+        [self refreshTaskList];
+        return;
+    }
     _revealedDeleteTaskIndex = -1;
     [self selectTaskAtIndex:sender.tag];
 }
@@ -2312,11 +2363,16 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     void (^changes)(void) = ^{
         for (UIView *view in self->_taskListView.subviews) {
-            if (![view.accessibilityIdentifier isEqualToString:@"AnClickTaskRow"]) {
-                continue;
-            }
-            if (view.tag != index) {
-                view.transform = CGAffineTransformIdentity;
+            if ([view.accessibilityIdentifier isEqualToString:@"AnClickTaskRow"]) {
+                if (view.tag != index) {
+                    view.transform = CGAffineTransformIdentity;
+                }
+            } else if ([view.accessibilityIdentifier isEqualToString:@"AnClickTaskDelete"]) {
+                NSInteger taskIndex = view.tag - 50000;
+                if (taskIndex != index) {
+                    view.alpha = 0.0;
+                    view.hidden = YES;
+                }
             }
         }
     };
@@ -2325,6 +2381,35 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [UIView animateWithDuration:0.16 animations:changes];
     } else {
         changes();
+    }
+}
+
+- (UIButton *)deleteButtonForTaskIndex:(NSInteger)index {
+    UIView *view = [_taskListView viewWithTag:50000 + index];
+    return [view isKindOfClass:UIButton.class] ? (UIButton *)view : nil;
+}
+
+- (void)setDeleteButtonVisible:(BOOL)visible forTaskIndex:(NSInteger)index animated:(BOOL)animated {
+    UIButton *deleteButton = [self deleteButtonForTaskIndex:index];
+    if (!deleteButton) {
+        return;
+    }
+    if (visible) {
+        deleteButton.hidden = NO;
+    }
+    void (^changes)(void) = ^{
+        deleteButton.alpha = visible ? 1.0 : 0.0;
+    };
+    void (^completion)(BOOL) = ^(__unused BOOL finished) {
+        if (!visible) {
+            deleteButton.hidden = YES;
+        }
+    };
+    if (animated) {
+        [UIView animateWithDuration:0.14 animations:changes completion:completion];
+    } else {
+        changes();
+        completion(YES);
     }
 }
 
@@ -2340,7 +2425,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
 
     CGPoint translation = [recognizer translationInView:_taskListView];
-    CGFloat rowHeight = 42.0;
+    CGFloat rowHeight = 78.0;
     CGFloat revealWidth = 88.0;
     if (recognizer.state == UIGestureRecognizerStateBegan) {
         _draggingTaskIndex = index;
@@ -2349,11 +2434,17 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         _taskPanDirectionLocked = fabs(_taskPanStartOffsetX) > 1.0;
         _taskPanHorizontal = _taskPanDirectionLocked;
         [self resetRevealedTaskRowsExceptIndex:index animated:YES];
+        if (_taskPanHorizontal) {
+            [self setDeleteButtonVisible:YES forTaskIndex:index animated:NO];
+        }
         [_taskListView bringSubviewToFront:row];
     } else if (recognizer.state == UIGestureRecognizerStateChanged) {
         if (!_taskPanDirectionLocked && hypot(translation.x, translation.y) > 7.0) {
             _taskPanHorizontal = fabs(translation.x) > fabs(translation.y);
             _taskPanDirectionLocked = YES;
+            if (_taskPanHorizontal) {
+                [self setDeleteButtonVisible:YES forTaskIndex:index animated:NO];
+            }
         }
 
         if (_taskPanHorizontal) {
@@ -2372,6 +2463,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
                 row.transform = CGAffineTransformMakeTranslation(targetX, 0);
             }];
             _revealedDeleteTaskIndex = targetX > 0.0 ? index : -1;
+            [self setDeleteButtonVisible:targetX > 0.0 forTaskIndex:index animated:YES];
             if (targetX > 0.0) {
                 _statusLabel.text = [NSString stringWithFormat:@"可删除任务%ld", (long)index + 1];
             }
