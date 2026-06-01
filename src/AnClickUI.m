@@ -110,6 +110,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     NSMutableArray<NSMutableDictionary *> *_taskItems;
     NSInteger _selectedTaskIndex;
     NSInteger _draggingTaskIndex;
+    NSInteger _revealedDeleteTaskIndex;
+    CGFloat _taskPanStartOffsetX;
+    BOOL _taskPanDirectionLocked;
+    BOOL _taskPanHorizontal;
     CGPoint _manualActionPoints[AnClickActionModeCount];
     BOOL _hasManualActionPoint[AnClickActionModeCount];
     CGPoint _manualSwipeAnchor;
@@ -195,6 +199,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _actionMode = AnClickActionModeNone;
     _selectedTaskIndex = -1;
     _draggingTaskIndex = -1;
+    _revealedDeleteTaskIndex = -1;
     _imageUsesMatchPoint = YES;
     _imageActionMode = AnClickActionModeTap;
     _matchThreshold = 0.80;
@@ -2136,9 +2141,25 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [_taskListView addSubview:emptyLabel];
     }
     for (NSUInteger i = 0; i < _taskItems.count; i++) {
+        CGFloat rowY = 6.0 + rowHeight * i;
+        UIButton *deleteButton = [UIButton buttonWithType:UIButtonTypeSystem];
+        deleteButton.tag = (NSInteger)i;
+        deleteButton.accessibilityIdentifier = @"AnClickTaskDelete";
+        deleteButton.frame = CGRectMake(6.0, rowY, 78.0, 36.0);
+        [deleteButton setTitle:@"删除" forState:UIControlStateNormal];
+        [deleteButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        deleteButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
+        deleteButton.backgroundColor = [UIColor colorWithRed:0.84 green:0.13 blue:0.10 alpha:0.94];
+        deleteButton.layer.cornerRadius = 4;
+        deleteButton.layer.borderWidth = 1;
+        deleteButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.34 blue:0.30 alpha:0.85].CGColor;
+        [deleteButton addTarget:self action:@selector(deleteTaskButtonAtIndex:) forControlEvents:UIControlEventTouchUpInside];
+        [_taskListView addSubview:deleteButton];
+
         UIButton *row = [UIButton buttonWithType:UIButtonTypeSystem];
         row.tag = (NSInteger)i;
-        row.frame = CGRectMake(6.0, 6.0 + rowHeight * i, width - 12.0, 36.0);
+        row.accessibilityIdentifier = @"AnClickTaskRow";
+        row.frame = CGRectMake(6.0, rowY, width - 12.0, 36.0);
         [row setTitle:[self titleForTask:_taskItems[i] index:i] forState:UIControlStateNormal];
         [row setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
         row.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
@@ -2152,6 +2173,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         row.layer.cornerRadius = 4;
         row.layer.borderWidth = 1;
         row.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
+        if ((NSInteger)i == _revealedDeleteTaskIndex) {
+            row.transform = CGAffineTransformMakeTranslation(88.0, 0);
+        }
         [row addTarget:self action:@selector(selectTaskButton:) forControlEvents:UIControlEventTouchUpInside];
 
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleTaskPan:)];
@@ -2166,6 +2190,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     NSMutableDictionary *task = [NSMutableDictionary dictionary];
     [_taskItems addObject:task];
     _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
+    _revealedDeleteTaskIndex = -1;
     [self showTaskHome];
     _statusLabel.text = [NSString stringWithFormat:@"已加任务%lu  点击任务设置", (unsigned long)_taskItems.count];
 }
@@ -2178,8 +2203,33 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     [_taskItems removeLastObject];
     _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
+    _revealedDeleteTaskIndex = -1;
     [self showTaskHome];
     _statusLabel.text = [NSString stringWithFormat:@"已删剩%lu", (unsigned long)_taskItems.count];
+}
+
+- (void)deleteTaskAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)_taskItems.count) {
+        _statusLabel.text = @"任务不存在";
+        return;
+    }
+
+    [_taskItems removeObjectAtIndex:(NSUInteger)index];
+    if (_selectedTaskIndex == index) {
+        _selectedTaskIndex = -1;
+    } else if (_selectedTaskIndex > index) {
+        _selectedTaskIndex--;
+    }
+    if (_selectedTaskIndex >= (NSInteger)_taskItems.count) {
+        _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
+    }
+    _revealedDeleteTaskIndex = -1;
+    [self showTaskHome];
+    _statusLabel.text = [NSString stringWithFormat:@"已删任务%ld  剩%lu", (long)index + 1, (unsigned long)_taskItems.count];
+}
+
+- (void)deleteTaskButtonAtIndex:(UIButton *)sender {
+    [self deleteTaskAtIndex:sender.tag];
 }
 
 - (void)saveSelectedTaskFromCurrentConfig {
@@ -2194,11 +2244,13 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         _taskItems[(NSUInteger)_selectedTaskIndex] = task;
     }
     [self refreshTaskList];
+    _revealedDeleteTaskIndex = -1;
     [self showTaskHome];
     _statusLabel.text = [NSString stringWithFormat:@"已保存任务%ld", (long)_selectedTaskIndex + 1];
 }
 
 - (void)selectTaskButton:(UIButton *)sender {
+    _revealedDeleteTaskIndex = -1;
     [self selectTaskAtIndex:sender.tag];
 }
 
@@ -2253,6 +2305,29 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [self updateStatusForCurrentConfig];
 }
 
+- (void)resetRevealedTaskRowsExceptIndex:(NSInteger)index animated:(BOOL)animated {
+    if (!_taskListView) {
+        return;
+    }
+
+    void (^changes)(void) = ^{
+        for (UIView *view in self->_taskListView.subviews) {
+            if (![view.accessibilityIdentifier isEqualToString:@"AnClickTaskRow"]) {
+                continue;
+            }
+            if (view.tag != index) {
+                view.transform = CGAffineTransformIdentity;
+            }
+        }
+    };
+
+    if (animated) {
+        [UIView animateWithDuration:0.16 animations:changes];
+    } else {
+        changes();
+    }
+}
+
 - (void)handleTaskPan:(UIPanGestureRecognizer *)recognizer {
     UIView *row = recognizer.view;
     if (!row) {
@@ -2266,14 +2341,47 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     CGPoint translation = [recognizer translationInView:_taskListView];
     CGFloat rowHeight = 42.0;
+    CGFloat revealWidth = 88.0;
     if (recognizer.state == UIGestureRecognizerStateBegan) {
         _draggingTaskIndex = index;
+        CGAffineTransform currentTransform = row.transform;
+        _taskPanStartOffsetX = currentTransform.tx;
+        _taskPanDirectionLocked = fabs(_taskPanStartOffsetX) > 1.0;
+        _taskPanHorizontal = _taskPanDirectionLocked;
+        [self resetRevealedTaskRowsExceptIndex:index animated:YES];
         [_taskListView bringSubviewToFront:row];
     } else if (recognizer.state == UIGestureRecognizerStateChanged) {
-        row.transform = CGAffineTransformMakeTranslation(0, translation.y);
+        if (!_taskPanDirectionLocked && hypot(translation.x, translation.y) > 7.0) {
+            _taskPanHorizontal = fabs(translation.x) > fabs(translation.y);
+            _taskPanDirectionLocked = YES;
+        }
+
+        if (_taskPanHorizontal) {
+            CGFloat offsetX = MIN(MAX(_taskPanStartOffsetX + translation.x, 0.0), revealWidth);
+            row.transform = CGAffineTransformMakeTranslation(offsetX, 0);
+        } else {
+            row.transform = CGAffineTransformMakeTranslation(0, translation.y);
+        }
     } else if (recognizer.state == UIGestureRecognizerStateEnded ||
                recognizer.state == UIGestureRecognizerStateCancelled ||
                recognizer.state == UIGestureRecognizerStateFailed) {
+        if (_taskPanHorizontal) {
+            CGAffineTransform currentTransform = row.transform;
+            CGFloat targetX = currentTransform.tx > revealWidth * 0.45 ? revealWidth : 0.0;
+            [UIView animateWithDuration:0.16 animations:^{
+                row.transform = CGAffineTransformMakeTranslation(targetX, 0);
+            }];
+            _revealedDeleteTaskIndex = targetX > 0.0 ? index : -1;
+            if (targetX > 0.0) {
+                _statusLabel.text = [NSString stringWithFormat:@"可删除任务%ld", (long)index + 1];
+            }
+            _draggingTaskIndex = -1;
+            _taskPanDirectionLocked = NO;
+            _taskPanHorizontal = NO;
+            _taskPanStartOffsetX = 0;
+            return;
+        }
+
         NSInteger targetIndex = index + (NSInteger)llround(translation.y / rowHeight);
         targetIndex = MIN(MAX(targetIndex, 0), (NSInteger)_taskItems.count - 1);
         row.transform = CGAffineTransformIdentity;
@@ -2288,8 +2396,12 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
             } else if (_selectedTaskIndex < index && _selectedTaskIndex >= targetIndex) {
                 _selectedTaskIndex++;
             }
+            _revealedDeleteTaskIndex = -1;
         }
         _draggingTaskIndex = -1;
+        _taskPanDirectionLocked = NO;
+        _taskPanHorizontal = NO;
+        _taskPanStartOffsetX = 0;
         [self refreshTaskList];
     }
 }
