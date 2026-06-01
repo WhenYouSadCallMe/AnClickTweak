@@ -550,20 +550,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     return field;
 }
 
-- (UIView *)keyboardAccessoryView {
-    UIToolbar *toolbar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, UIScreen.mainScreen.bounds.size.width, 44.0)];
-    toolbar.barStyle = UIBarStyleBlack;
-    toolbar.translucent = YES;
-    UIBarButtonItem *space = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
-    UIBarButtonItem *done = [[UIBarButtonItem alloc] initWithTitle:@"完成" style:UIBarButtonItemStyleDone target:self action:@selector(dismissKeyboard)];
-    toolbar.items = @[space, done];
-    return toolbar;
-}
-
 - (void)configureConfigTextField:(UITextField *)field {
     field.delegate = self;
     field.returnKeyType = UIReturnKeyDone;
-    field.inputAccessoryView = [self keyboardAccessoryView];
+    field.inputAccessoryView = nil;
 }
 
 - (UILabel *)configCaptionLabelWithText:(NSString *)text {
@@ -1063,6 +1053,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _taskItems = [self mutableTasksFromSavedTasks:tasks];
     _selectedTaskIndex = -1;
     _revealedDeleteTaskIndex = -1;
+    [self resetCurrentActionConfiguration];
     [self hideFunctionMenu];
     [self showTaskHome];
     _statusLabel.text = [NSString stringWithFormat:@"已加载 %lu 个任务", (unsigned long)_taskItems.count];
@@ -1103,6 +1094,16 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _actionDescription = nil;
     _actionDelay = 0;
     _actionRepeatCount = 1;
+}
+
+- (void)resetCurrentActionConfiguration {
+    [self resetEditorActionState];
+    _actionMode = AnClickActionModeNone;
+    _imageUsesMatchPoint = YES;
+    _imageActionMode = AnClickActionModeTap;
+    _templateSearchInProgress = NO;
+    [self refreshModeButtons];
+    [self refreshTemplatePreview];
 }
 
 - (void)collapsePanel {
@@ -2701,6 +2702,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [_taskItems addObject:task];
     _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
     _revealedDeleteTaskIndex = -1;
+    [self resetCurrentActionConfiguration];
     [self showTaskHome];
     _statusLabel.text = [NSString stringWithFormat:@"已加任务%lu  点击任务设置", (unsigned long)_taskItems.count];
 }
@@ -2711,11 +2713,18 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return;
     }
 
+    NSInteger removedIndex = (NSInteger)_taskItems.count - 1;
+    BOOL removedSelectedTask = _selectedTaskIndex == removedIndex;
     [_taskItems removeLastObject];
-    _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
+    if (removedSelectedTask || _taskItems.count == 0) {
+        _selectedTaskIndex = -1;
+        [self resetCurrentActionConfiguration];
+    } else if (_selectedTaskIndex >= (NSInteger)_taskItems.count) {
+        _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
+    }
     _revealedDeleteTaskIndex = -1;
     [self showTaskHome];
-    _statusLabel.text = [NSString stringWithFormat:@"已删剩%lu", (unsigned long)_taskItems.count];
+    _statusLabel.text = _taskItems.count == 0 ? @"暂无任务" : [NSString stringWithFormat:@"已删剩%lu", (unsigned long)_taskItems.count];
 }
 
 - (void)deleteTaskAtIndex:(NSInteger)index {
@@ -2724,6 +2733,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return;
     }
 
+    BOOL removedSelectedTask = _selectedTaskIndex == index;
     [_taskItems removeObjectAtIndex:(NSUInteger)index];
     if (_selectedTaskIndex == index) {
         _selectedTaskIndex = -1;
@@ -2733,9 +2743,13 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     if (_selectedTaskIndex >= (NSInteger)_taskItems.count) {
         _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
     }
+    if (removedSelectedTask || _taskItems.count == 0) {
+        _selectedTaskIndex = -1;
+        [self resetCurrentActionConfiguration];
+    }
     _revealedDeleteTaskIndex = -1;
     [self showTaskHome];
-    _statusLabel.text = [NSString stringWithFormat:@"已删任务%ld  剩%lu", (long)index + 1, (unsigned long)_taskItems.count];
+    _statusLabel.text = _taskItems.count == 0 ? @"暂无任务" : [NSString stringWithFormat:@"已删任务%ld  剩%lu", (long)index + 1, (unsigned long)_taskItems.count];
 }
 
 - (void)deleteTaskButtonAtIndex:(UIButton *)sender {
