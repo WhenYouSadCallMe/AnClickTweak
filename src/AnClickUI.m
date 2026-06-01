@@ -1176,7 +1176,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)handlePanelPan:(UIPanGestureRecognizer *)recognizer {
-    if (_panelExpanded) {
+    if (_taskEditorVisible) {
         return;
     }
 
