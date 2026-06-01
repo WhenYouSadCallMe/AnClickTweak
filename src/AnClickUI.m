@@ -564,9 +564,17 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
 
     _statusLabel.text = @"截图中";
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    if (hostWindow && !hostWindow.isKeyWindow) {
+        [hostWindow makeKeyWindow];
+    }
+    if (_panelWindow) {
+        _panelWindow.userInteractionEnabled = NO;
+        _panelWindow.hidden = YES;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.16 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         self->_captureSnapshot = [AnClickCore captureCurrentWindowImage];
         if (!self->_captureSnapshot.CGImage) {
+            [self restorePanelAfterExternalTap];
             self->_statusLabel.text = @"截图失败";
             return;
         }
@@ -604,12 +612,22 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     drawPan.cancelsTouchesInView = NO;
     [_captureOverlay addGestureRecognizer:drawPan];
 
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleCaptureOverlayTap:)];
+    tap.cancelsTouchesInView = NO;
+    [_captureOverlay addGestureRecognizer:tap];
+
     UIButton *saveButton = [self overlayButtonWithTitle:@"保存" action:@selector(saveSelectedTemplate)];
+    saveButton.tag = 3001;
     saveButton.frame = CGRectMake(16, hostWindow.bounds.size.height - 70, 86, 44);
+    saveButton.hidden = YES;
+    saveButton.userInteractionEnabled = NO;
     [_captureOverlay addSubview:saveButton];
 
     UIButton *cancelButton = [self overlayButtonWithTitle:@"取消" action:@selector(cancelTemplateCapture)];
+    cancelButton.tag = 3002;
     cancelButton.frame = CGRectMake(hostWindow.bounds.size.width - 102, hostWindow.bounds.size.height - 70, 86, 44);
+    cancelButton.hidden = YES;
+    cancelButton.userInteractionEnabled = NO;
     [_captureOverlay addSubview:cancelButton];
 
     [hostWindow addSubview:_captureOverlay];
@@ -685,8 +703,64 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     return [self clampedSelectionFrame:rawFrame];
 }
 
-- (BOOL)capturePointHitsBottomControls:(CGPoint)point {
-    return _captureOverlay && point.y >= _captureOverlay.bounds.size.height - 92.0;
+- (void)setCaptureActionButtonsHidden:(BOOL)hidden {
+    UIView *saveButton = [_captureOverlay viewWithTag:3001];
+    UIView *cancelButton = [_captureOverlay viewWithTag:3002];
+    saveButton.hidden = hidden;
+    cancelButton.hidden = hidden;
+}
+
+- (void)layoutCaptureActionButtonsAvoidingSelection {
+    if (!_captureOverlay || !_selectionView || _selectionView.hidden) {
+        [self setCaptureActionButtonsHidden:YES];
+        return;
+    }
+
+    UIView *saveButton = [_captureOverlay viewWithTag:3001];
+    UIView *cancelButton = [_captureOverlay viewWithTag:3002];
+    if (!saveButton || !cancelButton) {
+        return;
+    }
+
+    CGFloat margin = 14.0;
+    CGFloat gap = 12.0;
+    CGFloat buttonWidth = 86.0;
+    CGFloat buttonHeight = 44.0;
+    CGRect selectionFrame = _selectionView.frame;
+    CGFloat totalWidth = buttonWidth * 2.0 + gap;
+    CGFloat x = MIN(MAX(CGRectGetMidX(selectionFrame) - totalWidth * 0.5,
+                        margin),
+                    _captureOverlay.bounds.size.width - totalWidth - margin);
+
+    CGFloat belowY = CGRectGetMaxY(selectionFrame) + margin;
+    CGFloat aboveY = CGRectGetMinY(selectionFrame) - buttonHeight - margin;
+    CGFloat y = 0.0;
+    if (belowY + buttonHeight <= _captureOverlay.bounds.size.height - margin) {
+        y = belowY;
+    } else if (aboveY >= margin) {
+        y = aboveY;
+    } else {
+        y = _captureOverlay.bounds.size.height - buttonHeight - margin;
+    }
+
+    saveButton.frame = CGRectMake(x, y, buttonWidth, buttonHeight);
+    cancelButton.frame = CGRectMake(x + buttonWidth + gap, y, buttonWidth, buttonHeight);
+    [self setCaptureActionButtonsHidden:NO];
+}
+
+- (void)handleCaptureOverlayTap:(UITapGestureRecognizer *)recognizer {
+    if (recognizer.state != UIGestureRecognizerStateEnded || !_captureOverlay) {
+        return;
+    }
+
+    CGPoint point = [recognizer locationInView:_captureOverlay];
+    UIView *saveButton = [_captureOverlay viewWithTag:3001];
+    UIView *cancelButton = [_captureOverlay viewWithTag:3002];
+    if (saveButton && !saveButton.hidden && CGRectContainsPoint(CGRectInset(saveButton.frame, -8.0, -8.0), point)) {
+        [self saveSelectedTemplate];
+    } else if (cancelButton && !cancelButton.hidden && CGRectContainsPoint(CGRectInset(cancelButton.frame, -8.0, -8.0), point)) {
+        [self cancelTemplateCapture];
+    }
 }
 
 - (void)handleCaptureDrawPan:(UIPanGestureRecognizer *)recognizer {
@@ -696,13 +770,13 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     CGPoint point = [recognizer locationInView:_captureOverlay];
     if (recognizer.state == UIGestureRecognizerStateBegan) {
-        if ([self capturePointHitsBottomControls:point] ||
-            (!_selectionView.hidden && CGRectContainsPoint(_selectionView.frame, point))) {
+        if (!_selectionView.hidden && CGRectContainsPoint(_selectionView.frame, point)) {
             _captureDrawingSelection = NO;
             return;
         }
         _captureDrawingSelection = YES;
         _captureDragStartPoint = point;
+        [self setCaptureActionButtonsHidden:YES];
         _selectionView.hidden = NO;
         _selectionView.frame = CGRectMake(point.x, point.y, 1.0, 1.0);
         [self layoutCornerHandles];
@@ -728,6 +802,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         if (_selectionView.frame.size.width < 8.0 || _selectionView.frame.size.height < 8.0) {
             _selectionView.hidden = YES;
             _selectionView.frame = CGRectZero;
+            [self setCaptureActionButtonsHidden:YES];
+        } else {
+            [self layoutCaptureActionButtonsAvoidingSelection];
         }
     }
 }
@@ -736,12 +813,20 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     if (recognizer.view != _selectionView) {
         return;
     }
+    if (recognizer.state == UIGestureRecognizerStateBegan) {
+        [self setCaptureActionButtonsHidden:YES];
+    }
     CGPoint translation = [recognizer translationInView:_captureOverlay];
     CGRect frame = _selectionView.frame;
     frame.origin.x += translation.x;
     frame.origin.y += translation.y;
     _selectionView.frame = [self clampedSelectionFrame:frame];
     [recognizer setTranslation:CGPointZero inView:_captureOverlay];
+    if (recognizer.state == UIGestureRecognizerStateEnded ||
+        recognizer.state == UIGestureRecognizerStateCancelled ||
+        recognizer.state == UIGestureRecognizerStateFailed) {
+        [self layoutCaptureActionButtonsAvoidingSelection];
+    }
 }
 
 - (void)handleCornerPan:(UIPanGestureRecognizer *)recognizer {
