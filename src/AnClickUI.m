@@ -14,7 +14,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     AnClickActionModePinchOut = 6,
     AnClickActionModeRotate = 7,
     AnClickActionModeImage = 8,
-    AnClickActionModeCount = 9,
+    AnClickActionModeMacro = 9,
+    AnClickActionModeCount = 10,
 };
 
 @interface AnClickCore : NSObject
@@ -74,6 +75,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIButton *_imageActionButton;
     UIButton *_previewActionButton;
     UIButton *_swipeRecordButton;
+    UIButton *_macroRecordButton;
+    UIButton *_macroPlayButton;
     UIButton *_cancelEditButton;
     NSArray<UIButton *> *_modeButtons;
     UIScrollView *_taskListView;
@@ -133,6 +136,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     BOOL _panelExpanded;
     BOOL _taskEditorVisible;
     BOOL _imageUsesMatchPoint;
+    BOOL _returnToEditorAfterRecording;
     double _matchThreshold;
     NSTimeInterval _actionDelay;
     NSInteger _actionRepeatCount;
@@ -260,13 +264,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     CGFloat gap = 12.0;
     CGFloat modeWidth = floor((panelWidth - gap * 4.0) / 3.0);
-    NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"滑动", @"识图"];
+    NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"滑动", @"识图", @"录制"];
     NSArray<NSNumber *> *modeTags = @[
         @(AnClickActionModeTap),
         @(AnClickActionModeDoubleTap),
         @(AnClickActionModeLongPress),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeImage),
+        @(AnClickActionModeMacro),
     ];
     NSMutableArray<UIButton *> *modeButtons = [NSMutableArray array];
     for (NSUInteger i = 0; i < modeTitles.count; i++) {
@@ -352,6 +357,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _swipeRecordButton = [self panelButtonWithTitle:@"录制" action:@selector(beginSwipeRecording)];
     _swipeRecordButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 234, buttonWidth, 32);
     [_panelView addSubview:_swipeRecordButton];
+
+    _macroRecordButton = [self panelButtonWithTitle:@"开始录制" action:@selector(toggleMacroRecording)];
+    _macroRecordButton.frame = CGRectMake(gap, 272, buttonWidth, 32);
+    [_panelView addSubview:_macroRecordButton];
+
+    _macroPlayButton = [self panelButtonWithTitle:@"回放录制" action:@selector(playRecordedMacro)];
+    _macroPlayButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 272, buttonWidth, 32);
+    [_panelView addSubview:_macroPlayButton];
 
     _editorBackButton = [self panelButtonWithTitle:@"返回" action:@selector(showTaskHome)];
     _editorBackButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 120, buttonWidth, 34);
@@ -582,7 +595,22 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     return frame;
 }
 
+- (CGRect)clampedFloatingFrame:(CGRect)frame {
+    CGRect bounds = UIScreen.mainScreen.bounds;
+    frame.origin.x = MIN(MAX(frame.origin.x, 0.0), bounds.size.width - frame.size.width);
+    frame.origin.y = MIN(MAX(frame.origin.y, 0.0), bounds.size.height - frame.size.height);
+    return frame;
+}
+
 - (void)refreshCollapsedButtonTitle {
+    if ([AnClickRecorder shared].isRecording) {
+        [_collapsedButton setTitle:@"停" forState:UIControlStateNormal];
+        _collapsedButton.backgroundColor = [UIColor colorWithRed:0.84 green:0.12 blue:0.10 alpha:0.94];
+        _collapsedButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.34 blue:0.30 alpha:0.90].CGColor;
+        return;
+    }
+    _collapsedButton.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.075 alpha:0.92];
+    _collapsedButton.layer.borderColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:0.82].CGColor;
     [_collapsedButton setTitle:[NSString stringWithFormat:@"＋%lu", (unsigned long)_taskItems.count] forState:UIControlStateNormal];
 }
 
@@ -621,6 +649,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _imageActionButton.hidden = YES;
     _previewActionButton.hidden = YES;
     _swipeRecordButton.hidden = YES;
+    _macroRecordButton.hidden = YES;
+    _macroPlayButton.hidden = YES;
     _descriptionField.hidden = !visible;
     _thresholdField.hidden = YES;
     _delayField.hidden = YES;
@@ -1088,6 +1118,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _currentTemplatePath = nil;
     _imageUsesMatchPoint = YES;
     _imageActionMode = AnClickActionModeTap;
+    _recordedMacroEvents = nil;
     _matchThreshold = 0.80;
     _actionDescription = nil;
     _actionDelay = 0;
@@ -1113,12 +1144,31 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _taskEditorVisible = NO;
     CGRect frame = _panelWindow.frame;
     frame.size = CGSizeMake(48.0, 48.0);
-    _panelWindow.frame = [self clampedPanelFrame:frame];
+    _panelWindow.frame = [self clampedFloatingFrame:frame];
     _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
     _collapsedButton.frame = _panelWindow.bounds;
     _collapsedButton.hidden = NO;
     _homeCloseButton.hidden = YES;
     _panelView.hidden = YES;
+    [self refreshCollapsedButtonTitle];
+}
+
+- (void)showCollapsedRecordingButton {
+    if (!_panelWindow || !_collapsedButton || !_panelView) {
+        return;
+    }
+
+    _panelExpanded = NO;
+    CGRect frame = _panelWindow.frame;
+    frame.size = CGSizeMake(48.0, 48.0);
+    _panelWindow.frame = [self clampedFloatingFrame:frame];
+    _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
+    _collapsedButton.frame = _panelWindow.bounds;
+    _collapsedButton.hidden = NO;
+    _homeCloseButton.hidden = YES;
+    _panelView.hidden = YES;
+    _panelWindow.hidden = NO;
+    _panelWindow.userInteractionEnabled = YES;
     [self refreshCollapsedButtonTitle];
 }
 
@@ -1141,10 +1191,17 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)handleCollapsedTap {
+    if ([AnClickRecorder shared].isRecording) {
+        [self toggleMacroRecording];
+        return;
+    }
     [self refreshCollapsedButtonTitle];
 }
 
 - (void)handleCollapsedLongPress:(UILongPressGestureRecognizer *)recognizer {
+    if ([AnClickRecorder shared].isRecording) {
+        return;
+    }
     if (recognizer.state == UIGestureRecognizerStateBegan) {
         _taskEditorVisible = NO;
         [self expandPanel];
@@ -1173,7 +1230,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (NSString *)actionNameForMode:(AnClickActionMode)mode {
-    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动", @"二指", @"缩小", @"放大", @"旋转", @"识图"];
+    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动", @"二指", @"缩小", @"放大", @"旋转", @"识图", @"录制"];
     if (mode < AnClickActionModeTap || mode >= AnClickActionModeCount) {
         return @"动作";
     }
@@ -1185,7 +1242,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         mode == AnClickActionModeDoubleTap ||
         mode == AnClickActionModeLongPress ||
         mode == AnClickActionModeSwipe ||
-        mode == AnClickActionModeImage;
+        mode == AnClickActionModeImage ||
+        mode == AnClickActionModeMacro;
 }
 
 - (AnClickActionMode)modeForTask:(NSDictionary *)task {
@@ -1267,10 +1325,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
 
     CGPoint translation = [recognizer translationInView:_panelWindow];
-    CGPoint center = _panelWindow.center;
-    center.x += translation.x;
-    center.y += translation.y;
-    _panelWindow.center = center;
+    CGRect frame = _panelWindow.frame;
+    frame.origin.x += translation.x;
+    frame.origin.y += translation.y;
+    _panelWindow.frame = _panelExpanded ? [self clampedPanelFrame:frame] : [self clampedFloatingFrame:frame];
     [recognizer setTranslation:CGPointZero inView:_panelWindow];
 }
 
@@ -1413,6 +1471,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _imageActionButton.hidden = YES;
     _previewActionButton.hidden = YES;
     _swipeRecordButton.hidden = YES;
+    _macroRecordButton.hidden = YES;
+    _macroPlayButton.hidden = YES;
     _delayField.hidden = YES;
     _repeatField.hidden = YES;
     _thresholdField.hidden = YES;
@@ -1615,6 +1675,27 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
             fieldsY = MAX(actionButtonY + 8.0, bottomLimit - 60.0);
         }
         [self layoutImageFieldsAtY:fieldsY];
+    } else if (_actionMode == AnClickActionModeMacro) {
+        _saveTaskButton.enabled = YES;
+        _saveTaskButton.alpha = 1.0;
+        CGFloat side = 18.0;
+        CGFloat width = _panelView.bounds.size.width;
+        CGFloat contentWidth = width - side * 2.0;
+        BOOL recording = [AnClickRecorder shared].isRecording;
+        _primaryConfigLabel.text = @"录制回放";
+        _primaryConfigLabel.hidden = NO;
+        _primaryConfigLabel.frame = CGRectMake(side, 206, contentWidth, 20);
+        [_macroRecordButton setTitle:recording ? @"停止录制" : (_recordedMacroEvents.count > 0 ? @"重新录制" : @"开始录制") forState:UIControlStateNormal];
+        [_macroPlayButton setTitle:_recordedMacroEvents.count > 0 ? @"回放录制" : @"暂无录制" forState:UIControlStateNormal];
+        _macroPlayButton.enabled = _recordedMacroEvents.count > 0 && !recording;
+        _macroPlayButton.alpha = _macroPlayButton.enabled ? 1.0 : 0.45;
+        [self styleNormalButton:_macroRecordButton];
+        [self styleNormalButton:_macroPlayButton];
+        if (recording) {
+            _macroRecordButton.backgroundColor = [UIColor colorWithRed:0.84 green:0.12 blue:0.10 alpha:0.94];
+        }
+        [self layoutButtons:@[_macroRecordButton, _macroPlayButton] x:side y:228 width:contentWidth height:40 gap:10.0];
+        [self layoutDoubleTimingFieldsAtY:286];
     } else if (_actionMode == AnClickActionModeSwipe) {
         _saveTaskButton.enabled = YES;
         _saveTaskButton.alpha = 1.0;
@@ -1689,6 +1770,17 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
             state = @"已录轨迹";
         }
         _statusLabel.text = [NSString stringWithFormat:@"滑动 %@", state];
+        return;
+    }
+
+    if (_actionMode == AnClickActionModeMacro) {
+        if ([AnClickRecorder shared].isRecording) {
+            _statusLabel.text = @"录制中  点悬浮停止";
+        } else if (_recordedMacroEvents.count > 0) {
+            _statusLabel.text = [NSString stringWithFormat:@"已录制 %lu步", (unsigned long)_recordedMacroEvents.count];
+        } else {
+            _statusLabel.text = @"先开始录制";
+        }
         return;
     }
 
@@ -2509,13 +2601,16 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     return [_recordedSwipePoints copy];
 }
 
-- (NSArray<NSValue *> *)recordedMacroTrajectoryPoints {
-    if (_recordedMacroEvents.count == 0) {
+- (NSArray<NSValue *> *)trajectoryPointsForRecordedEvents:(NSArray<NSDictionary *> *)events {
+    if (events.count == 0) {
         return @[];
     }
 
     NSMutableArray<NSValue *> *points = [NSMutableArray array];
-    for (NSDictionary *event in _recordedMacroEvents) {
+    for (NSDictionary *event in events) {
+        if (![event isKindOfClass:NSDictionary.class]) {
+            continue;
+        }
         NSNumber *typeNumber = event[@"type"];
         NSNumber *xNumber = event[@"x"];
         NSNumber *yNumber = event[@"y"];
@@ -2530,11 +2625,32 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     return points;
 }
 
+- (NSArray<NSValue *> *)recordedMacroTrajectoryPoints {
+    return [self trajectoryPointsForRecordedEvents:_recordedMacroEvents];
+}
+
+- (NSTimeInterval)durationForRecordedEvents:(NSArray<NSDictionary *> *)events {
+    NSTimeInterval duration = 0.0;
+    for (NSDictionary *event in events) {
+        if (![event isKindOfClass:NSDictionary.class]) {
+            continue;
+        }
+        NSNumber *timestampNumber = event[@"timestamp"];
+        if (timestampNumber) {
+            duration = MAX(duration, timestampNumber.doubleValue);
+        }
+    }
+    return MAX(0.35, duration + 0.20);
+}
+
 - (void)autosaveSelectedTaskIfPossible {
     if (!_taskEditorVisible ||
         _selectedTaskIndex < 0 ||
         _selectedTaskIndex >= (NSInteger)_taskItems.count ||
         [_taskItems[(NSUInteger)_selectedTaskIndex] count] == 0) {
+        return;
+    }
+    if (_actionMode == AnClickActionModeMacro && _recordedMacroEvents.count == 0) {
         return;
     }
 
@@ -2598,6 +2714,16 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return task;
     }
 
+    if (_actionMode == AnClickActionModeMacro) {
+        if (_recordedMacroEvents.count > 0) {
+            task[@"events"] = [_recordedMacroEvents copy];
+        } else if (requireComplete) {
+            _statusLabel.text = @"先录制";
+            return nil;
+        }
+        return task;
+    }
+
     if ([self hasManualPointForMode:_actionMode]) {
         task[@"point"] = [NSValue valueWithCGPoint:_manualActionPoints[(NSUInteger)_actionMode]];
     } else if (requireComplete) {
@@ -2621,6 +2747,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     NSString *name = (mode == AnClickActionModeNone) ? @"未设置" : [self actionNameForMode:mode];
     NSString *desc = [self trimmedActionDescription:task[@"desc"]];
     NSString *subtitle = desc.length > 0 ? desc : (mode == AnClickActionModeNone ? @"未设置" : @"已设置");
+    if (desc.length == 0 && mode == AnClickActionModeMacro) {
+        NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
+        subtitle = events.count > 0 ? [NSString stringWithFormat:@"已录 %lu 步", (unsigned long)events.count] : @"未录制";
+    }
     return [NSString stringWithFormat:@"任务 %lu - %@\n%@", (unsigned long)index + 1, name, subtitle];
 }
 
@@ -2835,6 +2965,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
             _hasManualSwipeAnchor = YES;
             _hasManualSwipeEndPoint = YES;
         }
+    } else if (mode == AnClickActionModeMacro) {
+        NSArray<NSDictionary *> *events = task[@"events"];
+        _recordedMacroEvents = [events isKindOfClass:NSArray.class] ? [events copy] : nil;
     } else if ([self isSelectableActionMode:mode] && mode != AnClickActionModeSwipe && mode != AnClickActionModeImage) {
         NSValue *pointValue = task[@"point"];
         if (pointValue) {
@@ -3011,6 +3144,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     if (mode == AnClickActionModeImage) {
         return 1.45;
     }
+    if (mode == AnClickActionModeMacro) {
+        return [self durationForRecordedEvents:_recordedMacroEvents];
+    }
     return 0.30;
 }
 
@@ -3116,6 +3252,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         }
         return YES;
     }
+    if (mode == AnClickActionModeMacro) {
+        NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
+        if (events.count == 0) {
+            _statusLabel.text = @"任务未录制";
+            return NO;
+        }
+        return YES;
+    }
 
     NSValue *pointValue = task[@"point"];
     if (!pointValue) {
@@ -3137,6 +3281,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     if (mode == AnClickActionModeImage) {
         AnClickActionMode imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
         duration = 0.75 + [self durationForTaskMode:imageActionMode];
+    } else if (mode == AnClickActionModeMacro) {
+        NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
+        duration = [self durationForRecordedEvents:events];
     }
     NSTimeInterval interval = duration + 0.12;
 
@@ -3150,6 +3297,15 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
                 [AnClickFakeTouch playPath:path duration:0.55];
             } else if (mode == AnClickActionModeImage) {
                 [self performImageTask:task inWindow:currentHostWindow];
+            } else if (mode == AnClickActionModeMacro) {
+                NSArray<NSDictionary *> *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
+                NSArray<NSValue *> *trajectory = [self trajectoryPointsForRecordedEvents:events];
+                if (trajectory.count >= 2) {
+                    [self showTrajectoryForScreenPoints:trajectory inWindow:currentHostWindow duration:[self durationForRecordedEvents:events]];
+                } else if (trajectory.count == 1) {
+                    [self showTapMarkerAtScreenPoint:trajectory.firstObject.CGPointValue inWindow:currentHostWindow];
+                }
+                [AnClickFakeTouch playRecordedEvents:events];
             } else {
                 NSValue *pointValue = task[@"point"];
                 [self performPointActionMode:mode atPoint:pointValue.CGPointValue inWindow:currentHostWindow];
@@ -3619,16 +3775,28 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     if (recorder.isRecording) {
         [recorder stopRecording];
         _recordedMacroEvents = [recorder serializedEvents];
-        [_recordSwipeButton setTitle:@"录制" forState:UIControlStateNormal];
-        _recordSwipeButton.backgroundColor = [UIColor colorWithRed:0.20 green:0.20 blue:0.18 alpha:1.0];
+        [_macroRecordButton setTitle:@"重新录制" forState:UIControlStateNormal];
+        [self styleNormalButton:_macroRecordButton];
         _statusLabel.text = [NSString stringWithFormat:@"已录 %lu步", (unsigned long)_recordedMacroEvents.count];
+        [self refreshCollapsedButtonTitle];
+        if (_returnToEditorAfterRecording) {
+            _taskEditorVisible = YES;
+            [self expandPanel];
+        }
+        _returnToEditorAfterRecording = NO;
+        [self refreshEditorConfigControls];
+        [self autosaveSelectedTaskIfPossible];
         return;
     }
 
+    _actionMode = AnClickActionModeMacro;
     _recordedMacroEvents = nil;
+    _returnToEditorAfterRecording = _taskEditorVisible;
     [recorder startRecording];
-    [_recordSwipeButton setTitle:@"停止" forState:UIControlStateNormal];
-    _recordSwipeButton.backgroundColor = [UIColor colorWithRed:0.84 green:0.18 blue:0.18 alpha:1.0];
+    [_macroRecordButton setTitle:@"停止录制" forState:UIControlStateNormal];
+    _macroRecordButton.backgroundColor = [UIColor colorWithRed:0.84 green:0.12 blue:0.10 alpha:0.94];
+    [self refreshModeButtons];
+    [self showCollapsedRecordingButton];
     _statusLabel.text = @"录制中";
 }
 
@@ -3644,14 +3812,18 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return;
     }
 
-    [self preparePanelForExternalTapWithHostWindow:hostWindow];
+    NSTimeInterval duration = [self durationForRecordedEvents:_recordedMacroEvents];
+    [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
     NSArray<NSValue *> *trajectory = [self recordedMacroTrajectoryPoints];
-    if (trajectory.count >= 2) {
-        [self showTrajectoryForScreenPoints:trajectory inWindow:hostWindow duration:1.2];
-    } else if (trajectory.count == 1) {
-        [self showTapMarkerAtScreenPoint:trajectory.firstObject.CGPointValue inWindow:hostWindow];
-    }
-    [AnClickFakeTouch playRecordedEvents:_recordedMacroEvents];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (trajectory.count >= 2) {
+            [self showTrajectoryForScreenPoints:trajectory inWindow:hostWindow duration:duration];
+        } else if (trajectory.count == 1) {
+            [self showTapMarkerAtScreenPoint:trajectory.firstObject.CGPointValue inWindow:hostWindow];
+        }
+        [AnClickFakeTouch playRecordedEvents:self->_recordedMacroEvents];
+        [self restorePanelAfterScreenDelay:duration + 0.15];
+    });
     _statusLabel.text = [NSString stringWithFormat:@"回放 %lu步", (unsigned long)_recordedMacroEvents.count];
 }
 
