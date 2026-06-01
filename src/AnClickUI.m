@@ -63,9 +63,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIButton *_previewSwipeButton;
     UIButton *_clearActionButton;
     UIButton *_addTaskButton;
+    UIButton *_deleteTaskButton;
     UIButton *_saveTaskButton;
     UIButton *_runTasksButton;
     UIButton *_collapseButton;
+    UIButton *_editorBackButton;
     NSArray<UIButton *> *_modeButtons;
     UIScrollView *_taskListView;
     UILabel *_statusLabel;
@@ -104,6 +106,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     BOOL _captureDrawingSelection;
     CGPoint _captureDragStartPoint;
     BOOL _panelExpanded;
+    BOOL _taskEditorVisible;
     AnClickActionMode _actionMode;
 }
 
@@ -188,7 +191,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _collapsedButton.layer.cornerRadius = 6;
     _collapsedButton.layer.borderWidth = 1;
     _collapsedButton.layer.borderColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:0.82].CGColor;
-    _collapsedButton.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightBold];
+    _collapsedButton.titleLabel.font = [UIFont systemFontOfSize:19 weight:UIFontWeightBold];
     [_collapsedButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     [_collapsedButton addTarget:self action:@selector(handleCollapsedTap) forControlEvents:UIControlEventTouchUpInside];
     [controller.view addSubview:_collapsedButton];
@@ -263,38 +266,46 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [_panelView addSubview:_testButton];
 
     _addTaskButton = [self panelButtonWithTitle:@"＋0" action:@selector(addTaskFromCurrentConfig)];
-    _addTaskButton.frame = CGRectMake(gap, 162, buttonWidth, 32);
+    _addTaskButton.frame = CGRectMake(gap, 8, buttonWidth, 38);
     [_panelView addSubview:_addTaskButton];
 
-    _saveTaskButton = [self panelButtonWithTitle:@"保存" action:@selector(saveSelectedTaskFromCurrentConfig)];
-    _saveTaskButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 162, buttonWidth, 32);
-    [_panelView addSubview:_saveTaskButton];
+    _deleteTaskButton = [self panelButtonWithTitle:@"删除" action:@selector(deleteLastTask)];
+    _deleteTaskButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 8, buttonWidth, 38);
+    [_panelView addSubview:_deleteTaskButton];
 
-    _runTasksButton = [self panelButtonWithTitle:@"运行" action:@selector(runTaskList)];
-    _runTasksButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 162, buttonWidth, 32);
+    _runTasksButton = [self panelButtonWithTitle:@"播放" action:@selector(runTaskList)];
+    _runTasksButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 8, buttonWidth, 38);
     [_panelView addSubview:_runTasksButton];
 
     _collapseButton = [self panelButtonWithTitle:@"收起" action:@selector(collapsePanel)];
-    _collapseButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 162, buttonWidth, 32);
+    _collapseButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 8, buttonWidth, 38);
     [_panelView addSubview:_collapseButton];
 
-    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 202, panelWidth - 16, 22)];
+    _saveTaskButton = [self panelButtonWithTitle:@"保存" action:@selector(saveSelectedTaskFromCurrentConfig)];
+    _saveTaskButton.frame = CGRectMake(gap, 162, buttonWidth, 32);
+    [_panelView addSubview:_saveTaskButton];
+
+    _editorBackButton = [self panelButtonWithTitle:@"返回" action:@selector(showTaskHome)];
+    _editorBackButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 162, buttonWidth, 32);
+    [_panelView addSubview:_editorBackButton];
+
+    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 52, panelWidth - 16, 24)];
     _statusLabel.text = @"待机";
     _statusLabel.textColor = UIColor.whiteColor;
-    _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+    _statusLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
     _statusLabel.adjustsFontSizeToFitWidth = YES;
     _statusLabel.minimumScaleFactor = 0.6;
     _statusLabel.textAlignment = NSTextAlignmentCenter;
     [_panelView addSubview:_statusLabel];
 
-    _taskListView = [[UIScrollView alloc] initWithFrame:CGRectMake(8, 230, panelWidth - 16, 88)];
+    _taskListView = [[UIScrollView alloc] initWithFrame:CGRectMake(8, 84, panelWidth - 16, panelHeight - 92)];
     _taskListView.backgroundColor = [UIColor colorWithRed:0.11 green:0.11 blue:0.10 alpha:1.0];
     _taskListView.layer.cornerRadius = 4;
     _taskListView.layer.borderWidth = 1;
     _taskListView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
     [_panelView addSubview:_taskListView];
 
-    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 326, panelWidth - 16, MAX(54.0, panelHeight - 334))];
+    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 230, panelWidth - 16, MAX(82.0, panelHeight - 238))];
     _previewView.contentMode = UIViewContentModeScaleAspectFit;
     _previewView.clipsToBounds = YES;
     _previewView.backgroundColor = [UIColor colorWithRed:0.13 green:0.13 blue:0.12 alpha:1.0];
@@ -305,6 +316,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [_panelView addSubview:_previewView];
     [self refreshTemplatePreview];
     [self refreshTaskList];
+    [self setTaskEditorVisible:NO];
 
     _panelWindow.hidden = NO;
     [self collapsePanel];
@@ -315,7 +327,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     [button setTitle:title forState:UIControlStateNormal];
     [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    button.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
     button.titleLabel.adjustsFontSizeToFitWidth = YES;
     button.titleLabel.minimumScaleFactor = 0.72;
     button.backgroundColor = [UIColor colorWithRed:0.20 green:0.20 blue:0.18 alpha:1.0];
@@ -343,12 +355,66 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [_collapsedButton setTitle:[NSString stringWithFormat:@"＋%lu", (unsigned long)_taskItems.count] forState:UIControlStateNormal];
 }
 
+- (void)setTaskEditorVisible:(BOOL)visible {
+    _taskEditorVisible = visible;
+
+    for (UIButton *button in _modeButtons) {
+        button.hidden = !visible;
+    }
+    _captureButton.hidden = !visible;
+    _playButton.hidden = !visible;
+    _pickPointButton.hidden = !visible;
+    _runManualButton.hidden = !visible;
+    _recordSwipeButton.hidden = !visible;
+    _previewSwipeButton.hidden = !visible;
+    _clearActionButton.hidden = !visible;
+    _testButton.hidden = !visible;
+    _saveTaskButton.hidden = !visible;
+    _editorBackButton.hidden = !visible;
+    _previewView.hidden = !visible || _previewView.image == nil;
+
+    _addTaskButton.hidden = visible;
+    _deleteTaskButton.hidden = visible;
+    _runTasksButton.hidden = visible;
+    _collapseButton.hidden = visible;
+    _taskListView.hidden = visible;
+
+    CGRect statusFrame = _statusLabel.frame;
+    statusFrame.origin.y = visible ? 202.0 : 52.0;
+    statusFrame.size.height = visible ? 22.0 : 24.0;
+    _statusLabel.frame = statusFrame;
+    _statusLabel.font = [UIFont systemFontOfSize:(visible ? 14.0 : 15.0) weight:UIFontWeightMedium];
+}
+
+- (void)showTaskHome {
+    [self setTaskEditorVisible:NO];
+    [self refreshTaskList];
+    _statusLabel.text = _taskItems.count == 0 ? @"暂无任务" : @"任务列表";
+}
+
+- (void)resetEditorActionState {
+    for (NSUInteger i = 0; i < (NSUInteger)AnClickActionModeCount; i++) {
+        _manualActionPoints[i] = CGPointZero;
+        _hasManualActionPoint[i] = NO;
+    }
+    _manualSwipeAnchor = CGPointZero;
+    _manualSwipeEndPoint = CGPointZero;
+    _hasManualSwipeAnchor = NO;
+    _hasManualSwipeEndPoint = NO;
+    if (_recordedSwipePoints) {
+        [_recordedSwipePoints removeAllObjects];
+    } else {
+        _recordedSwipePoints = [NSMutableArray array];
+    }
+}
+
 - (void)collapsePanel {
     if (!_panelWindow || !_collapsedButton || !_panelView) {
         return;
     }
 
     _panelExpanded = NO;
+    _taskEditorVisible = NO;
     CGRect frame = _panelWindow.frame;
     frame.size = CGSizeMake(48.0, 48.0);
     _panelWindow.frame = [self clampedPanelFrame:frame];
@@ -372,6 +438,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _panelView.frame = _panelWindow.bounds;
     _collapsedButton.hidden = YES;
     _panelView.hidden = NO;
+    [self setTaskEditorVisible:_taskEditorVisible];
     [self refreshTaskList];
     [self refreshTemplatePreview];
 }
@@ -382,7 +449,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 - (void)handleCollapsedLongPress:(UILongPressGestureRecognizer *)recognizer {
     if (recognizer.state == UIGestureRecognizerStateBegan) {
+        _taskEditorVisible = NO;
         [self expandPanel];
+        [self showTaskHome];
     }
 }
 
@@ -769,7 +838,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     NSString *path = [self templatePath];
     UIImage *image = [[NSFileManager defaultManager] fileExistsAtPath:path] ? [UIImage imageWithContentsOfFile:path] : nil;
     _previewView.image = image;
-    _previewView.hidden = (image == nil);
+    _previewView.hidden = !_taskEditorVisible || image == nil;
 }
 
 - (void)preparePanelForExternalTapWithHostWindow:(UIWindow *)hostWindow {
@@ -1168,7 +1237,12 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 - (void)refreshTaskList {
     [self refreshCollapsedButtonTitle];
-    [_addTaskButton setTitle:[NSString stringWithFormat:@"＋%lu", (unsigned long)_taskItems.count] forState:UIControlStateNormal];
+    [_addTaskButton setTitle:[NSString stringWithFormat:@"添加%lu", (unsigned long)_taskItems.count] forState:UIControlStateNormal];
+    BOOL hasTasks = _taskItems.count > 0;
+    _deleteTaskButton.enabled = hasTasks;
+    _deleteTaskButton.alpha = hasTasks ? 1.0 : 0.45;
+    _runTasksButton.enabled = hasTasks;
+    _runTasksButton.alpha = hasTasks ? 1.0 : 0.45;
     if (!_taskListView) {
         return;
     }
@@ -1177,15 +1251,25 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [view removeFromSuperview];
     }
 
-    CGFloat rowHeight = 34.0;
+    CGFloat rowHeight = 42.0;
     CGFloat width = _taskListView.bounds.size.width;
+    if (_taskItems.count == 0) {
+        UILabel *emptyLabel = [[UILabel alloc] initWithFrame:CGRectMake(12.0, 18.0, width - 24.0, 46.0)];
+        emptyLabel.text = @"暂无任务  点击添加";
+        emptyLabel.textAlignment = NSTextAlignmentCenter;
+        emptyLabel.textColor = [UIColor colorWithWhite:1 alpha:0.58];
+        emptyLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+        emptyLabel.adjustsFontSizeToFitWidth = YES;
+        emptyLabel.minimumScaleFactor = 0.7;
+        [_taskListView addSubview:emptyLabel];
+    }
     for (NSUInteger i = 0; i < _taskItems.count; i++) {
         UIButton *row = [UIButton buttonWithType:UIButtonTypeSystem];
         row.tag = (NSInteger)i;
-        row.frame = CGRectMake(6.0, 5.0 + rowHeight * i, width - 12.0, 29.0);
+        row.frame = CGRectMake(6.0, 6.0 + rowHeight * i, width - 12.0, 36.0);
         [row setTitle:[self titleForTask:_taskItems[i] index:i] forState:UIControlStateNormal];
         [row setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-        row.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+        row.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
         row.titleLabel.adjustsFontSizeToFitWidth = YES;
         row.titleLabel.minimumScaleFactor = 0.62;
         row.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
@@ -1199,22 +1283,31 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [row addTarget:self action:@selector(selectTaskButton:) forControlEvents:UIControlEventTouchUpInside];
 
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleTaskPan:)];
-        pan.cancelsTouchesInView = NO;
+        pan.cancelsTouchesInView = YES;
         [row addGestureRecognizer:pan];
         [_taskListView addSubview:row];
     }
-    _taskListView.contentSize = CGSizeMake(width, MAX(_taskListView.bounds.size.height + 1.0, 10.0 + rowHeight * _taskItems.count));
+    _taskListView.contentSize = CGSizeMake(width, MAX(_taskListView.bounds.size.height + 1.0, 12.0 + rowHeight * _taskItems.count));
 }
 
 - (void)addTaskFromCurrentConfig {
-    NSMutableDictionary *task = [self taskDictionaryFromCurrentConfigRequireComplete:NO];
-    if (!task) {
-        task = [@{@"mode": @(_actionMode)} mutableCopy];
-    }
+    NSMutableDictionary *task = [@{@"mode": @(AnClickActionModeTap)} mutableCopy];
     [_taskItems addObject:task];
     _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
-    [self refreshTaskList];
-    _statusLabel.text = [NSString stringWithFormat:@"已加任务%lu", (unsigned long)_taskItems.count];
+    [self showTaskHome];
+    _statusLabel.text = [NSString stringWithFormat:@"已加任务%lu  点击任务设置", (unsigned long)_taskItems.count];
+}
+
+- (void)deleteLastTask {
+    if (_taskItems.count == 0) {
+        _statusLabel.text = @"没有任务";
+        return;
+    }
+
+    [_taskItems removeLastObject];
+    _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
+    [self showTaskHome];
+    _statusLabel.text = [NSString stringWithFormat:@"已删剩%lu", (unsigned long)_taskItems.count];
 }
 
 - (void)saveSelectedTaskFromCurrentConfig {
@@ -1229,6 +1322,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         _taskItems[(NSUInteger)_selectedTaskIndex] = task;
     }
     [self refreshTaskList];
+    [self showTaskHome];
     _statusLabel.text = [NSString stringWithFormat:@"已保存任务%ld", (long)_selectedTaskIndex + 1];
 }
 
@@ -1248,6 +1342,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         mode = AnClickActionModeTap;
     }
     _actionMode = mode;
+    [self resetEditorActionState];
 
     if (mode == AnClickActionModeSwipe) {
         NSArray<NSValue *> *path = task[@"path"];
@@ -1268,6 +1363,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     [self refreshModeButtons];
     [self refreshTaskList];
+    [self setTaskEditorVisible:YES];
     _statusLabel.text = [NSString stringWithFormat:@"选择任务%ld %@", (long)index + 1, [self actionNameForMode:mode]];
 }
 
@@ -1283,7 +1379,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
 
     CGPoint translation = [recognizer translationInView:_taskListView];
-    CGFloat rowHeight = 34.0;
+    CGFloat rowHeight = 42.0;
     if (recognizer.state == UIGestureRecognizerStateBegan) {
         _draggingTaskIndex = index;
         [_taskListView bringSubviewToFront:row];
