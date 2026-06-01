@@ -194,14 +194,18 @@ static uint32_t AnClickHammerHandMaskForPhase(AnClickHammerTouchPhase phase) {
     return AnClickHammerFingerMaskForPhase(phase) & kIOHIDDigitizerEventTouch;
 }
 
-static IOHIDEventRef AnClickHammerCreateTouchEvent(CGPoint point,
-                                                   uint32_t identity,
-                                                   uint32_t fingerIndex,
-                                                   AnClickHammerTouchPhase phase) CF_RETURNS_RETAINED {
-    BOOL touching = AnClickHammerPhaseIsTouching(phase);
+static IOHIDEventRef AnClickHammerCreateTouchEvent(NSArray<NSNumber *> *touchIds,
+                                                   NSArray<NSValue *> *points,
+                                                   NSArray<NSNumber *> *phases,
+                                                   NSArray<NSNumber *> *identities) CF_RETURNS_RETAINED {
     uint64_t timestamp = mach_absolute_time();
-    uint32_t handMask = AnClickHammerHandMaskForPhase(phase);
-    uint32_t fingerMask = AnClickHammerFingerMaskForPhase(phase);
+    BOOL touching = NO;
+    uint32_t handMask = 0;
+    for (NSNumber *phaseNumber in phases) {
+        AnClickHammerTouchPhase phase = (AnClickHammerTouchPhase)phaseNumber.integerValue;
+        touching = touching || AnClickHammerPhaseIsTouching(phase);
+        handMask |= AnClickHammerHandMaskForPhase(phase);
+    }
 
     IOHIDEventRef handEvent = IOHIDEventCreateDigitizerEvent(kCFAllocatorDefault,
                                                              timestamp,
@@ -225,26 +229,34 @@ static IOHIDEventRef AnClickHammerCreateTouchEvent(CGPoint point,
     IOHIDEventSetIntegerValue(handEvent, kIOHIDEventFieldDigitizerIsDisplayIntegrated, 1);
     IOHIDEventSetSenderID(handEvent, AnClickHammerSenderID);
 
-    IOHIDEventRef fingerEvent = IOHIDEventCreateDigitizerFingerEvent(kCFAllocatorDefault,
-                                                                     timestamp,
-                                                                     identity,
-                                                                     fingerIndex,
-                                                                     fingerMask,
-                                                                     (IOHIDFloat)point.x,
-                                                                     (IOHIDFloat)point.y,
-                                                                     0,
-                                                                     touching ? 0.5 : 0,
-                                                                     0,
-                                                                     touching,
-                                                                     touching,
-                                                                     0);
-    if (fingerEvent) {
-        IOHIDEventSetIntegerValue(fingerEvent, kIOHIDEventFieldDigitizerIsDisplayIntegrated, 1);
-        IOHIDEventSetFloatValue(fingerEvent, kIOHIDEventFieldDigitizerMajorRadius, 5);
-        IOHIDEventSetFloatValue(fingerEvent, kIOHIDEventFieldDigitizerMinorRadius, 5);
-        IOHIDEventSetSenderID(fingerEvent, AnClickHammerSenderID);
-        IOHIDEventAppendEvent(handEvent, fingerEvent, 0);
-        CFRelease(fingerEvent);
+    for (NSUInteger i = 0; i < points.count; i++) {
+        CGPoint point = [(NSValue *)points[i] CGPointValue];
+        AnClickHammerTouchPhase phase = (AnClickHammerTouchPhase)[(NSNumber *)phases[i] integerValue];
+        BOOL fingerTouching = AnClickHammerPhaseIsTouching(phase);
+        uint32_t identity = [(NSNumber *)identities[i] unsignedIntValue];
+        uint32_t fingerIndex = [(NSNumber *)touchIds[i] unsignedIntValue];
+        uint32_t fingerMask = AnClickHammerFingerMaskForPhase(phase);
+        IOHIDEventRef fingerEvent = IOHIDEventCreateDigitizerFingerEvent(kCFAllocatorDefault,
+                                                                         timestamp,
+                                                                         identity,
+                                                                         fingerIndex,
+                                                                         fingerMask,
+                                                                         (IOHIDFloat)point.x,
+                                                                         (IOHIDFloat)point.y,
+                                                                         0,
+                                                                         fingerTouching ? 0.5 : 0,
+                                                                         0,
+                                                                         fingerTouching,
+                                                                         fingerTouching,
+                                                                         0);
+        if (fingerEvent) {
+            IOHIDEventSetIntegerValue(fingerEvent, kIOHIDEventFieldDigitizerIsDisplayIntegrated, 1);
+            IOHIDEventSetFloatValue(fingerEvent, kIOHIDEventFieldDigitizerMajorRadius, 5);
+            IOHIDEventSetFloatValue(fingerEvent, kIOHIDEventFieldDigitizerMinorRadius, 5);
+            IOHIDEventSetSenderID(fingerEvent, AnClickHammerSenderID);
+            IOHIDEventAppendEvent(handEvent, fingerEvent, 0);
+            CFRelease(fingerEvent);
+        }
     }
 
     return handEvent;
@@ -283,80 +295,124 @@ static void AnClickHammerPrepareEventForWindow(IOHIDEventRef event, UIWindow *wi
 }
 
 + (NSInteger)sendTouchId:(NSInteger)touchId atPoint:(CGPoint)point phase:(AnClickHammerTouchPhase)phase {
+    if (touchId <= 0) {
+        touchId = [self availableTouchId];
+    }
+    if (touchId <= 0) {
+        NSLog(@"[AnClick] HammerTouch no available touch id");
+        return 0;
+    }
+    [self sendTouchIds:@[@(touchId)]
+                points:@[[NSValue valueWithCGPoint:point]]
+                phases:@[@(phase)]];
+    return touchId;
+}
+
++ (void)sendTouchIds:(NSArray<NSNumber *> *)touchIds
+              points:(NSArray<NSValue *> *)points
+              phases:(NSArray<NSNumber *> *)phases {
     if (!NSThread.isMainThread) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self sendTouchId:touchId atPoint:point phase:phase];
+            [self sendTouchIds:touchIds points:points phases:phases];
         });
-        return touchId;
+        return;
     }
 
     if (![UIApplication.sharedApplication respondsToSelector:@selector(_enqueueHIDEvent:)]) {
         NSLog(@"[AnClick] HammerTouch _enqueueHIDEvent unavailable");
-        return 0;
+        return;
     }
 
-    if (touchId <= 0) {
-        touchId = [self availableTouchId];
-    }
-    if (touchId <= 0 || touchId > 64) {
-        NSLog(@"[AnClick] HammerTouch no available touch id");
-        return 0;
+    if (touchIds.count == 0 || touchIds.count != points.count || touchIds.count != phases.count) {
+        NSLog(@"[AnClick] HammerTouch invalid multi-touch payload");
+        return;
     }
 
-    NSUInteger index = (NSUInteger)(touchId - 1);
-    AnClickHammerTouchSlot *slot = &AnClickHammerTouchSlots[index];
+    NSMutableArray<NSNumber *> *eventTouchIds = [NSMutableArray array];
+    NSMutableArray<NSValue *> *eventPoints = [NSMutableArray array];
+    NSMutableArray<NSNumber *> *eventPhases = [NSMutableArray array];
+    NSMutableArray<NSNumber *> *eventIdentities = [NSMutableArray array];
+    NSMutableArray<NSNumber *> *endedTouchIds = [NSMutableArray array];
+    UIWindow *eventWindow = nil;
 
-    if (phase == AnClickHammerTouchPhaseBegan) {
-        if (slot->active) {
-            [self sendTouchId:touchId atPoint:slot->point phase:AnClickHammerTouchPhaseCancelled];
+    for (NSUInteger i = 0; i < touchIds.count; i++) {
+        NSInteger touchId = [(NSNumber *)touchIds[i] integerValue];
+        CGPoint point = [(NSValue *)points[i] CGPointValue];
+        AnClickHammerTouchPhase phase = (AnClickHammerTouchPhase)[(NSNumber *)phases[i] integerValue];
+        if (touchId <= 0 || touchId > 64) {
+            NSLog(@"[AnClick] HammerTouch invalid id=%ld", (long)touchId);
+            continue;
         }
-        slot->active = YES;
-        slot->identity = AnClickHammerNewIdentity();
-        slot->point = point;
-        slot->window = AnClickHammerWindowForPoint(point);
-    } else if (!slot->active) {
-        NSLog(@"[AnClick] HammerTouch dropped inactive phase=%ld id=%ld screen=(%.1f, %.1f)",
-              (long)phase,
-              (long)touchId,
-              point.x,
-              point.y);
-        return touchId;
-    } else {
-        slot->point = point;
-        if (!slot->window || slot->window.hidden || slot->window.alpha <= 0.01) {
-            slot->window = AnClickHammerWindowForPoint(point);
-        }
-    }
 
-    UIWindow *window = slot->window ?: AnClickHammerWindowForPoint(point);
-    if (!window) {
-        NSLog(@"[AnClick] HammerTouch no target window at %.1f, %.1f", point.x, point.y);
+        NSUInteger index = (NSUInteger)(touchId - 1);
+        AnClickHammerTouchSlot *slot = &AnClickHammerTouchSlots[index];
         if (phase == AnClickHammerTouchPhaseBegan) {
-            slot->active = NO;
-            slot->identity = 0;
-            slot->window = nil;
+            if (slot->active) {
+                [self sendTouchId:touchId atPoint:slot->point phase:AnClickHammerTouchPhaseCancelled];
+            }
+            slot->active = YES;
+            slot->identity = AnClickHammerNewIdentity();
+            slot->point = point;
+            slot->window = AnClickHammerWindowForPoint(point);
+        } else if (!slot->active) {
+            NSLog(@"[AnClick] HammerTouch dropped inactive phase=%ld id=%ld screen=(%.1f, %.1f)",
+                  (long)phase,
+                  (long)touchId,
+                  point.x,
+                  point.y);
+            continue;
+        } else {
+            slot->point = point;
+            if (!slot->window || slot->window.hidden || slot->window.alpha <= 0.01) {
+                slot->window = AnClickHammerWindowForPoint(point);
+            }
         }
-        return touchId;
+
+        if (!eventWindow) {
+            eventWindow = slot->window ?: AnClickHammerWindowForPoint(point);
+        }
+
+        if (!eventWindow) {
+            NSLog(@"[AnClick] HammerTouch no target window at %.1f, %.1f", point.x, point.y);
+            if (phase == AnClickHammerTouchPhaseBegan) {
+                slot->active = NO;
+                slot->identity = 0;
+                slot->window = nil;
+            }
+            continue;
+        }
+
+        [eventTouchIds addObject:@(touchId)];
+        [eventPoints addObject:[NSValue valueWithCGPoint:point]];
+        [eventPhases addObject:@(phase)];
+        [eventIdentities addObject:@(slot->identity ?: (uint32_t)touchId)];
+        if (phase == AnClickHammerTouchPhaseEnded || phase == AnClickHammerTouchPhaseCancelled) {
+            [endedTouchIds addObject:@(touchId)];
+        }
     }
 
-    IOHIDEventRef event = AnClickHammerCreateTouchEvent(point,
-                                                        slot->identity ?: (uint32_t)touchId,
-                                                        (uint32_t)touchId,
-                                                        phase);
+    if (eventTouchIds.count == 0 || !eventWindow) {
+        return;
+    }
+
+    IOHIDEventRef event = AnClickHammerCreateTouchEvent(eventTouchIds,
+                                                        eventPoints,
+                                                        eventPhases,
+                                                        eventIdentities);
     if (event) {
-        AnClickHammerPrepareEventForWindow(event, window);
+        AnClickHammerPrepareEventForWindow(event, eventWindow);
         [UIApplication.sharedApplication _enqueueHIDEvent:event];
         CFRelease(event);
     }
 
-    if (phase == AnClickHammerTouchPhaseEnded || phase == AnClickHammerTouchPhaseCancelled) {
+    for (NSNumber *touchIdNumber in endedTouchIds) {
+        NSUInteger index = (NSUInteger)(touchIdNumber.integerValue - 1);
+        AnClickHammerTouchSlot *slot = &AnClickHammerTouchSlots[index];
         slot->active = NO;
         slot->identity = 0;
         slot->point = CGPointZero;
         slot->window = nil;
     }
-
-    return touchId;
 }
 
 @end

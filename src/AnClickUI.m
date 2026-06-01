@@ -8,6 +8,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     AnClickActionModeDoubleTap = 1,
     AnClickActionModeLongPress = 2,
     AnClickActionModeSwipe = 3,
+    AnClickActionModeTwoFingerTap = 4,
+    AnClickActionModePinchIn = 5,
+    AnClickActionModePinchOut = 6,
+    AnClickActionModeRotate = 7,
+    AnClickActionModeCount = 8,
 };
 
 @interface AnClickCore : NSObject
@@ -26,6 +31,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 + (BOOL)isHolding;
 + (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration;
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events;
++ (void)twoFingerTapAtPoint:(CGPoint)point distance:(CGFloat)distance;
++ (void)pinchAtPoint:(CGPoint)center fromDistance:(CGFloat)fromDistance toDistance:(CGFloat)toDistance duration:(NSTimeInterval)duration;
++ (void)rotateAtPoint:(CGPoint)center radius:(CGFloat)radius startAngle:(CGFloat)startAngle endAngle:(CGFloat)endAngle duration:(NSTimeInterval)duration;
 @end
 
 @interface AnClickRecorder : NSObject
@@ -59,6 +67,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIView *_pointPickOverlay;
     UIWindow *_pointPickWindow;
     UIView *_pointCursorView;
+    UIView *_pointPickToolbar;
     UILabel *_pointCoordinateLabel;
     UIImage *_captureSnapshot;
     UIImageView *_previewView;
@@ -68,10 +77,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     NSMutableArray<NSValue *> *_recordedSwipePoints;
     NSMutableArray<NSValue *> *_liveSwipePoints;
     NSArray<NSDictionary *> *_recordedMacroEvents;
-    CGPoint _manualActionPoints[3];
-    BOOL _hasManualActionPoint[3];
+    CGPoint _manualActionPoints[AnClickActionModeCount];
+    BOOL _hasManualActionPoint[AnClickActionModeCount];
     CGPoint _manualSwipeAnchor;
     BOOL _hasManualSwipeAnchor;
+    CGPoint _manualSwipeEndPoint;
+    BOOL _hasManualSwipeEndPoint;
+    BOOL _pickingSwipeEndPoint;
+    BOOL _pointPickPanStartedOnToolbar;
     CGPoint _pendingPointPickPoint;
     BOOL _hasPendingPointPickPoint;
     BOOL _longPressHolding;
@@ -131,13 +144,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)buildPanel {
-    CGFloat panelWidth = MIN(360.0, UIScreen.mainScreen.bounds.size.width - 24.0);
+    CGFloat panelWidth = MIN(348.0, UIScreen.mainScreen.bounds.size.width - 16.0);
+    CGFloat panelHeight = 232.0;
     _actionMode = AnClickActionModeTap;
     if (!_recordedSwipePoints) {
         _recordedSwipePoints = [NSMutableArray array];
     }
 
-    _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(12, 120, panelWidth, 196)];
+    _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(8, 118, panelWidth, panelHeight)];
     [self attachPanelWindowToActiveSceneIfNeeded];
     _panelWindow.windowLevel = UIWindowLevelAlert + 1000;
     _panelWindow.backgroundColor = UIColor.clearColor;
@@ -147,10 +161,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _panelWindow.rootViewController = controller;
 
     _panelView = [[UIView alloc] initWithFrame:_panelWindow.bounds];
-    _panelView.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.10 alpha:0.94];
+    _panelView.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.075 alpha:0.94];
     _panelView.layer.cornerRadius = 6;
     _panelView.layer.borderWidth = 1;
-    _panelView.layer.borderColor = [UIColor colorWithRed:0.33 green:0.58 blue:0.86 alpha:0.55].CGColor;
+    _panelView.layer.borderColor = [UIColor colorWithRed:0.72 green:0.57 blue:0.32 alpha:0.55].CGColor;
     _panelView.layer.shadowColor = UIColor.blackColor.CGColor;
     _panelView.layer.shadowOpacity = 0.35;
     _panelView.layer.shadowRadius = 14.0;
@@ -160,14 +174,16 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIPanGestureRecognizer *panelPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelPan:)];
     [_panelView addGestureRecognizer:panelPan];
 
-    CGFloat gap = 8.0;
+    CGFloat gap = 7.0;
     CGFloat modeWidth = floor((panelWidth - gap * 5.0) / 4.0);
-    NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"滑动"];
+    NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"滑动", @"二指", @"缩小", @"放大", @"旋转"];
     NSMutableArray<UIButton *> *modeButtons = [NSMutableArray array];
     for (NSUInteger i = 0; i < modeTitles.count; i++) {
         UIButton *button = [self panelButtonWithTitle:modeTitles[i] action:@selector(selectActionMode:)];
         button.tag = (NSInteger)i;
-        button.frame = CGRectMake(gap + (modeWidth + gap) * i, 8, modeWidth, 32);
+        NSUInteger row = i / 4;
+        NSUInteger column = i % 4;
+        button.frame = CGRectMake(gap + (modeWidth + gap) * column, 8 + row * 36, modeWidth, 30);
         [_panelView addSubview:button];
         [modeButtons addObject:button];
     }
@@ -176,38 +192,38 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     CGFloat buttonWidth = floor((panelWidth - gap * 5.0) / 4.0);
     _captureButton = [self panelButtonWithTitle:@"截图" action:@selector(beginTemplateCapture)];
-    _captureButton.frame = CGRectMake(gap, 48, buttonWidth, 34);
+    _captureButton.frame = CGRectMake(gap, 84, buttonWidth, 32);
     [_panelView addSubview:_captureButton];
 
     _playButton = [self panelButtonWithTitle:@"识图" action:@selector(playTemplateTap)];
-    _playButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 48, buttonWidth, 34);
+    _playButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 84, buttonWidth, 32);
     [_panelView addSubview:_playButton];
 
     _pickPointButton = [self panelButtonWithTitle:@"取点" action:@selector(beginPointPicking)];
-    _pickPointButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 48, buttonWidth, 34);
+    _pickPointButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 84, buttonWidth, 32);
     [_panelView addSubview:_pickPointButton];
 
     _runManualButton = [self panelButtonWithTitle:@"执行" action:@selector(runManualAction)];
-    _runManualButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 48, buttonWidth, 34);
+    _runManualButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 84, buttonWidth, 32);
     [_panelView addSubview:_runManualButton];
 
     _recordSwipeButton = [self panelButtonWithTitle:@"录制" action:@selector(toggleMacroRecording)];
-    _recordSwipeButton.frame = CGRectMake(gap, 88, buttonWidth, 34);
+    _recordSwipeButton.frame = CGRectMake(gap, 123, buttonWidth, 32);
     [_panelView addSubview:_recordSwipeButton];
 
     _previewSwipeButton = [self panelButtonWithTitle:@"回放" action:@selector(playRecordedMacro)];
-    _previewSwipeButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 88, buttonWidth, 34);
+    _previewSwipeButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 123, buttonWidth, 32);
     [_panelView addSubview:_previewSwipeButton];
 
     _clearActionButton = [self panelButtonWithTitle:@"清除" action:@selector(clearCurrentActionConfig)];
-    _clearActionButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 88, buttonWidth, 34);
+    _clearActionButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 123, buttonWidth, 32);
     [_panelView addSubview:_clearActionButton];
 
     _testButton = [self panelButtonWithTitle:@"测试" action:@selector(testCenterTap)];
-    _testButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 88, buttonWidth, 34);
+    _testButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 123, buttonWidth, 32);
     [_panelView addSubview:_testButton];
 
-    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 130, panelWidth - 16, 22)];
+    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 163, panelWidth - 16, 22)];
     _statusLabel.text = @"待机";
     _statusLabel.textColor = UIColor.whiteColor;
     _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
@@ -216,10 +232,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _statusLabel.textAlignment = NSTextAlignmentCenter;
     [_panelView addSubview:_statusLabel];
 
-    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 158, panelWidth - 16, 30)];
+    _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 193, panelWidth - 16, 31)];
     _previewView.contentMode = UIViewContentModeScaleAspectFit;
     _previewView.clipsToBounds = YES;
-    _previewView.backgroundColor = [UIColor colorWithRed:0.12 green:0.14 blue:0.17 alpha:1.0];
+    _previewView.backgroundColor = [UIColor colorWithRed:0.13 green:0.13 blue:0.12 alpha:1.0];
     _previewView.layer.cornerRadius = 4;
     _previewView.layer.borderWidth = 1;
     _previewView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
@@ -235,8 +251,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     [button setTitle:title forState:UIControlStateNormal];
     [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    button.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    button.backgroundColor = [UIColor colorWithRed:0.16 green:0.20 blue:0.25 alpha:1.0];
+    button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    button.titleLabel.adjustsFontSizeToFitWidth = YES;
+    button.titleLabel.minimumScaleFactor = 0.72;
+    button.backgroundColor = [UIColor colorWithRed:0.20 green:0.20 blue:0.18 alpha:1.0];
     button.layer.cornerRadius = 4;
     button.layer.borderWidth = 1;
     button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
@@ -250,12 +268,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
     NSString *name = [self currentActionName];
     if (_actionMode == AnClickActionModeSwipe) {
-        if (_recordedSwipePoints.count < 2) {
-            _statusLabel.text = @"滑动需录制";
+        if (_hasManualSwipeAnchor && _hasManualSwipeEndPoint) {
+            _statusLabel.text = @"滑动已设起终点";
         } else if (_hasManualSwipeAnchor) {
-            _statusLabel.text = @"滑动已设锚点";
-        } else {
+            _statusLabel.text = @"滑动需终点";
+        } else if (_recordedSwipePoints.count >= 2) {
             _statusLabel.text = @"滑动已录轨迹";
+        } else {
+            _statusLabel.text = @"滑动需取点";
         }
     } else if ([self hasManualPointForMode:_actionMode]) {
         CGPoint point = _manualActionPoints[(NSUInteger)_actionMode];
@@ -269,22 +289,22 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     for (UIButton *button in _modeButtons) {
         BOOL selected = button.tag == _actionMode;
         button.backgroundColor = selected
-            ? [UIColor colorWithRed:0.93 green:0.57 blue:0.18 alpha:1.0]
-            : [UIColor colorWithRed:0.16 green:0.20 blue:0.25 alpha:1.0];
+            ? [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:1.0]
+            : [UIColor colorWithRed:0.20 green:0.20 blue:0.18 alpha:1.0];
         button.layer.borderColor = selected
-            ? [UIColor colorWithRed:1.0 green:0.78 blue:0.36 alpha:1.0].CGColor
+            ? [UIColor colorWithRed:1.0 green:0.82 blue:0.43 alpha:1.0].CGColor
             : [UIColor colorWithWhite:1 alpha:0.10].CGColor;
         [button setTitleColor:selected ? UIColor.blackColor : UIColor.whiteColor forState:UIControlStateNormal];
     }
 }
 
 - (NSString *)currentActionName {
-    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动"];
+    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动", @"二指", @"缩小", @"放大", @"旋转"];
     return names[(NSUInteger)_actionMode];
 }
 
 - (BOOL)hasManualPointForMode:(AnClickActionMode)mode {
-    if (mode < AnClickActionModeTap || mode > AnClickActionModeLongPress) {
+    if (mode < AnClickActionModeTap || mode >= AnClickActionModeCount || mode == AnClickActionModeSwipe) {
         return NO;
     }
     return _hasManualActionPoint[(NSUInteger)mode];
@@ -705,9 +725,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [self preparePanelForExternalTapWithHostWindow:hostWindow];
 
     if (_actionMode == AnClickActionModeSwipe) {
-        NSArray<NSValue *> *path = [self recordedSwipePointsAnchoredAtPoint:point];
+        NSArray<NSValue *> *path = (_hasManualSwipeAnchor && _hasManualSwipeEndPoint)
+            ? [self manualSwipePath]
+            : [self recordedSwipePointsAnchoredAtPoint:point];
         if (path.count < 2) {
-            _statusLabel.text = @"先录滑动";
+            _statusLabel.text = _hasManualSwipeAnchor ? @"先取终点" : @"先取起点";
             return;
         }
         [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:1.1];
@@ -732,6 +754,18 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
                 [self refreshModeButtons];
             }
         });
+    } else if (_actionMode == AnClickActionModeTwoFingerTap) {
+        [AnClickFakeTouch twoFingerTapAtPoint:point distance:72.0];
+        _statusLabel.text = [NSString stringWithFormat:@"二指 %.0f,%.0f", point.x, point.y];
+    } else if (_actionMode == AnClickActionModePinchIn) {
+        [AnClickFakeTouch pinchAtPoint:point fromDistance:168.0 toDistance:58.0 duration:0.46];
+        _statusLabel.text = [NSString stringWithFormat:@"缩小 %.0f,%.0f", point.x, point.y];
+    } else if (_actionMode == AnClickActionModePinchOut) {
+        [AnClickFakeTouch pinchAtPoint:point fromDistance:58.0 toDistance:168.0 duration:0.46];
+        _statusLabel.text = [NSString stringWithFormat:@"放大 %.0f,%.0f", point.x, point.y];
+    } else if (_actionMode == AnClickActionModeRotate) {
+        [AnClickFakeTouch rotateAtPoint:point radius:64.0 startAngle:(CGFloat)(-M_PI / 4.0) endAngle:(CGFloat)(M_PI * 0.75) duration:0.58];
+        _statusLabel.text = [NSString stringWithFormat:@"旋转 %.0f,%.0f", point.x, point.y];
     } else {
         [AnClickFakeTouch tapAtPoint:point];
         _statusLabel.text = [NSString stringWithFormat:@"点 %.0f,%.0f", point.x, point.y];
@@ -739,6 +773,12 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (NSArray<NSValue *> *)manualSwipePath {
+    if (_hasManualSwipeAnchor && _hasManualSwipeEndPoint) {
+        return @[
+            [NSValue valueWithCGPoint:_manualSwipeAnchor],
+            [NSValue valueWithCGPoint:_manualSwipeEndPoint],
+        ];
+    }
     if (_recordedSwipePoints.count < 2) {
         return @[];
     }
@@ -753,6 +793,17 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     if (!hostWindow) {
         _statusLabel.text = @"无窗口";
         return;
+    }
+
+    if (_actionMode == AnClickActionModeSwipe) {
+        BOOL shouldPickEnd = _hasManualSwipeAnchor && !_hasManualSwipeEndPoint;
+        if (!shouldPickEnd) {
+            _hasManualSwipeAnchor = NO;
+            _hasManualSwipeEndPoint = NO;
+        }
+        _pickingSwipeEndPoint = shouldPickEnd;
+    } else {
+        _pickingSwipeEndPoint = NO;
     }
 
     _panelWindow.hidden = YES;
@@ -770,11 +821,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     overlay.backgroundColor = UIColor.clearColor;
     overlay.userInteractionEnabled = YES;
 
-    CGFloat cursorSize = 34.0;
+    CGFloat cursorSize = 32.0;
     UIView *cursor = [[UIView alloc] initWithFrame:CGRectMake(0, 0, cursorSize, cursorSize)];
     cursor.backgroundColor = UIColor.clearColor;
     cursor.layer.cornerRadius = cursorSize * 0.5;
-    cursor.layer.borderWidth = 1.5;
+    cursor.layer.borderWidth = 1.25;
     cursor.layer.borderColor = UIColor.systemYellowColor.CGColor;
     cursor.userInteractionEnabled = NO;
     UIView *horizontal = [[UIView alloc] initWithFrame:CGRectMake(6, cursorSize * 0.5 - 0.5, cursorSize - 12, 1)];
@@ -793,32 +844,54 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [overlay addSubview:cursor];
     _pointCursorView = cursor;
 
-    UITapGestureRecognizer *confirmTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingDoubleTap:)];
-    confirmTap.numberOfTapsRequired = 2;
-    [overlay addGestureRecognizer:confirmTap];
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingTap:)];
-    [tap requireGestureRecognizerToFail:confirmTap];
+    tap.cancelsTouchesInView = NO;
     [overlay addGestureRecognizer:tap];
-    UITapGestureRecognizer *cancelTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(cancelPointPicking)];
-    cancelTap.numberOfTouchesRequired = 2;
-    [overlay addGestureRecognizer:cancelTap];
     UIPanGestureRecognizer *overlayPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingOverlayPan:)];
+    overlayPan.cancelsTouchesInView = NO;
     [overlay addGestureRecognizer:overlayPan];
+
+    UIView *toolbar = [[UIView alloc] initWithFrame:CGRectZero];
+    toolbar.backgroundColor = [UIColor colorWithRed:0.06 green:0.06 blue:0.055 alpha:0.72];
+    toolbar.layer.cornerRadius = 6;
+    toolbar.layer.borderWidth = 1;
+    toolbar.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
+    toolbar.clipsToBounds = YES;
+    [overlay addSubview:toolbar];
+    _pointPickToolbar = toolbar;
+
+    _pointCoordinateLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    _pointCoordinateLabel.textColor = UIColor.whiteColor;
+    _pointCoordinateLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightSemibold];
+    _pointCoordinateLabel.adjustsFontSizeToFitWidth = YES;
+    _pointCoordinateLabel.minimumScaleFactor = 0.65;
+    [toolbar addSubview:_pointCoordinateLabel];
+
+    UIButton *confirmButton = [self pointPickButtonWithTitle:@"确定" action:@selector(confirmPointPicking)];
+    confirmButton.tag = 1001;
+    [toolbar addSubview:confirmButton];
+
+    UIButton *cancelButton = [self pointPickButtonWithTitle:@"取消" action:@selector(cancelPointPicking)];
+    cancelButton.tag = 1002;
+    [toolbar addSubview:cancelButton];
 
     [_pointPickWindow.rootViewController.view addSubview:overlay];
     _pointPickOverlay = overlay;
     _pendingPointPickPoint = [self initialPointPickPointInOverlay:overlay];
     _hasPendingPointPickPoint = YES;
+    if (_actionMode == AnClickActionModeSwipe && _pickingSwipeEndPoint && _hasManualSwipeAnchor) {
+        [self showPointPickSwipeStartMarker];
+    }
     [self updatePointPickCursor];
     _pointPickWindow.hidden = NO;
-    _statusLabel.text = @"拖动取点 双击确定";
+    _statusLabel.text = _pickingSwipeEndPoint ? @"滑动取终点" : @"拖动取点";
 }
 
 - (CGPoint)initialPointPickPointInOverlay:(UIView *)overlay {
-    if (_actionMode == AnClickActionModeSwipe && _hasManualSwipeAnchor) {
+    if (_actionMode == AnClickActionModeSwipe && _pickingSwipeEndPoint && _hasManualSwipeAnchor) {
         return [self clampedPointPickPoint:_manualSwipeAnchor inOverlay:overlay];
     }
-    if (_actionMode <= AnClickActionModeLongPress && [self hasManualPointForMode:_actionMode]) {
+    if ([self hasManualPointForMode:_actionMode]) {
         return [self clampedPointPickPoint:_manualActionPoints[(NSUInteger)_actionMode] inOverlay:overlay];
     }
     return CGPointMake(CGRectGetMidX(overlay.bounds), CGRectGetMidY(overlay.bounds));
@@ -837,18 +910,98 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
     _pendingPointPickPoint = [self clampedPointPickPoint:_pendingPointPickPoint inOverlay:_pointPickOverlay];
     _pointCursorView.center = _pendingPointPickPoint;
-    _pointCoordinateLabel.text = [NSString stringWithFormat:@"X %.0f   Y %.0f", _pendingPointPickPoint.x, _pendingPointPickPoint.y];
+    NSString *stage = (_actionMode == AnClickActionModeSwipe)
+        ? (_pickingSwipeEndPoint ? @"终点" : @"起点")
+        : [self currentActionName];
+    _pointCoordinateLabel.text = [NSString stringWithFormat:@"%@  X %.0f  Y %.0f",
+                                  stage,
+                                  _pendingPointPickPoint.x,
+                                  _pendingPointPickPoint.y];
+    [self layoutPointPickToolbar];
 }
 
-- (void)cancelPointPicking {
+- (UIButton *)pointPickButtonWithTitle:(NSString *)title action:(SEL)action {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    [button setTitle:title forState:UIControlStateNormal];
+    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
+    button.backgroundColor = [title isEqualToString:@"确定"]
+        ? [UIColor colorWithRed:0.86 green:0.55 blue:0.18 alpha:0.92]
+        : [UIColor colorWithWhite:1 alpha:0.10];
+    button.layer.cornerRadius = 5;
+    button.layer.borderWidth = 1;
+    button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.18].CGColor;
+    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return button;
+}
+
+- (void)layoutPointPickToolbar {
+    if (!_pointPickOverlay || !_pointPickToolbar) {
+        return;
+    }
+
+    CGFloat margin = 8.0;
+    CGFloat toolbarHeight = 48.0;
+    CGFloat toolbarWidth = MIN(_pointPickOverlay.bounds.size.width - margin * 2.0, 360.0);
+    CGFloat x = (_pointPickOverlay.bounds.size.width - toolbarWidth) * 0.5;
+    BOOL cursorNearBottom = _hasPendingPointPickPoint &&
+        _pendingPointPickPoint.y > _pointPickOverlay.bounds.size.height - toolbarHeight - 28.0;
+    CGFloat y = cursorNearBottom ? margin : _pointPickOverlay.bounds.size.height - toolbarHeight - margin;
+    _pointPickToolbar.frame = CGRectMake(x, y, toolbarWidth, toolbarHeight);
+
+    CGFloat buttonWidth = 64.0;
+    CGFloat buttonHeight = 34.0;
+    CGFloat buttonY = (toolbarHeight - buttonHeight) * 0.5;
+    UIButton *confirmButton = (UIButton *)[_pointPickToolbar viewWithTag:1001];
+    UIButton *cancelButton = (UIButton *)[_pointPickToolbar viewWithTag:1002];
+    cancelButton.frame = CGRectMake(toolbarWidth - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
+    confirmButton.frame = CGRectMake(CGRectGetMinX(cancelButton.frame) - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
+    _pointCoordinateLabel.frame = CGRectMake(10, 0, CGRectGetMinX(confirmButton.frame) - 18, toolbarHeight);
+}
+
+- (BOOL)pointPickLocationHitsToolbar:(CGPoint)location {
+    return _pointPickToolbar && CGRectContainsPoint(_pointPickToolbar.frame, location);
+}
+
+- (void)showPointPickSwipeStartMarker {
+    if (!_pointPickOverlay || !_hasManualSwipeAnchor) {
+        return;
+    }
+
+    [[_pointPickOverlay viewWithTag:2201] removeFromSuperview];
+    CGFloat size = 24.0;
+    UIView *marker = [[UIView alloc] initWithFrame:CGRectMake(0, 0, size, size)];
+    marker.tag = 2201;
+    marker.center = [self clampedPointPickPoint:_manualSwipeAnchor inOverlay:_pointPickOverlay];
+    marker.userInteractionEnabled = NO;
+    marker.backgroundColor = UIColor.clearColor;
+    marker.layer.cornerRadius = size * 0.5;
+    marker.layer.borderWidth = 2.0;
+    marker.layer.borderColor = UIColor.systemGreenColor.CGColor;
+
+    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(size * 0.5 - 2, size * 0.5 - 2, 4, 4)];
+    dot.backgroundColor = UIColor.systemGreenColor;
+    dot.layer.cornerRadius = 2;
+    dot.userInteractionEnabled = NO;
+    [marker addSubview:dot];
+    [_pointPickOverlay insertSubview:marker belowSubview:_pointCursorView];
+}
+
+- (void)finishPointPickingOverlay {
     [_pointPickOverlay removeFromSuperview];
     _pointPickOverlay = nil;
     _pointCursorView = nil;
+    _pointPickToolbar = nil;
     _pointCoordinateLabel = nil;
     _hasPendingPointPickPoint = NO;
     _pointPickWindow.hidden = YES;
     _pointPickWindow = nil;
+    _pickingSwipeEndPoint = NO;
     [self restorePanelAfterExternalTap];
+}
+
+- (void)cancelPointPicking {
+    [self finishPointPickingOverlay];
     _statusLabel.text = @"取消取点";
 }
 
@@ -856,30 +1009,41 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     if (recognizer.state != UIGestureRecognizerStateEnded) {
         return;
     }
-    _pendingPointPickPoint = [self clampedPointPickPoint:[recognizer locationInView:_pointPickOverlay] inOverlay:_pointPickOverlay];
-    _hasPendingPointPickPoint = YES;
-    [self updatePointPickCursor];
-}
-
-- (void)handlePointPickingDoubleTap:(UITapGestureRecognizer *)recognizer {
-    if (recognizer.state != UIGestureRecognizerStateEnded) {
+    CGPoint location = [recognizer locationInView:_pointPickOverlay];
+    if ([self pointPickLocationHitsToolbar:location]) {
         return;
     }
-    _pendingPointPickPoint = [self clampedPointPickPoint:[recognizer locationInView:_pointPickOverlay] inOverlay:_pointPickOverlay];
+    _pendingPointPickPoint = [self clampedPointPickPoint:location inOverlay:_pointPickOverlay];
     _hasPendingPointPickPoint = YES;
-    [self confirmPointPicking];
+    [self updatePointPickCursor];
 }
 
 - (void)handlePointPickingOverlayPan:(UIPanGestureRecognizer *)recognizer {
     if (!_pointPickOverlay) {
         return;
     }
-    if (recognizer.state == UIGestureRecognizerStateBegan ||
-        recognizer.state == UIGestureRecognizerStateChanged ||
+    if (recognizer.state == UIGestureRecognizerStateBegan) {
+        _pointPickPanStartedOnToolbar = [self pointPickLocationHitsToolbar:[recognizer locationInView:_pointPickOverlay]];
+        [recognizer setTranslation:CGPointZero inView:_pointPickOverlay];
+        return;
+    }
+    if (_pointPickPanStartedOnToolbar) {
+        if (recognizer.state == UIGestureRecognizerStateEnded ||
+            recognizer.state == UIGestureRecognizerStateCancelled ||
+            recognizer.state == UIGestureRecognizerStateFailed) {
+            _pointPickPanStartedOnToolbar = NO;
+        }
+        return;
+    }
+    if (recognizer.state == UIGestureRecognizerStateChanged ||
         recognizer.state == UIGestureRecognizerStateEnded) {
-        _pendingPointPickPoint = [self clampedPointPickPoint:[recognizer locationInView:_pointPickOverlay] inOverlay:_pointPickOverlay];
+        CGPoint translation = [recognizer translationInView:_pointPickOverlay];
+        _pendingPointPickPoint = [self clampedPointPickPoint:CGPointMake(_pendingPointPickPoint.x + translation.x,
+                                                                         _pendingPointPickPoint.y + translation.y)
+                                                  inOverlay:_pointPickOverlay];
         _hasPendingPointPickPoint = YES;
         [self updatePointPickCursor];
+        [recognizer setTranslation:CGPointZero inView:_pointPickOverlay];
     }
 }
 
@@ -904,27 +1068,41 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
 
     CGPoint screenPoint = _pendingPointPickPoint;
-    [_pointPickOverlay removeFromSuperview];
-    _pointPickOverlay = nil;
-    _pointCursorView = nil;
-    _pointCoordinateLabel = nil;
-    _hasPendingPointPickPoint = NO;
-    _pointPickWindow.hidden = YES;
-    _pointPickWindow = nil;
-    [self restorePanelAfterExternalTap];
 
     if (_actionMode == AnClickActionModeSwipe) {
-        _manualSwipeAnchor = screenPoint;
-        _hasManualSwipeAnchor = YES;
-        [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
+        if (!_pickingSwipeEndPoint) {
+            _manualSwipeAnchor = screenPoint;
+            _hasManualSwipeAnchor = YES;
+            _hasManualSwipeEndPoint = NO;
+            _manualSwipeEndPoint = CGPointZero;
+            _pickingSwipeEndPoint = YES;
+            _pendingPointPickPoint = screenPoint;
+            [self showPointPickSwipeStartMarker];
+            [self updatePointPickCursor];
+            _statusLabel.text = @"起点已定 继续终点";
+            return;
+        }
+
+        _manualSwipeEndPoint = screenPoint;
+        _hasManualSwipeEndPoint = YES;
+        [self finishPointPickingOverlay];
+        [self showTapMarkerAtScreenPoint:_manualSwipeAnchor inWindow:hostWindow];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.18 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
+        });
         NSArray<NSValue *> *path = [self manualSwipePath];
         if (path.count >= 2) {
             [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:1.0];
         }
-        _statusLabel.text = [NSString stringWithFormat:@"滑动起点 %.0f,%.0f", screenPoint.x, screenPoint.y];
+        _statusLabel.text = [NSString stringWithFormat:@"滑 %.0f,%.0f -> %.0f,%.0f",
+                             _manualSwipeAnchor.x,
+                             _manualSwipeAnchor.y,
+                             screenPoint.x,
+                             screenPoint.y];
         return;
     }
 
+    [self finishPointPickingOverlay];
     _manualActionPoints[(NSUInteger)_actionMode] = screenPoint;
     _hasManualActionPoint[(NSUInteger)_actionMode] = YES;
     [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
@@ -941,13 +1119,13 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     if (_actionMode == AnClickActionModeSwipe) {
         NSArray<NSValue *> *path = [self manualSwipePath];
         if (path.count < 2) {
-            _statusLabel.text = @"先录滑动";
+            _statusLabel.text = _hasManualSwipeAnchor ? @"先取终点" : @"先取起点";
             return;
         }
         [self preparePanelForExternalTapWithHostWindow:hostWindow];
         [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:1.1];
         [AnClickFakeTouch playPath:path duration:0.55];
-        _statusLabel.text = _hasManualSwipeAnchor ? @"执行滑动锚点" : @"执行原轨迹";
+        _statusLabel.text = (_hasManualSwipeAnchor && _hasManualSwipeEndPoint) ? @"执行起终点" : @"执行原轨迹";
         return;
     }
 
@@ -968,11 +1146,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     if (_actionMode == AnClickActionModeSwipe) {
         NSArray<NSValue *> *path = [self manualSwipePath];
         if (path.count < 2) {
-            _statusLabel.text = @"先录滑动";
+            _statusLabel.text = _hasManualSwipeAnchor ? @"先取终点" : @"先取起点";
             return;
         }
         [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:1.2];
-        _statusLabel.text = _hasManualSwipeAnchor ? @"预览锚点轨迹" : @"预览原轨迹";
+        _statusLabel.text = (_hasManualSwipeAnchor && _hasManualSwipeEndPoint) ? @"预览起终点" : @"预览原轨迹";
         return;
     }
 
@@ -989,6 +1167,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     if (_actionMode == AnClickActionModeSwipe) {
         [_recordedSwipePoints removeAllObjects];
         _hasManualSwipeAnchor = NO;
+        _hasManualSwipeEndPoint = NO;
+        _manualSwipeAnchor = CGPointZero;
+        _manualSwipeEndPoint = CGPointZero;
         [_trajectoryView removeFromSuperview];
         _statusLabel.text = @"已清滑动";
         return;
@@ -1010,7 +1191,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [recorder stopRecording];
         _recordedMacroEvents = [recorder serializedEvents];
         [_recordSwipeButton setTitle:@"录制" forState:UIControlStateNormal];
-        _recordSwipeButton.backgroundColor = [UIColor colorWithRed:0.16 green:0.20 blue:0.25 alpha:1.0];
+        _recordSwipeButton.backgroundColor = [UIColor colorWithRed:0.20 green:0.20 blue:0.18 alpha:1.0];
         _statusLabel.text = [NSString stringWithFormat:@"已录 %lu步", (unsigned long)_recordedMacroEvents.count];
         return;
     }
@@ -1105,6 +1286,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         if (_liveSwipePoints.count >= 2) {
             _recordedSwipePoints = [_liveSwipePoints mutableCopy];
             _hasManualSwipeAnchor = NO;
+            _hasManualSwipeEndPoint = NO;
             _actionMode = AnClickActionModeSwipe;
             [self refreshModeButtons];
             _statusLabel.text = [NSString stringWithFormat:@"已录 %lu点", (unsigned long)_recordedSwipePoints.count];

@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <math.h>
 #import "../include/HammerTouch.h"
 
 @interface AnClickFakeTouch : NSObject
@@ -14,6 +15,9 @@
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end duration:(NSTimeInterval)duration steps:(NSUInteger)steps;
 + (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration;
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events;
++ (void)twoFingerTapAtPoint:(CGPoint)point distance:(CGFloat)distance;
++ (void)pinchAtPoint:(CGPoint)center fromDistance:(CGFloat)fromDistance toDistance:(CGFloat)toDistance duration:(NSTimeInterval)duration;
++ (void)rotateAtPoint:(CGPoint)center radius:(CGFloat)radius startAngle:(CGFloat)startAngle endAngle:(CGFloat)endAngle duration:(NSTimeInterval)duration;
 + (void)touchDownAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
 + (void)touchMoveAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
 + (void)touchStationaryAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
@@ -275,6 +279,91 @@ static const NSTimeInterval AnClickTouchUpDelay = 1.0 / 120.0;
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(safeDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self finishTouchId:touchId atPoint:points.lastObject.CGPointValue cancelled:NO];
+    });
+}
+
++ (NSArray<NSValue *> *)twoFingerPointsAtCenter:(CGPoint)center distance:(CGFloat)distance angle:(CGFloat)angle {
+    CGFloat halfDistance = distance * 0.5;
+    CGFloat dx = cos(angle) * halfDistance;
+    CGFloat dy = sin(angle) * halfDistance;
+    return @[
+        [NSValue valueWithCGPoint:CGPointMake(center.x - dx, center.y - dy)],
+        [NSValue valueWithCGPoint:CGPointMake(center.x + dx, center.y + dy)],
+    ];
+}
+
++ (void)sendTwoFingerPoints:(NSArray<NSValue *> *)points phase:(AnClickHammerTouchPhase)phase {
+    [AnClickHammerTouch sendTouchIds:@[@20, @21]
+                              points:points
+                              phases:@[@(phase), @(phase)]];
+}
+
++ (void)twoFingerTapAtPoint:(CGPoint)point distance:(CGFloat)distance {
+    NSArray<NSValue *> *points = [self twoFingerPointsAtCenter:point distance:MAX(distance, 24.0) angle:0];
+    [self sendTwoFingerPoints:points phase:AnClickHammerTouchPhaseBegan];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self sendTwoFingerPoints:points phase:AnClickHammerTouchPhaseEnded];
+    });
+}
+
++ (void)pinchAtPoint:(CGPoint)center fromDistance:(CGFloat)fromDistance toDistance:(CGFloat)toDistance duration:(NSTimeInterval)duration {
+    NSInteger touchIdA = 22;
+    NSInteger touchIdB = 23;
+    NSUInteger steps = 18;
+    NSTimeInterval safeDuration = MAX(duration, 0.18);
+    NSTimeInterval stepDuration = safeDuration / (NSTimeInterval)steps;
+    NSArray<NSValue *> *startPoints = [self twoFingerPointsAtCenter:center distance:MAX(fromDistance, 10.0) angle:0];
+    [AnClickHammerTouch sendTouchIds:@[@(touchIdA), @(touchIdB)]
+                              points:startPoints
+                              phases:@[@(AnClickHammerTouchPhaseBegan), @(AnClickHammerTouchPhaseBegan)]];
+
+    for (NSUInteger i = 1; i <= steps; i++) {
+        CGFloat progress = (CGFloat)i / (CGFloat)steps;
+        CGFloat distance = fromDistance + (toDistance - fromDistance) * progress;
+        NSArray<NSValue *> *points = [self twoFingerPointsAtCenter:center distance:MAX(distance, 8.0) angle:0];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(stepDuration * i * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [AnClickHammerTouch sendTouchIds:@[@(touchIdA), @(touchIdB)]
+                                      points:points
+                                      phases:@[@(AnClickHammerTouchPhaseMoved), @(AnClickHammerTouchPhaseMoved)]];
+        });
+    }
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((safeDuration + AnClickTouchUpDelay) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NSArray<NSValue *> *endPoints = [self twoFingerPointsAtCenter:center distance:MAX(toDistance, 8.0) angle:0];
+        [AnClickHammerTouch sendTouchIds:@[@(touchIdA), @(touchIdB)]
+                                  points:endPoints
+                                  phases:@[@(AnClickHammerTouchPhaseEnded), @(AnClickHammerTouchPhaseEnded)]];
+    });
+}
+
++ (void)rotateAtPoint:(CGPoint)center radius:(CGFloat)radius startAngle:(CGFloat)startAngle endAngle:(CGFloat)endAngle duration:(NSTimeInterval)duration {
+    NSInteger touchIdA = 24;
+    NSInteger touchIdB = 25;
+    NSUInteger steps = 24;
+    NSTimeInterval safeDuration = MAX(duration, 0.24);
+    NSTimeInterval stepDuration = safeDuration / (NSTimeInterval)steps;
+    CGFloat distance = MAX(radius * 2.0, 24.0);
+    NSArray<NSValue *> *startPoints = [self twoFingerPointsAtCenter:center distance:distance angle:startAngle];
+    [AnClickHammerTouch sendTouchIds:@[@(touchIdA), @(touchIdB)]
+                              points:startPoints
+                              phases:@[@(AnClickHammerTouchPhaseBegan), @(AnClickHammerTouchPhaseBegan)]];
+
+    for (NSUInteger i = 1; i <= steps; i++) {
+        CGFloat progress = (CGFloat)i / (CGFloat)steps;
+        CGFloat angle = startAngle + (endAngle - startAngle) * progress;
+        NSArray<NSValue *> *points = [self twoFingerPointsAtCenter:center distance:distance angle:angle];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(stepDuration * i * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [AnClickHammerTouch sendTouchIds:@[@(touchIdA), @(touchIdB)]
+                                      points:points
+                                      phases:@[@(AnClickHammerTouchPhaseMoved), @(AnClickHammerTouchPhaseMoved)]];
+        });
+    }
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((safeDuration + AnClickTouchUpDelay) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NSArray<NSValue *> *endPoints = [self twoFingerPointsAtCenter:center distance:distance angle:endAngle];
+        [AnClickHammerTouch sendTouchIds:@[@(touchIdA), @(touchIdB)]
+                                  points:endPoints
+                                  phases:@[@(AnClickHammerTouchPhaseEnded), @(AnClickHammerTouchPhaseEnded)]];
     });
 }
 
