@@ -69,6 +69,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIButton *_saveTaskButton;
     UIButton *_runTasksButton;
     UIButton *_collapseButton;
+    UIButton *_homeCloseButton;
     UIButton *_editorBackButton;
     UIButton *_imageActionButton;
     UIButton *_previewActionButton;
@@ -333,6 +334,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _collapseButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 8, buttonWidth, 38);
     [_panelView addSubview:_collapseButton];
 
+    _homeCloseButton = [self panelButtonWithTitle:@"×" action:@selector(collapsePanel)];
+    _homeCloseButton.frame = CGRectMake(panelWidth - 50, 8, 38, 38);
+    [_panelView addSubview:_homeCloseButton];
+
     _saveTaskButton = [self panelButtonWithTitle:@"保存" action:@selector(saveSelectedTaskFromCurrentConfig)];
     _saveTaskButton.frame = CGRectMake(gap, 120, buttonWidth, 34);
     [_panelView addSubview:_saveTaskButton];
@@ -499,6 +504,32 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
                                                                    attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.30]}];
 }
 
+- (void)setCenteredIconForButton:(UIButton *)button systemName:(NSString *)systemName fallbackTitle:(NSString *)fallbackTitle fontSize:(CGFloat)fontSize {
+    button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
+    button.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
+    button.contentEdgeInsets = UIEdgeInsetsZero;
+    button.titleEdgeInsets = UIEdgeInsetsZero;
+    button.imageEdgeInsets = UIEdgeInsetsZero;
+    button.titleLabel.textAlignment = NSTextAlignmentCenter;
+    button.titleLabel.font = [UIFont systemFontOfSize:fontSize weight:UIFontWeightBold];
+    [button setAttributedTitle:nil forState:UIControlStateNormal];
+    [button setImage:nil forState:UIControlStateNormal];
+
+    if (@available(iOS 13.0, *)) {
+        UIImage *image = [UIImage systemImageNamed:systemName];
+        if (image) {
+            [button setTitle:nil forState:UIControlStateNormal];
+            [button setImage:image forState:UIControlStateNormal];
+            button.tintColor = UIColor.whiteColor;
+            button.imageView.contentMode = UIViewContentModeScaleAspectFit;
+            return;
+        }
+    }
+
+    [button setTitle:fallbackTitle forState:UIControlStateNormal];
+    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+}
+
 - (UIButton *)panelButtonWithTitle:(NSString *)title action:(SEL)action {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     [button setTitle:title forState:UIControlStateNormal];
@@ -613,6 +644,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _addTaskButton.hidden = visible;
     _deleteTaskButton.hidden = visible;
     _runTasksButton.hidden = visible;
+    _homeCloseButton.hidden = visible;
     _collapseButton.hidden = NO;
     _taskListView.hidden = visible;
     if (visible) {
@@ -636,10 +668,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     CGFloat buttonY = height - buttonSize - 14.0;
     [_panelView viewWithTag:8811].hidden = YES;
 
-    [_addTaskButton setTitle:@"+" forState:UIControlStateNormal];
-    [_deleteTaskButton setTitle:@"-" forState:UIControlStateNormal];
-    [_runTasksButton setTitle:@"▶" forState:UIControlStateNormal];
-    [_collapseButton setTitle:@"…" forState:UIControlStateNormal];
+    [self setCenteredIconForButton:_addTaskButton systemName:@"plus" fallbackTitle:@"+" fontSize:27];
+    [self setCenteredIconForButton:_deleteTaskButton systemName:@"minus" fallbackTitle:@"-" fontSize:27];
+    [self setCenteredIconForButton:_collapseButton systemName:@"gearshape.fill" fallbackTitle:@"⚙" fontSize:24];
+    [self setCenteredIconForButton:_runTasksButton systemName:@"play.fill" fallbackTitle:@"▶" fontSize:24];
     NSArray<UIButton *> *toolbarButtons = @[_addTaskButton, _deleteTaskButton, _collapseButton, _runTasksButton];
     NSArray<UIColor *> *colors = @[
         [UIColor colorWithRed:0.02 green:0.50 blue:0.95 alpha:0.95],
@@ -657,16 +689,33 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         button.layer.shadowRadius = 7.0;
         button.layer.shadowOpacity = 0.32;
         button.backgroundColor = colors[i];
-        button.titleLabel.font = [UIFont systemFontOfSize:26 weight:UIFontWeightBold];
         [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        button.tintColor = UIColor.whiteColor;
         [self updateButtonShadowPath:button];
     }
 
-    _statusLabel.frame = CGRectMake(10, 10, width - 20, 24);
+    [self setCenteredIconForButton:_homeCloseButton systemName:@"xmark" fallbackTitle:@"×" fontSize:19];
+    _homeCloseButton.frame = CGRectMake(width - 48.0, 8.0, 36.0, 36.0);
+    _homeCloseButton.layer.cornerRadius = 18.0;
+    _homeCloseButton.layer.borderWidth = 1.0;
+    _homeCloseButton.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
+    _homeCloseButton.layer.shadowColor = UIColor.blackColor.CGColor;
+    _homeCloseButton.layer.shadowOffset = CGSizeMake(0, 3);
+    _homeCloseButton.layer.shadowRadius = 5.0;
+    _homeCloseButton.layer.shadowOpacity = 0.28;
+    _homeCloseButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+    [_homeCloseButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    _homeCloseButton.tintColor = UIColor.whiteColor;
+    [self updateButtonShadowPath:_homeCloseButton];
+
+    _statusLabel.frame = CGRectMake(10, 10, width - 68, 24);
     _statusLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
     _taskListView.frame = CGRectMake(10, 42, width - 20, MAX(80.0, buttonY - 50.0));
     if (_functionMenuView) {
         _functionMenuView.frame = _panelView.bounds;
+        [_panelView bringSubviewToFront:_functionMenuView];
+    } else {
+        [_panelView bringSubviewToFront:_homeCloseButton];
     }
 }
 
@@ -690,13 +739,13 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [_editorBackButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
     [self updateButtonShadowPath:_editorBackButton];
 
-    [_collapseButton setTitle:@"×" forState:UIControlStateNormal];
-    _collapseButton.titleLabel.font = [UIFont systemFontOfSize:28 weight:UIFontWeightBold];
+    [self setCenteredIconForButton:_collapseButton systemName:@"xmark" fallbackTitle:@"×" fontSize:22];
     _collapseButton.frame = CGRectMake(width - 54, 8, 42, 40);
     _collapseButton.layer.cornerRadius = 20.0;
     _collapseButton.layer.borderWidth = 0;
     _collapseButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];
     [_collapseButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
+    _collapseButton.tintColor = UIColor.blackColor;
     [self updateButtonShadowPath:_collapseButton];
 
     _editorTitleLabel.text = (_actionMode == AnClickActionModeNone) ? @"选择动作" : [self currentActionName];
@@ -1069,6 +1118,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
     _collapsedButton.frame = _panelWindow.bounds;
     _collapsedButton.hidden = NO;
+    _homeCloseButton.hidden = YES;
     _panelView.hidden = YES;
     [self refreshCollapsedButtonTitle];
 }
