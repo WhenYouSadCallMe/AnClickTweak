@@ -77,6 +77,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     UIScrollView *_taskListView;
     UILabel *_statusLabel;
     UITextField *_descriptionField;
+    UITextField *_delayField;
+    UITextField *_repeatField;
     UIView *_captureOverlay;
     UIView *_selectionView;
     UIView *_pointPickOverlay;
@@ -347,6 +349,18 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [_descriptionField addTarget:self action:@selector(actionDescriptionChanged:) forControlEvents:UIControlEventEditingChanged];
     [_panelView addSubview:_descriptionField];
 
+    _delayField = [self configTextFieldWithPlaceholder:@"延时(秒)"];
+    _delayField.keyboardType = UIKeyboardTypeDecimalPad;
+    [_delayField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
+    [_delayField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+    [_panelView addSubview:_delayField];
+
+    _repeatField = [self configTextFieldWithPlaceholder:@"次数"];
+    _repeatField.keyboardType = UIKeyboardTypeNumberPad;
+    [_repeatField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
+    [_repeatField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+    [_panelView addSubview:_repeatField];
+
     _taskListView = [[UIScrollView alloc] initWithFrame:CGRectMake(8, 84, panelWidth - 16, panelHeight - 92)];
     _taskListView.backgroundColor = [UIColor colorWithRed:0.11 green:0.11 blue:0.10 alpha:1.0];
     _taskListView.layer.cornerRadius = 4;
@@ -387,6 +401,24 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     return button;
 }
 
+- (UITextField *)configTextFieldWithPlaceholder:(NSString *)placeholder {
+    UITextField *field = [[UITextField alloc] initWithFrame:CGRectZero];
+    field.placeholder = placeholder;
+    field.textColor = UIColor.whiteColor;
+    field.tintColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:1.0];
+    field.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    field.backgroundColor = [UIColor colorWithRed:0.13 green:0.13 blue:0.12 alpha:1.0];
+    field.layer.cornerRadius = 4;
+    field.layer.borderWidth = 1;
+    field.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
+    field.clearButtonMode = UITextFieldViewModeWhileEditing;
+    field.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 10, 1)];
+    field.leftViewMode = UITextFieldViewModeAlways;
+    field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:placeholder
+                                                                   attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.45]}];
+    return field;
+}
+
 - (CGSize)expandedPanelSize {
     CGFloat width = MIN(348.0, UIScreen.mainScreen.bounds.size.width - 16.0);
     CGFloat height = MIN(420.0, UIScreen.mainScreen.bounds.size.height - 72.0);
@@ -425,6 +457,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _clearConfigButton.hidden = YES;
     _swipeRecordButton.hidden = YES;
     _descriptionField.hidden = !visible;
+    _delayField.hidden = YES;
+    _repeatField.hidden = YES;
     _previewView.hidden = YES;
 
     _addTaskButton.hidden = visible;
@@ -518,6 +552,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 - (void)selectActionMode:(UIButton *)sender {
     [self syncActionDescriptionFromField];
+    [self syncActionTimingFromFields];
     _actionMode = (AnClickActionMode)sender.tag;
     [self refreshModeButtons];
     [self refreshEditorConfigControls];
@@ -633,6 +668,53 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _actionDescription = [self trimmedActionDescription:textField.text];
 }
 
+- (NSString *)delayFieldText {
+    if (_actionDelay <= 0.001) {
+        return @"";
+    }
+    return [NSString stringWithFormat:@"%.1f", _actionDelay];
+}
+
+- (NSString *)repeatFieldText {
+    return [NSString stringWithFormat:@"%ld", (long)MAX(1, _actionRepeatCount)];
+}
+
+- (void)syncActionTimingFromFields {
+    NSString *delayText = [_delayField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *repeatText = [_repeatField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (delayText.length > 0) {
+        _actionDelay = MIN(30.0, MAX(0.0, delayText.doubleValue));
+        _actionDelay = round(_actionDelay * 10.0) / 10.0;
+    } else {
+        _actionDelay = 0.0;
+    }
+    if (repeatText.length > 0) {
+        _actionRepeatCount = MIN(99, MAX(1, repeatText.integerValue));
+    } else {
+        _actionRepeatCount = 1;
+    }
+}
+
+- (void)refreshTimingFieldsIfNeeded {
+    if (!_delayField.isFirstResponder) {
+        _delayField.text = [self delayFieldText];
+    }
+    if (!_repeatField.isFirstResponder) {
+        _repeatField.text = [self repeatFieldText];
+    }
+}
+
+- (void)actionTimingChanged:(__unused UITextField *)textField {
+    [self syncActionTimingFromFields];
+    [self updateStatusForCurrentConfig];
+}
+
+- (void)actionTimingEditingDidEnd:(__unused UITextField *)textField {
+    [self syncActionTimingFromFields];
+    [self refreshTimingFieldsIfNeeded];
+    [self updateStatusForCurrentConfig];
+}
+
 - (void)hideAllConfigButtons {
     _captureButton.hidden = YES;
     _playButton.hidden = YES;
@@ -646,6 +728,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _previewActionButton.hidden = YES;
     _clearConfigButton.hidden = YES;
     _swipeRecordButton.hidden = YES;
+    _delayField.hidden = YES;
+    _repeatField.hidden = YES;
     _saveTaskButton.hidden = YES;
     _editorBackButton.hidden = YES;
 }
@@ -666,6 +750,16 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
 }
 
+- (void)layoutTimingFieldsAtY:(CGFloat)y {
+    CGFloat gap = 7.0;
+    CGFloat width = _panelView.bounds.size.width;
+    CGFloat fieldWidth = floor((width - gap * 3.0) / 2.0);
+    _delayField.hidden = NO;
+    _repeatField.hidden = NO;
+    _delayField.frame = CGRectMake(gap, y, fieldWidth, 34.0);
+    _repeatField.frame = CGRectMake(gap * 2.0 + fieldWidth, y, fieldWidth, 34.0);
+}
+
 - (void)refreshEditorConfigControls {
     if (!_taskEditorVisible) {
         return;
@@ -676,6 +770,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     if (!_descriptionField.isFirstResponder) {
         _descriptionField.text = _actionDescription ?: @"";
     }
+    [self refreshTimingFieldsIfNeeded];
     [_captureButton setTitle:@"截图" forState:UIControlStateNormal];
     [_playButton setTitle:(_actionMode == AnClickActionModeImage ? (_imageUsesMatchPoint ? @"点识别" : @"点指定") : @"清除") forState:UIControlStateNormal];
     [_imageActionButton setTitle:[NSString stringWithFormat:@"后%@", [self actionNameForMode:_imageActionMode]] forState:UIControlStateNormal];
@@ -687,25 +782,21 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     }
     [_pickPointButton setTitle:pickTitle forState:UIControlStateNormal];
     [_runManualButton setTitle:@"测试" forState:UIControlStateNormal];
-    [_recordSwipeButton setTitle:@"延-" forState:UIControlStateNormal];
-    [_previewSwipeButton setTitle:@"延+" forState:UIControlStateNormal];
-    [_clearActionButton setTitle:@"次-" forState:UIControlStateNormal];
-    [_testButton setTitle:@"次+" forState:UIControlStateNormal];
     [_previewActionButton setTitle:@"预览" forState:UIControlStateNormal];
     [_clearConfigButton setTitle:@"清除" forState:UIControlStateNormal];
     [_swipeRecordButton setTitle:@"录制" forState:UIControlStateNormal];
 
     if (_actionMode == AnClickActionModeImage) {
         [self layoutConfigButtons:@[_captureButton, _playButton, _pickPointButton, _imageActionButton] y:180.0];
-        [self layoutConfigButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton, _testButton] y:218.0];
+        [self layoutTimingFieldsAtY:218.0];
         [self layoutConfigButtons:@[_previewActionButton, _runManualButton, _saveTaskButton, _editorBackButton] y:256.0];
     } else if (_actionMode == AnClickActionModeSwipe) {
         [self layoutConfigButtons:@[_pickPointButton, _swipeRecordButton, _previewActionButton, _runManualButton] y:180.0];
-        [self layoutConfigButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton, _testButton] y:218.0];
+        [self layoutTimingFieldsAtY:218.0];
         [self layoutConfigButtons:@[_clearConfigButton, _saveTaskButton, _editorBackButton] y:256.0];
     } else {
         [self layoutConfigButtons:@[_pickPointButton, _previewActionButton, _runManualButton, _playButton] y:180.0];
-        [self layoutConfigButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton, _testButton] y:218.0];
+        [self layoutTimingFieldsAtY:218.0];
         [self layoutConfigButtons:@[_saveTaskButton, _editorBackButton] y:256.0];
     }
     [self refreshTemplatePreview];
