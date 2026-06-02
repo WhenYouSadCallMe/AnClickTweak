@@ -1,12 +1,17 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"runtime"
+	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -28,12 +33,40 @@ type response struct {
 
 var state = stateStore{status: true}
 
+//go:embed static/index.html
+var indexHTML string
+
 func envOrDefault(name, fallback string) string {
 	value := os.Getenv(name)
 	if value == "" {
 		return fallback
 	}
 	return value
+}
+
+func openBrowserEnabled() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("ANCLICK_OPEN_BROWSER")))
+	return value != "0" && value != "false" && value != "no"
+}
+
+func browserURL(host, port string) string {
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return fmt.Sprintf("http://%s:%s/", host, port)
+}
+
+func openBrowser(url string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	return cmd.Start()
 }
 
 func writeJSON(w http.ResponseWriter, httpStatus int, resp response) {
@@ -61,6 +94,15 @@ func allowRequest(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+func indexPage(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html;charset=utf-8")
+	_, _ = w.Write([]byte(indexHTML))
 }
 
 func getStatus(w http.ResponseWriter, r *http.Request) {
@@ -103,14 +145,25 @@ func main() {
 	addr := fmt.Sprintf("%s:%s", host, port)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", indexPage)
 	mux.HandleFunc("/get_status_anclick", getStatus)
 	mux.HandleFunc("/set_false_anclick", setStatus(false, "已将状态修改为false"))
 	mux.HandleFunc("/set_true_anclick", setStatus(true, "已将状态修改为true"))
 
 	log.Printf("安点击网络联动服务启动: http://%s:%s", publicHost, port)
+	log.Printf("网页控制台: http://%s:%s/", publicHost, port)
 	log.Printf("查询状态: http://%s:%s/get_status_anclick", publicHost, port)
 	log.Printf("置为false: http://%s:%s/set_false_anclick", publicHost, port)
 	log.Printf("置为true: http://%s:%s/set_true_anclick", publicHost, port)
+	if openBrowserEnabled() {
+		url := browserURL(host, port)
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			if err := openBrowser(url); err != nil {
+				log.Printf("自动打开浏览器失败，可手动访问 %s: %v", url, err)
+			}
+		}()
+	}
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatalf("服务启动失败: %v", err)
 	}
