@@ -20,6 +20,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 static const NSUInteger AnClickMacroMaxTrajectoryPoints = 2400;
 static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
+static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
 @interface AnClickCore : NSObject
 + (UIImage *)captureCurrentWindowImage;
@@ -173,6 +174,65 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     AnClickActionMode _imageActionMode;
 }
 
+- (UIColor *)themeHighlightColor {
+    return [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:1.0];
+}
+
+- (UIColor *)themePanelDarkColor {
+    return [UIColor colorWithRed:0.06 green:0.06 blue:0.05 alpha:1.0];
+}
+
+- (NSSet *)archiveAllowedClasses {
+    return [NSSet setWithObjects:
+            NSArray.class,
+            NSMutableArray.class,
+            NSDictionary.class,
+            NSMutableDictionary.class,
+            NSString.class,
+            NSNumber.class,
+            NSValue.class,
+            nil];
+}
+
+- (dispatch_queue_t)diskIOQueue {
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        queue = dispatch_queue_create("com.anclick.disk-io", DISPATCH_QUEUE_SERIAL);
+    });
+    return queue;
+}
+
+- (void)installDarkBlurInView:(UIView *)view cornerRadius:(CGFloat)cornerRadius {
+    if (!view) {
+        return;
+    }
+
+    [[view viewWithTag:AnClickBackdropBlurViewTag] removeFromSuperview];
+    view.backgroundColor = UIColor.clearColor;
+    UIVisualEffectView *blurView = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleDark]];
+    blurView.tag = AnClickBackdropBlurViewTag;
+    blurView.frame = view.bounds;
+    blurView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    blurView.userInteractionEnabled = NO;
+    blurView.layer.cornerRadius = cornerRadius;
+    blurView.clipsToBounds = YES;
+    [view insertSubview:blurView atIndex:0];
+}
+
+- (void)applyFrostedRoundButtonStyle:(UIButton *)button {
+    button.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.12];
+    button.layer.borderWidth = 1.0;
+    button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
+    button.layer.shadowColor = UIColor.blackColor.CGColor;
+    button.layer.shadowOffset = CGSizeMake(0, 2);
+    button.layer.shadowRadius = 4.0;
+    button.layer.shadowOpacity = 0.22;
+    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    button.tintColor = UIColor.whiteColor;
+    [self updateButtonShadowPath:button];
+}
+
 + (instancetype)shared {
     static AnClickUI *ui = nil;
     static dispatch_once_t onceToken;
@@ -183,15 +243,20 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 }
 
 - (void)show {
+    __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self->_panelWindow) {
-            [self attachPanelWindowToActiveSceneIfNeeded];
-            [self scheduleGlobalTimers];
-            self->_panelWindow.hidden = NO;
-            [self refreshCollapsedButtonTitle];
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
             return;
         }
-        [self buildPanel];
+        if (strongSelf->_panelWindow) {
+            [strongSelf attachPanelWindowToActiveSceneIfNeeded];
+            [strongSelf scheduleGlobalTimers];
+            strongSelf->_panelWindow.hidden = NO;
+            [strongSelf refreshCollapsedButtonTitle];
+            return;
+        }
+        [strongSelf buildPanel];
     });
 }
 
@@ -269,10 +334,10 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 
     _collapsedButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _collapsedButton.frame = CGRectMake(0, 0, 48, 48);
-    _collapsedButton.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.075 alpha:0.92];
+    _collapsedButton.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.92];
     _collapsedButton.layer.cornerRadius = 6;
     _collapsedButton.layer.borderWidth = 1;
-    _collapsedButton.layer.borderColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:0.82].CGColor;
+    _collapsedButton.layer.borderColor = [[self themeHighlightColor] colorWithAlphaComponent:0.82].CGColor;
     _collapsedButton.titleLabel.font = [UIFont systemFontOfSize:19 weight:UIFontWeightBold];
     [_collapsedButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     [_collapsedButton addTarget:self action:@selector(handleCollapsedTap) forControlEvents:UIControlEventTouchUpInside];
@@ -285,14 +350,14 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     [_collapsedButton addGestureRecognizer:collapsedPan];
 
     _panelView = [[UIView alloc] initWithFrame:_panelWindow.bounds];
-    _panelView.backgroundColor = [UIColor colorWithRed:0.115 green:0.112 blue:0.098 alpha:0.95];
-    _panelView.layer.cornerRadius = 8;
-    _panelView.layer.borderWidth = 1;
-    _panelView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
+    [self installDarkBlurInView:_panelView cornerRadius:12.0];
+    _panelView.layer.cornerRadius = 12.0;
+    _panelView.layer.borderWidth = 1.0;
+    _panelView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.15].CGColor;
     _panelView.layer.shadowColor = UIColor.blackColor.CGColor;
-    _panelView.layer.shadowOpacity = 0.46;
-    _panelView.layer.shadowRadius = 18.0;
-    _panelView.layer.shadowOffset = CGSizeMake(0, 10);
+    _panelView.layer.shadowOpacity = 0.60;
+    _panelView.layer.shadowRadius = 24.0;
+    _panelView.layer.shadowOffset = CGSizeMake(0, 12);
     [controller.view addSubview:_panelView];
 
     UIPanGestureRecognizer *panelPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelPan:)];
@@ -475,7 +540,7 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     [_panelView addSubview:_thresholdField];
 
     _taskListView = [[UIScrollView alloc] initWithFrame:CGRectMake(8, 84, panelWidth - 16, panelHeight - 92)];
-    _taskListView.backgroundColor = [UIColor colorWithRed:0.055 green:0.055 blue:0.05 alpha:0.92];
+    _taskListView.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.92];
     _taskListView.layer.cornerRadius = 4;
     _taskListView.layer.borderWidth = 1;
     _taskListView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
@@ -484,7 +549,7 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 296, panelWidth - 16, MAX(70.0, panelHeight - 304))];
     _previewView.contentMode = UIViewContentModeScaleAspectFit;
     _previewView.clipsToBounds = YES;
-    _previewView.backgroundColor = [UIColor colorWithRed:0.055 green:0.055 blue:0.05 alpha:1.0];
+    _previewView.backgroundColor = [self themePanelDarkColor];
     _previewView.layer.cornerRadius = 4;
     _previewView.layer.borderWidth = 1;
     _previewView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
@@ -510,41 +575,42 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 }
 
 - (void)applyObsidian3DStyleToButton:(UIButton *)button selected:(BOOL)selected {
-    button.layer.cornerRadius = 7;
-    button.layer.borderWidth = 1;
+    button.layer.cornerRadius = 8;
     button.layer.masksToBounds = NO;
 
     if (selected) {
-        button.backgroundColor = [UIColor colorWithRed:0.28 green:0.20 blue:0.08 alpha:1.0];
-        button.layer.borderColor = [UIColor colorWithRed:0.98 green:0.70 blue:0.28 alpha:0.94].CGColor;
-        button.layer.shadowColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:1.0].CGColor;
+        button.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.25];
+        button.layer.borderWidth = 1.0;
+        button.layer.borderColor = [[self themeHighlightColor] colorWithAlphaComponent:0.8].CGColor;
+        button.layer.shadowColor = [self themeHighlightColor].CGColor;
         button.layer.shadowOffset = CGSizeMake(0, 0);
-        button.layer.shadowRadius = 7.0;
-        button.layer.shadowOpacity = 0.34;
-        [button setTitleColor:[UIColor colorWithRed:1.0 green:0.82 blue:0.45 alpha:1.0] forState:UIControlStateNormal];
+        button.layer.shadowRadius = 8.0;
+        button.layer.shadowOpacity = 0.4;
+        [button setTitleColor:[UIColor colorWithRed:1.0 green:0.82 blue:0.43 alpha:1.0] forState:UIControlStateNormal];
     } else {
-        button.backgroundColor = [UIColor colorWithRed:0.18 green:0.18 blue:0.16 alpha:1.0];
-        button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
+        button.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.06];
+        button.layer.borderWidth = 1.0;
+        button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
         button.layer.shadowColor = UIColor.blackColor.CGColor;
-        button.layer.shadowOffset = CGSizeMake(0, 2.5);
-        button.layer.shadowRadius = 4.0;
-        button.layer.shadowOpacity = 0.26;
-        [button setTitleColor:[UIColor colorWithWhite:1 alpha:0.90] forState:UIControlStateNormal];
+        button.layer.shadowOffset = CGSizeMake(2.0, 4.0);
+        button.layer.shadowRadius = 5.0;
+        button.layer.shadowOpacity = 0.5;
+        [button setTitleColor:[UIColor colorWithWhite:1 alpha:0.85] forState:UIControlStateNormal];
     }
 
     [self updateButtonShadowPath:button];
 }
 
 - (void)applyObsidianInputStyleToField:(UITextField *)field placeholder:(NSString *)placeholder monospaced:(BOOL)monospaced {
-    field.textColor = monospaced ? [UIColor colorWithRed:0.96 green:0.70 blue:0.34 alpha:1.0] : UIColor.whiteColor;
-    field.tintColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:1.0];
+    field.textColor = monospaced ? [self themeHighlightColor] : UIColor.whiteColor;
+    field.tintColor = [self themeHighlightColor];
     field.font = monospaced
         ? [UIFont monospacedDigitSystemFontOfSize:16 weight:UIFontWeightBold]
         : [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    field.backgroundColor = [UIColor colorWithRed:0.055 green:0.055 blue:0.048 alpha:1.0];
+    field.backgroundColor = [self themePanelDarkColor];
     field.layer.cornerRadius = 6;
-    field.layer.borderWidth = 1;
-    field.layer.borderColor = [UIColor colorWithWhite:0 alpha:0.75].CGColor;
+    field.layer.borderWidth = 1.0;
+    field.layer.borderColor = [UIColor colorWithWhite:0 alpha:0.8].CGColor;
     field.layer.shadowColor = [UIColor colorWithWhite:1 alpha:0.18].CGColor;
     field.layer.shadowOffset = CGSizeMake(0, 1);
     field.layer.shadowRadius = 1.0;
@@ -553,7 +619,7 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     field.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 10, 1)];
     field.leftViewMode = UITextFieldViewModeAlways;
     field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:placeholder
-                                                                   attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.30]}];
+                                                                   attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.25]}];
 }
 
 - (void)setCenteredIconForButton:(UIButton *)button systemName:(NSString *)systemName fallbackTitle:(NSString *)fallbackTitle fontSize:(CGFloat)fontSize {
@@ -659,8 +725,8 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         _collapsedButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.34 blue:0.30 alpha:0.90].CGColor;
         return;
     }
-    _collapsedButton.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.075 alpha:0.92];
-    _collapsedButton.layer.borderColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:0.82].CGColor;
+    _collapsedButton.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.92];
+    _collapsedButton.layer.borderColor = [[self themeHighlightColor] colorWithAlphaComponent:0.82].CGColor;
     [_collapsedButton setTitle:[NSString stringWithFormat:@"＋%lu", (unsigned long)_taskItems.count] forState:UIControlStateNormal];
 }
 
@@ -771,8 +837,8 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     _homeCloseButton.layer.borderWidth = 0;
     _homeCloseButton.layer.shadowOpacity = 0;
     _homeCloseButton.backgroundColor = UIColor.clearColor;
-    [_homeCloseButton setTitleColor:[UIColor colorWithWhite:1 alpha:0.92] forState:UIControlStateNormal];
-    _homeCloseButton.tintColor = [UIColor colorWithWhite:1 alpha:0.92];
+    [_homeCloseButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    _homeCloseButton.tintColor = UIColor.whiteColor;
     [self updateButtonShadowPath:_homeCloseButton];
 
     [self setCenteredIconForButton:_globalSettingsButton systemName:@"gearshape.fill" fallbackTitle:@"⚙" fontSize:17];
@@ -781,8 +847,8 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     _globalSettingsButton.layer.borderWidth = 0;
     _globalSettingsButton.layer.shadowOpacity = 0;
     _globalSettingsButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
-    _globalSettingsButton.tintColor = [UIColor colorWithWhite:1 alpha:0.92];
-    [_globalSettingsButton setTitleColor:[UIColor colorWithWhite:1 alpha:0.92] forState:UIControlStateNormal];
+    _globalSettingsButton.tintColor = UIColor.whiteColor;
+    [_globalSettingsButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     [self updateButtonShadowPath:_globalSettingsButton];
 
     _statusLabel.frame = CGRectMake(50, 10, width - closeSize - 84.0, 24);
@@ -816,17 +882,21 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     _editorBackButton.frame = CGRectMake(12, 8, 42, 40);
     _editorBackButton.layer.cornerRadius = 20.0;
     _editorBackButton.layer.borderWidth = 0;
-    _editorBackButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];
-    [_editorBackButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
+    _editorBackButton.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.12];
+    _editorBackButton.layer.borderWidth = 1.0;
+    _editorBackButton.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
+    [_editorBackButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     [self updateButtonShadowPath:_editorBackButton];
 
     [self setCenteredIconForButton:_collapseButton systemName:@"xmark" fallbackTitle:@"×" fontSize:22];
     _collapseButton.frame = CGRectMake(width - 54, 8, 42, 40);
     _collapseButton.layer.cornerRadius = 20.0;
     _collapseButton.layer.borderWidth = 0;
-    _collapseButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];
-    [_collapseButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
-    _collapseButton.tintColor = UIColor.blackColor;
+    _collapseButton.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.12];
+    _collapseButton.layer.borderWidth = 1.0;
+    _collapseButton.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
+    [_collapseButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    _collapseButton.tintColor = UIColor.whiteColor;
     [self updateButtonShadowPath:_collapseButton];
 
     _editorTitleLabel.text = (_actionMode == AnClickActionModeNone) ? @"选择动作" : [self currentActionName];
@@ -894,10 +964,12 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         return [NSMutableArray array];
     }
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    id object = [NSKeyedUnarchiver unarchiveObjectWithData:data];
-#pragma clang diagnostic pop
+    NSError *error = nil;
+    id object = [NSKeyedUnarchiver unarchivedObjectOfClasses:[self archiveAllowedClasses] fromData:data error:&error];
+    if (error) {
+        NSLog(@"[AnClick] Saved task configs unarchive failed: %@", error.localizedDescription);
+        return [NSMutableArray array];
+    }
     if (![object isKindOfClass:NSArray.class]) {
         return [NSMutableArray array];
     }
@@ -911,13 +983,20 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     return configs;
 }
 
-- (BOOL)writeSavedTaskConfigs:(NSArray *)configs {
-    NSError *error = nil;
-    NSData *data = [NSKeyedArchiver archivedDataWithRootObject:configs requiringSecureCoding:NO error:&error];
-    if (!data || error) {
-        return NO;
-    }
-    return [data writeToFile:[self savedTaskConfigsPath] atomically:YES];
+- (void)writeSavedTaskConfigs:(NSArray *)configs {
+    NSArray *configsSnapshot = [configs copy] ?: @[];
+    NSString *path = [self savedTaskConfigsPath];
+    dispatch_async([self diskIOQueue], ^{
+        NSError *error = nil;
+        NSData *data = [NSKeyedArchiver archivedDataWithRootObject:configsSnapshot requiringSecureCoding:YES error:&error];
+        if (!data || error) {
+            NSLog(@"[AnClick] Saved task configs archive failed: %@", error.localizedDescription);
+            return;
+        }
+        if (![data writeToFile:path atomically:YES]) {
+            NSLog(@"[AnClick] Saved task configs write failed: %@", path);
+        }
+    });
 }
 
 - (NSMutableArray<NSMutableDictionary *> *)copyTaskItemsForSaving {
@@ -978,10 +1057,12 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         return;
     }
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    id object = [NSKeyedUnarchiver unarchiveObjectWithData:data];
-#pragma clang diagnostic pop
+    NSError *error = nil;
+    id object = [NSKeyedUnarchiver unarchivedObjectOfClasses:[self archiveAllowedClasses] fromData:data error:&error];
+    if (error) {
+        NSLog(@"[AnClick] Global settings unarchive failed: %@", error.localizedDescription);
+        return;
+    }
     if (![object isKindOfClass:NSDictionary.class]) {
         return;
     }
@@ -989,14 +1070,20 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     [self applyGlobalSettingsDictionary:(NSDictionary *)object];
 }
 
-- (BOOL)writeGlobalSettings {
-    NSDictionary *settings = [self currentGlobalSettingsDictionary];
-    NSError *error = nil;
-    NSData *data = [NSKeyedArchiver archivedDataWithRootObject:settings requiringSecureCoding:NO error:&error];
-    if (!data || error) {
-        return NO;
-    }
-    return [data writeToFile:[self savedGlobalSettingsPath] atomically:YES];
+- (void)writeGlobalSettings {
+    NSDictionary *settings = [[self currentGlobalSettingsDictionary] copy];
+    NSString *path = [self savedGlobalSettingsPath];
+    dispatch_async([self diskIOQueue], ^{
+        NSError *error = nil;
+        NSData *data = [NSKeyedArchiver archivedDataWithRootObject:settings requiringSecureCoding:YES error:&error];
+        if (!data || error) {
+            NSLog(@"[AnClick] Global settings archive failed: %@", error.localizedDescription);
+            return;
+        }
+        if (![data writeToFile:path atomically:YES]) {
+            NSLog(@"[AnClick] Global settings write failed: %@", path);
+        }
+    });
 }
 
 - (void)persistGlobalSettings {
@@ -1169,7 +1256,7 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     [self hideGlobalSettings];
 
     _globalSettingsView = [[UIView alloc] initWithFrame:_panelView.bounds];
-    _globalSettingsView.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.075 alpha:0.97];
+    [self installDarkBlurInView:_globalSettingsView cornerRadius:_panelView.layer.cornerRadius];
     _globalSettingsView.layer.cornerRadius = _panelView.layer.cornerRadius;
     _globalSettingsView.clipsToBounds = YES;
     [_panelView addSubview:_globalSettingsView];
@@ -1185,10 +1272,9 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     UIButton *closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
     closeButton.frame = CGRectMake(width - 54, 10, 40, 40);
     closeButton.layer.cornerRadius = 20;
-    closeButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];
     closeButton.titleLabel.font = [UIFont systemFontOfSize:27 weight:UIFontWeightBold];
     [closeButton setTitle:@"×" forState:UIControlStateNormal];
-    [closeButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
+    [self applyFrostedRoundButtonStyle:closeButton];
     [closeButton addTarget:self action:@selector(hideGlobalSettings) forControlEvents:UIControlEventTouchUpInside];
     [_globalSettingsView addSubview:closeButton];
 
@@ -1256,7 +1342,7 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     CGFloat height = overlay.bounds.size.height;
     CGFloat cardHeight = MIN(330.0, height - 48.0);
     UIView *card = [[UIView alloc] initWithFrame:CGRectMake(0, MAX(40.0, (height - cardHeight) * 0.5), width, cardHeight)];
-    card.backgroundColor = [UIColor colorWithRed:0.06 green:0.06 blue:0.055 alpha:0.98];
+    card.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.98];
     card.layer.cornerRadius = 22;
     card.layer.borderWidth = 1;
     card.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
@@ -1402,7 +1488,7 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     [self hideFunctionMenu];
 
     _functionMenuView = [[UIView alloc] initWithFrame:_panelView.bounds];
-    _functionMenuView.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.075 alpha:0.96];
+    [self installDarkBlurInView:_functionMenuView cornerRadius:_panelView.layer.cornerRadius];
     _functionMenuView.layer.cornerRadius = _panelView.layer.cornerRadius;
     _functionMenuView.clipsToBounds = YES;
     [_panelView addSubview:_functionMenuView];
@@ -1416,10 +1502,9 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     UIButton *closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
     closeButton.frame = CGRectMake(_functionMenuView.bounds.size.width - 54, 10, 40, 40);
     closeButton.layer.cornerRadius = 20;
-    closeButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];
     closeButton.titleLabel.font = [UIFont systemFontOfSize:27 weight:UIFontWeightBold];
     [closeButton setTitle:@"×" forState:UIControlStateNormal];
-    [closeButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
+    [self applyFrostedRoundButtonStyle:closeButton];
     [closeButton addTarget:self action:@selector(hideFunctionMenu) forControlEvents:UIControlEventTouchUpInside];
     [_functionMenuView addSubview:closeButton];
 
@@ -1468,8 +1553,8 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         @"globalSettings": [self currentGlobalSettingsDictionary],
     } mutableCopy];
     [configs insertObject:config atIndex:0];
-    BOOL saved = [self writeSavedTaskConfigs:configs];
-    _statusLabel.text = saved ? @"任务配置已保存" : @"保存失败";
+    [self writeSavedTaskConfigs:configs];
+    _statusLabel.text = @"任务配置已保存";
     [self hideFunctionMenu];
 }
 
@@ -1485,8 +1570,10 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     if (!_functionMenuView) {
         [self showFunctionMenu];
     }
-    for (UIView *view in _functionMenuView.subviews) {
-        [view removeFromSuperview];
+    for (UIView *view in [_functionMenuView.subviews copy]) {
+        if (view.tag != AnClickBackdropBlurViewTag) {
+            [view removeFromSuperview];
+        }
     }
 
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(18, 14, _functionMenuView.bounds.size.width - 76, 34)];
@@ -1498,10 +1585,9 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     UIButton *backButton = [UIButton buttonWithType:UIButtonTypeSystem];
     backButton.frame = CGRectMake(_functionMenuView.bounds.size.width - 54, 10, 40, 40);
     backButton.layer.cornerRadius = 20;
-    backButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];
     backButton.titleLabel.font = [UIFont systemFontOfSize:24 weight:UIFontWeightBold];
     [backButton setTitle:@"×" forState:UIControlStateNormal];
-    [backButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
+    [self applyFrostedRoundButtonStyle:backButton];
     [backButton addTarget:self action:@selector(showFunctionMenu) forControlEvents:UIControlEventTouchUpInside];
     [_functionMenuView addSubview:backButton];
 
@@ -1571,8 +1657,8 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     }
 
     [configs removeObjectAtIndex:(NSUInteger)index];
-    BOOL saved = [self writeSavedTaskConfigs:configs];
-    _statusLabel.text = saved ? @"配置已删除" : @"删除失败";
+    [self writeSavedTaskConfigs:configs];
+    _statusLabel.text = @"配置已删除";
     [self showSavedConfigListForDeleting:YES];
 }
 
@@ -2354,20 +2440,18 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         return nil;
     }
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    if (UIApplication.sharedApplication.keyWindow &&
-        UIApplication.sharedApplication.keyWindow.windowLevel < UIWindowLevelAlert &&
-        UIApplication.sharedApplication.keyWindow != _panelWindow) {
-        return UIApplication.sharedApplication.keyWindow;
+    NSArray<UIWindow *> *windows = [UIApplication.sharedApplication valueForKey:@"windows"];
+    for (UIWindow *window in windows) {
+        if (window != _panelWindow && window.windowLevel < UIWindowLevelAlert && window.isKeyWindow && !window.hidden && window.alpha > 0.01) {
+            return window;
+        }
     }
-    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+    for (UIWindow *window in windows) {
         if (window != _panelWindow && window.windowLevel < UIWindowLevelAlert && !window.hidden && window.alpha > 0.01) {
             return window;
         }
     }
     return nil;
-#pragma clang diagnostic pop
 }
 
 - (void)beginTemplateCapture {
@@ -2392,14 +2476,19 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 
     _statusLabel.text = @"截图中";
     [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+    __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.16 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        self->_captureSnapshot = [AnClickCore captureCurrentWindowImage];
-        if (!self->_captureSnapshot.CGImage) {
-            [self restorePanelAfterExternalTap];
-            self->_statusLabel.text = @"截图失败";
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
             return;
         }
-        [self showCaptureOverlayInWindow:hostWindow];
+        strongSelf->_captureSnapshot = [AnClickCore captureCurrentWindowImage];
+        if (!strongSelf->_captureSnapshot.CGImage) {
+            [strongSelf restorePanelAfterExternalTap];
+            strongSelf->_statusLabel.text = @"截图失败";
+            return;
+        }
+        [strongSelf showCaptureOverlayInWindow:hostWindow];
     });
 }
 
@@ -2783,11 +2872,16 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 
 - (void)restorePanelAfterScreenDelay:(NSTimeInterval)delay {
     NSUInteger restoreGeneration = [self invalidatePendingPanelRestore];
+    __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(delay, 0.05) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (restoreGeneration != self->_panelRestoreGeneration || [AnClickRecorder shared].isRecording) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
             return;
         }
-        [self restorePanelAfterExternalTap];
+        if (restoreGeneration != strongSelf->_panelRestoreGeneration || [AnClickRecorder shared].isRecording) {
+            return;
+        }
+        [strongSelf restorePanelAfterExternalTap];
     });
 }
 
@@ -2837,10 +2931,15 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 
     [hostWindow addSubview:marker];
     _tapMarkerView = marker;
+    __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(duration, 0.4) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
         [marker removeFromSuperview];
-        if (self->_tapMarkerView == marker) {
-            self->_tapMarkerView = nil;
+        if (strongSelf->_tapMarkerView == marker) {
+            strongSelf->_tapMarkerView = nil;
         }
     });
 }
@@ -2885,10 +2984,15 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 
     [hostWindow addSubview:overlay];
     _recognitionBoxView = overlay;
+    __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(duration, 0.6) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
         [overlay removeFromSuperview];
-        if (self->_recognitionBoxView == overlay) {
-            self->_recognitionBoxView = nil;
+        if (strongSelf->_recognitionBoxView == overlay) {
+            strongSelf->_recognitionBoxView = nil;
         }
     });
 }
@@ -2953,10 +3057,15 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     [overlay.layer addSublayer:layer];
     [hostWindow addSubview:overlay];
     _operationTraceView = overlay;
+    __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(duration, 0.6) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
         [overlay removeFromSuperview];
-        if (self->_operationTraceView == overlay) {
-            self->_operationTraceView = nil;
+        if (strongSelf->_operationTraceView == overlay) {
+            strongSelf->_operationTraceView = nil;
         }
     });
 }
@@ -3000,11 +3109,16 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     _trajectoryView = view;
     _trajectoryLayer = layer;
 
+    __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(duration, 0.4) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
         [view removeFromSuperview];
-        if (self->_trajectoryView == view) {
-            self->_trajectoryView = nil;
-            self->_trajectoryLayer = nil;
+        if (strongSelf->_trajectoryView == view) {
+            strongSelf->_trajectoryView = nil;
+            strongSelf->_trajectoryLayer = nil;
         }
     });
 }
@@ -3064,11 +3178,16 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         [AnClickFakeTouch longPressAtPoint:point duration:5.0];
         _statusLabel.text = [NSString stringWithFormat:@"长按5秒 %.0f,%.0f", point.x, point.y];
         [self refreshModeButtons];
+        __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            self->_longPressHolding = NO;
-            if (self->_actionMode == AnClickActionModeLongPress) {
-                self->_statusLabel.text = @"长按完成";
-                [self refreshModeButtons];
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            strongSelf->_longPressHolding = NO;
+            if (strongSelf->_actionMode == AnClickActionModeLongPress) {
+                strongSelf->_statusLabel.text = @"长按完成";
+                [strongSelf refreshModeButtons];
             }
         });
     } else if (_actionMode == AnClickActionModeTwoFingerTap) {
@@ -3498,8 +3617,13 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         return;
     }
 
+    __weak typeof(self) weakSelf = self;
     void (^changes)(void) = ^{
-        for (UIView *view in self->_taskListView.subviews) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+        for (UIView *view in strongSelf->_taskListView.subviews) {
             if ([view.accessibilityIdentifier isEqualToString:@"AnClickTaskRow"]) {
                 if (view.tag != index) {
                     view.transform = CGAffineTransformIdentity;
@@ -3676,8 +3800,13 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     } else if (mode == AnClickActionModeLongPress) {
         _longPressHolding = YES;
         [AnClickFakeTouch longPressAtPoint:point duration:5.0];
+        __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            self->_longPressHolding = NO;
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            strongSelf->_longPressHolding = NO;
         });
     } else if (mode == AnClickActionModeTwoFingerTap) {
         [AnClickFakeTouch twoFingerTapAtPoint:point distance:72.0];
@@ -3710,34 +3839,43 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     double threshold = thresholdNumber ? MIN(1.0, MAX(0.0, thresholdNumber.doubleValue)) : 0.80;
     NSValue *customPointValue = task[@"point"];
     _templateSearchInProgress = YES;
+    __weak typeof(self) weakSelf = self;
     dispatch_async([self templateSearchQueue], ^{
+        __strong typeof(weakSelf) searchSelf = weakSelf;
+        if (!searchSelf) {
+            return;
+        }
         NSDictionary *match = [AnClickCore findTemplateImageMatch:templateImage threshold:threshold];
         dispatch_async(dispatch_get_main_queue(), ^{
-            self->_templateSearchInProgress = NO;
-            if (runGeneration != 0 && (!self->_taskRunActive || runGeneration != self->_taskRunGeneration)) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            strongSelf->_templateSearchInProgress = NO;
+            if (runGeneration != 0 && (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration)) {
                 return;
             }
             if (!match) {
-                self->_statusLabel.text = @"识图未找到";
+                strongSelf->_statusLabel.text = @"识图未找到";
                 return;
             }
             NSValue *matchPointValue = match[@"point"];
             NSValue *rectValue = match[@"rect"];
             NSNumber *scoreNumber = match[@"score"];
             if (!matchPointValue || !rectValue) {
-                self->_statusLabel.text = @"识图异常";
+                strongSelf->_statusLabel.text = @"识图异常";
                 return;
             }
-            UIWindow *currentHostWindow = [self hostWindow] ?: hostWindow;
+            UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
             CGRect rect = rectValue.CGRectValue;
-            [self showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.2];
+            [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.2];
             CGPoint actionPoint = useMatchPoint ? matchPointValue.CGPointValue : customPointValue.CGPointValue;
-            [self performPointActionMode:imageActionMode atPoint:actionPoint inWindow:currentHostWindow];
-            self->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f %@ %.0f,%.0f",
-                                      scoreNumber.doubleValue,
-                                      [self actionNameForMode:imageActionMode],
-                                      actionPoint.x,
-                                      actionPoint.y];
+            [strongSelf performPointActionMode:imageActionMode atPoint:actionPoint inWindow:currentHostWindow];
+            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f %@ %.0f,%.0f",
+                                             scoreNumber.doubleValue,
+                                             [strongSelf actionNameForMode:imageActionMode],
+                                             actionPoint.x,
+                                             actionPoint.y];
         });
     });
 }
@@ -3808,31 +3946,36 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     }
     NSTimeInterval interval = duration + 0.12;
 
+    __weak typeof(self) weakSelf = self;
     for (NSInteger i = 0; i < repeatCount; i++) {
         NSTimeInterval fireDelay = delay + interval * i;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(fireDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (runGeneration != 0 && (!self->_taskRunActive || runGeneration != self->_taskRunGeneration)) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
                 return;
             }
-            UIWindow *currentHostWindow = [self hostWindow] ?: hostWindow;
+            if (runGeneration != 0 && (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration)) {
+                return;
+            }
+            UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
             if (mode == AnClickActionModeSwipe) {
                 NSArray<NSValue *> *path = task[@"path"];
-                [self showTrajectoryForScreenPoints:path inWindow:currentHostWindow duration:0.75];
+                [strongSelf showTrajectoryForScreenPoints:path inWindow:currentHostWindow duration:0.75];
                 [AnClickFakeTouch playPath:path duration:0.55];
             } else if (mode == AnClickActionModeImage) {
-                [self performImageTask:task inWindow:currentHostWindow runGeneration:runGeneration];
+                [strongSelf performImageTask:task inWindow:currentHostWindow runGeneration:runGeneration];
             } else if (mode == AnClickActionModeMacro) {
                 NSArray<NSDictionary *> *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
-                NSArray<NSValue *> *trajectory = [self trajectoryPointsForRecordedEvents:events];
+                NSArray<NSValue *> *trajectory = [strongSelf trajectoryPointsForRecordedEvents:events];
                 if (trajectory.count >= 2) {
-                    [self showTrajectoryForScreenPoints:trajectory inWindow:currentHostWindow duration:[self durationForRecordedEvents:events]];
+                    [strongSelf showTrajectoryForScreenPoints:trajectory inWindow:currentHostWindow duration:[strongSelf durationForRecordedEvents:events]];
                 } else if (trajectory.count == 1) {
-                    [self showTapMarkerAtScreenPoint:trajectory.firstObject.CGPointValue inWindow:currentHostWindow];
+                    [strongSelf showTapMarkerAtScreenPoint:trajectory.firstObject.CGPointValue inWindow:currentHostWindow];
                 }
                 [AnClickFakeTouch playRecordedEvents:events];
             } else {
                 NSValue *pointValue = task[@"point"];
-                [self performPointActionMode:mode atPoint:pointValue.CGPointValue inWindow:currentHostWindow];
+                [strongSelf performPointActionMode:mode atPoint:pointValue.CGPointValue inWindow:currentHostWindow];
             }
         });
     }
@@ -3921,9 +4064,18 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     }
 
     NSTimeInterval globalDelay = MAX(0.0, _globalDelayMilliseconds / 1000.0);
+    __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration + 0.12) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) delaySelf = weakSelf;
+        if (!delaySelf) {
+            return;
+        }
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(globalDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self runTaskAtIndex:index + 1 inWindow:currentHostWindow generation:runGeneration];
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            [strongSelf runTaskAtIndex:index + 1 inWindow:currentHostWindow generation:runGeneration];
         });
     });
 }
@@ -4001,7 +4153,7 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     [overlay addGestureRecognizer:overlayPan];
 
     UIView *toolbar = [[UIView alloc] initWithFrame:CGRectZero];
-    toolbar.backgroundColor = [UIColor colorWithRed:0.06 green:0.06 blue:0.055 alpha:0.72];
+    toolbar.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.72];
     toolbar.layer.cornerRadius = 6;
     toolbar.layer.borderWidth = 1;
     toolbar.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
@@ -4243,8 +4395,13 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         _hasManualSwipeEndPoint = YES;
         [self finishPointPickingOverlay];
         [self showTapMarkerAtScreenPoint:_manualSwipeAnchor inWindow:hostWindow];
+        __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.18 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            [strongSelf showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
         });
         NSArray<NSValue *> *path = [self manualSwipePath];
         if (path.count >= 2) {
@@ -4303,10 +4460,15 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         }
         NSTimeInterval previewDuration = 1.2;
         [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+        __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:previewDuration];
-            self->_statusLabel.text = (self->_hasManualSwipeAnchor && self->_hasManualSwipeEndPoint) ? @"预览起终点" : @"预览原轨迹";
-            [self restorePanelAfterScreenDelay:previewDuration + 0.1];
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            [strongSelf showTrajectoryForScreenPoints:path inWindow:hostWindow duration:previewDuration];
+            strongSelf->_statusLabel.text = (strongSelf->_hasManualSwipeAnchor && strongSelf->_hasManualSwipeEndPoint) ? @"预览起终点" : @"预览原轨迹";
+            [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
         });
         return;
     }
@@ -4324,10 +4486,15 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         NSTimeInterval previewDuration = 1.0;
         AnClickActionMode imageActionMode = _imageActionMode;
         [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+        __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self showOperationTraceForMode:imageActionMode atPoint:point inWindow:hostWindow duration:previewDuration];
-            self->_statusLabel.text = [NSString stringWithFormat:@"预览识图%@ %.0f,%.0f", [self actionNameForMode:imageActionMode], point.x, point.y];
-            [self restorePanelAfterScreenDelay:previewDuration + 0.1];
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            [strongSelf showOperationTraceForMode:imageActionMode atPoint:point inWindow:hostWindow duration:previewDuration];
+            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览识图%@ %.0f,%.0f", [strongSelf actionNameForMode:imageActionMode], point.x, point.y];
+            [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
         });
         return;
     }
@@ -4341,10 +4508,15 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     AnClickActionMode actionMode = _actionMode;
     NSString *actionName = [self currentActionName];
     [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+    __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:previewDuration];
-        self->_statusLabel.text = [NSString stringWithFormat:@"预览%@ %.0f,%.0f", actionName, point.x, point.y];
-        [self restorePanelAfterScreenDelay:previewDuration + 0.1];
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+        [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:previewDuration];
+        strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览%@ %.0f,%.0f", actionName, point.x, point.y];
+        [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
     });
 }
 
@@ -4394,14 +4566,20 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     NSTimeInterval duration = [self durationForRecordedEvents:_recordedMacroEvents];
     [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
     NSArray<NSValue *> *trajectory = [self recordedMacroTrajectoryPoints];
+    NSArray<NSDictionary *> *recordedEvents = [_recordedMacroEvents copy];
+    __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (trajectory.count >= 2) {
-            [self showTrajectoryForScreenPoints:trajectory inWindow:hostWindow duration:duration];
-        } else if (trajectory.count == 1) {
-            [self showTapMarkerAtScreenPoint:trajectory.firstObject.CGPointValue inWindow:hostWindow];
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
         }
-        [AnClickFakeTouch playRecordedEvents:self->_recordedMacroEvents];
-        [self restorePanelAfterScreenDelay:duration + 0.15];
+        if (trajectory.count >= 2) {
+            [strongSelf showTrajectoryForScreenPoints:trajectory inWindow:hostWindow duration:duration];
+        } else if (trajectory.count == 1) {
+            [strongSelf showTapMarkerAtScreenPoint:trajectory.firstObject.CGPointValue inWindow:hostWindow];
+        }
+        [AnClickFakeTouch playRecordedEvents:recordedEvents];
+        [strongSelf restorePanelAfterScreenDelay:duration + 0.15];
     });
     _statusLabel.text = [NSString stringWithFormat:@"回放 %lu步", (unsigned long)_recordedMacroEvents.count];
 }
@@ -4526,36 +4704,46 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     _templateSearchInProgress = YES;
     _playButton.enabled = NO;
     _playButton.alpha = 0.55;
+    double matchThreshold = _matchThreshold;
     [self preparePanelForExternalTapWithHostWindow:hostWindow];
+    __weak typeof(self) weakSelf = self;
     dispatch_async([self templateSearchQueue], ^{
-        NSDictionary *match = [AnClickCore findTemplateImageMatch:templateImage threshold:self->_matchThreshold];
+        __strong typeof(weakSelf) searchSelf = weakSelf;
+        if (!searchSelf) {
+            return;
+        }
+        NSDictionary *match = [AnClickCore findTemplateImageMatch:templateImage threshold:matchThreshold];
         dispatch_async(dispatch_get_main_queue(), ^{
-            self->_templateSearchInProgress = NO;
-            self->_playButton.enabled = YES;
-            self->_playButton.alpha = 1.0;
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            strongSelf->_templateSearchInProgress = NO;
+            strongSelf->_playButton.enabled = YES;
+            strongSelf->_playButton.alpha = 1.0;
             if (!match) {
-                [self restorePanelAfterExternalTap];
-                self->_statusLabel.text = @"未找到";
+                [strongSelf restorePanelAfterExternalTap];
+                strongSelf->_statusLabel.text = @"未找到";
                 return;
             }
             NSValue *pointValue = match[@"point"];
             NSValue *rectValue = match[@"rect"];
             NSNumber *scoreNumber = match[@"score"];
             if (!pointValue || !rectValue) {
-                [self restorePanelAfterExternalTap];
-                self->_statusLabel.text = @"识别异常";
+                [strongSelf restorePanelAfterExternalTap];
+                strongSelf->_statusLabel.text = @"识别异常";
                 return;
             }
             CGPoint point = pointValue.CGPointValue;
             CGRect rect = rectValue.CGRectValue;
-            UIWindow *currentHostWindow = [self hostWindow] ?: hostWindow;
-            [self preparePanelForExternalTapWithHostWindow:currentHostWindow];
-            [self showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.6];
-            [self performSelectedActionAtPoint:point inWindow:currentHostWindow];
-            self->_statusLabel.text = [NSString stringWithFormat:@"识别 %.2f  %.0f,%.0f",
-                                      scoreNumber.doubleValue,
-                                      point.x,
-                                      point.y];
+            UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
+            [strongSelf preparePanelForExternalTapWithHostWindow:currentHostWindow];
+            [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.6];
+            [strongSelf performSelectedActionAtPoint:point inWindow:currentHostWindow];
+            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识别 %.2f  %.0f,%.0f",
+                                             scoreNumber.doubleValue,
+                                             point.x,
+                                             point.y];
         });
     });
 }
