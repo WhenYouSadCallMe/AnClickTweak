@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
+#import <AVFoundation/AVFoundation.h>
 #import <math.h>
 
 typedef NS_ENUM(NSInteger, AnClickActionMode) {
@@ -170,6 +171,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     BOOL _globalStopEnabled;
     BOOL _globalTimePickerEditingStartTime;
     BOOL _taskRunActive;
+    BOOL _volumeShortcutRegistered;
+    BOOL _hasObservedSystemVolume;
     NSUInteger _panelRestoreGeneration;
     NSUInteger _taskRunGeneration;
     CGFloat _taskReorderStartCenterY;
@@ -183,6 +186,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     NSInteger _globalStopMinute;
     NSInteger _globalStopSecond;
     NSInteger _currentGlobalRunCycle;
+    float _lastObservedSystemVolume;
     NSTimer *_globalStartTimer;
     NSTimer *_globalStopTimer;
     double _matchThreshold;
@@ -277,12 +281,99 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         }
         if (strongSelf->_panelWindow) {
             [strongSelf attachPanelWindowToActiveSceneIfNeeded];
+            [strongSelf registerVolumeShortcutObserver];
             [strongSelf scheduleGlobalTimers];
             strongSelf->_panelWindow.hidden = NO;
             [strongSelf refreshCollapsedButtonTitle];
             return;
         }
         [strongSelf buildPanel];
+    });
+}
+
+- (void)registerVolumeShortcutObserver {
+    if (_volumeShortcutRegistered) {
+        return;
+    }
+
+    _volumeShortcutRegistered = YES;
+    _lastObservedSystemVolume = AVAudioSession.sharedInstance.outputVolume;
+    _hasObservedSystemVolume = YES;
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handleSystemVolumeDidChange:)
+                                                 name:@"AVSystemController_SystemVolumeDidChangeNotification"
+                                               object:nil];
+}
+
+- (void)handleVolumeShortcutPlay {
+    if ([AnClickRecorder shared].isRecording) {
+        _statusLabel.text = @"录制中无法播放";
+        [self refreshCollapsedButtonTitle];
+        return;
+    }
+    if (_taskRunActive) {
+        _statusLabel.text = @"播放中";
+        [self refreshCollapsedButtonTitle];
+        return;
+    }
+    [self startTaskListRunScheduled:NO];
+}
+
+- (void)handleVolumeShortcutStop {
+    if ([AnClickRecorder shared].isRecording) {
+        [self toggleMacroRecording];
+        _statusLabel.text = @"音量停止录制";
+        [self refreshCollapsedButtonTitle];
+        return;
+    }
+    if (_taskRunActive) {
+        [self stopTaskRunWithStatus:@"音量停止"];
+        return;
+    }
+    _statusLabel.text = @"未播放";
+    [self refreshCollapsedButtonTitle];
+}
+
+- (void)handleSystemVolumeDidChange:(NSNotification *)notification {
+    NSDictionary *userInfo = notification.userInfo;
+    NSString *reason = [userInfo[@"AVSystemController_AudioVolumeChangeReasonNotificationParameter"] isKindOfClass:NSString.class]
+        ? userInfo[@"AVSystemController_AudioVolumeChangeReasonNotificationParameter"]
+        : nil;
+    if (reason.length > 0 && ![reason isEqualToString:@"ExplicitVolumeChange"]) {
+        return;
+    }
+
+    NSNumber *volumeNumber = [userInfo[@"AVSystemController_AudioVolumeNotificationParameter"] isKindOfClass:NSNumber.class]
+        ? userInfo[@"AVSystemController_AudioVolumeNotificationParameter"]
+        : nil;
+    if (!volumeNumber) {
+        return;
+    }
+
+    float volume = volumeNumber.floatValue;
+    if (!_hasObservedSystemVolume) {
+        _lastObservedSystemVolume = volume;
+        _hasObservedSystemVolume = YES;
+        return;
+    }
+
+    float delta = volume - _lastObservedSystemVolume;
+    _lastObservedSystemVolume = volume;
+    if (fabsf(delta) < 0.005f) {
+        return;
+    }
+
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+        if (delta < 0.0f) {
+            [strongSelf handleVolumeShortcutPlay];
+        } else {
+            [strongSelf handleVolumeShortcutStop];
+        }
     });
 }
 
@@ -345,7 +436,10 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _globalStopSecond = 0;
     _currentGlobalRunCycle = 0;
     _taskRunActive = NO;
+    _volumeShortcutRegistered = NO;
+    _hasObservedSystemVolume = NO;
     [self loadGlobalSettings];
+    [self registerVolumeShortcutObserver];
     if (!_recordedSwipePoints) {
         _recordedSwipePoints = [NSMutableArray array];
     }
@@ -752,8 +846,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 - (CGSize)expandedPanelSizeForEditorVisible:(BOOL)editorVisible {
     CGFloat width = MIN(340.0, UIScreen.mainScreen.bounds.size.width - 10.0);
     CGFloat availableHeight = UIScreen.mainScreen.bounds.size.height - 60.0;
-    CGFloat preferredHeight = MIN(editorVisible ? 590.0 : 420.0, availableHeight);
-    CGFloat minHeight = MIN(editorVisible ? 520.0 : 340.0, availableHeight);
+    CGFloat preferredHeight = MIN(editorVisible ? 620.0 : 420.0, availableHeight);
+    CGFloat minHeight = MIN(editorVisible ? 560.0 : 340.0, availableHeight);
     return CGSizeMake(width, MAX(minHeight, preferredHeight));
 }
 
@@ -773,20 +867,20 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
 - (void)refreshCollapsedButtonTitle {
     if ([AnClickRecorder shared].isRecording) {
-        [_collapsedButton setTitle:@"停" forState:UIControlStateNormal];
         _collapsedButton.backgroundColor = [UIColor colorWithRed:0.84 green:0.12 blue:0.10 alpha:0.94];
         _collapsedButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.34 blue:0.30 alpha:0.90].CGColor;
+        [self setCenteredIconForButton:_collapsedButton systemName:@"stop.fill" fallbackTitle:@"■" fontSize:20];
         return;
     }
     if (_taskRunActive) {
-        [_collapsedButton setTitle:@"停" forState:UIControlStateNormal];
         _collapsedButton.backgroundColor = [UIColor colorWithRed:0.84 green:0.12 blue:0.10 alpha:0.94];
         _collapsedButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.34 blue:0.30 alpha:0.90].CGColor;
+        [self setCenteredIconForButton:_collapsedButton systemName:@"stop.fill" fallbackTitle:@"■" fontSize:20];
         return;
     }
     _collapsedButton.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.92];
     _collapsedButton.layer.borderColor = [[self themeHighlightColor] colorWithAlphaComponent:0.82].CGColor;
-    [_collapsedButton setTitle:[NSString stringWithFormat:@"＋%lu", (unsigned long)_taskItems.count] forState:UIControlStateNormal];
+    [self setCenteredIconForButton:_collapsedButton systemName:@"hand.tap.fill" fallbackTitle:@"点" fontSize:22];
 }
 
 - (void)setTaskEditorVisible:(BOOL)visible {
@@ -936,6 +1030,10 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
 }
 
+- (CGFloat)editorConfigTopY {
+    return _modeButtons.count > 6 ? 228.0 : 206.0;
+}
+
 - (void)layoutEditorScaffold {
     if (!_panelView) {
         return;
@@ -944,8 +1042,11 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     CGFloat width = _panelView.bounds.size.width;
     CGFloat height = _panelView.bounds.size.height;
     CGFloat side = 18.0;
-    CGFloat modeGap = 5.0;
-    CGFloat modeWidth = floor((width - side * 2.0 - modeGap * (_modeButtons.count - 1)) / MAX((NSUInteger)1, _modeButtons.count));
+    CGFloat modeGap = 6.0;
+    CGFloat modeTopY = 64.0;
+    CGFloat modeButtonHeight = _modeButtons.count > 6 ? 30.0 : 34.0;
+    NSUInteger modeColumns = _modeButtons.count > 6 ? 4 : MAX((NSUInteger)1, _modeButtons.count);
+    NSUInteger modeRows = (_modeButtons.count + modeColumns - 1) / modeColumns;
 
     [_editorBackButton setTitle:@"‹" forState:UIControlStateNormal];
     _editorBackButton.titleLabel.font = [UIFont systemFontOfSize:34 weight:UIFontWeightBold];
@@ -990,15 +1091,29 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     for (NSUInteger i = 0; i < _modeButtons.count; i++) {
         UIButton *button = _modeButtons[i];
-        button.frame = CGRectMake(side + (modeWidth + modeGap) * i, 64, modeWidth, 34);
+        NSUInteger row = i / modeColumns;
+        NSUInteger column = i % modeColumns;
+        NSUInteger rowStart = row * modeColumns;
+        NSUInteger itemsInRow = MIN(modeColumns, _modeButtons.count - rowStart);
+        CGFloat rowWidth = width - side * 2.0;
+        CGFloat buttonWidth = floor((rowWidth - modeGap * (itemsInRow - 1)) / itemsInRow);
+        CGFloat usedWidth = buttonWidth * itemsInRow + modeGap * (itemsInRow - 1);
+        CGFloat rowX = side + floor((rowWidth - usedWidth) * 0.5);
+        button.frame = CGRectMake(rowX + (buttonWidth + modeGap) * column,
+                                  modeTopY + (modeButtonHeight + 5.0) * row,
+                                  buttonWidth,
+                                  modeButtonHeight);
+        button.titleLabel.font = [UIFont systemFontOfSize:_modeButtons.count > 6 ? 15 : 16 weight:UIFontWeightBold];
     }
 
-    _statusLabel.frame = CGRectMake(16, 102, width - 32, 22);
+    CGFloat modeRowGapCount = modeRows > 0 ? (CGFloat)(modeRows - 1) : 0.0;
+    CGFloat modeBottomY = modeTopY + modeRows * modeButtonHeight + modeRowGapCount * 5.0;
+    _statusLabel.frame = CGRectMake(16, modeBottomY + 6.0, width - 32, 22);
     _statusLabel.textColor = UIColor.whiteColor;
     _statusLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
 
-    _descriptionCaptionLabel.frame = CGRectMake(side, 130, width - side * 2.0, 20);
-    _descriptionField.frame = CGRectMake(side, 152, width - side * 2.0, 40);
+    _descriptionCaptionLabel.frame = CGRectMake(side, CGRectGetMaxY(_statusLabel.frame) + 6.0, width - side * 2.0, 20);
+    _descriptionField.frame = CGRectMake(side, CGRectGetMaxY(_descriptionCaptionLabel.frame) + 2.0, width - side * 2.0, 40);
 
     CGFloat bottomButtonY = height - 52.0;
     CGFloat bottomButtonWidth = floor((width - side * 2.0 - 12.0) / 2.0);
@@ -1997,7 +2112,19 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [self syncActionDescriptionFromField];
     [self syncActionTimingFromFields];
     [self syncOCRTargetFromField];
-    _actionMode = (AnClickActionMode)sender.tag;
+    AnClickActionMode previousMode = _actionMode;
+    AnClickActionMode nextMode = (AnClickActionMode)sender.tag;
+    CGPoint reusablePoint = CGPointZero;
+    BOOL hasReusablePoint = [self isReusablePointActionMode:previousMode] && [self hasManualPointForMode:previousMode];
+    if (hasReusablePoint) {
+        reusablePoint = _manualActionPoints[(NSUInteger)previousMode];
+    }
+
+    _actionMode = nextMode;
+    if ([self isReusablePointActionMode:nextMode] && ![self hasManualPointForMode:nextMode] && hasReusablePoint) {
+        _manualActionPoints[(NSUInteger)nextMode] = reusablePoint;
+        _hasManualActionPoint[(NSUInteger)nextMode] = YES;
+    }
     [self refreshModeButtons];
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
@@ -2030,6 +2157,12 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         mode == AnClickActionModeImage ||
         mode == AnClickActionModeMacro ||
         mode == AnClickActionModeOCR;
+}
+
+- (BOOL)isReusablePointActionMode:(AnClickActionMode)mode {
+    return mode == AnClickActionModeTap ||
+        mode == AnClickActionModeDoubleTap ||
+        mode == AnClickActionModeLongPress;
 }
 
 - (AnClickActionMode)modeForTask:(NSDictionary *)task {
@@ -2456,6 +2589,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         _ocrTargetField.text = _ocrTargetText ?: @"";
     }
     [self refreshTimingFieldsIfNeeded];
+    CGFloat configTopY = [self editorConfigTopY];
 
     if (_actionMode == AnClickActionModeNone) {
         _descriptionCaptionLabel.hidden = YES;
@@ -2472,10 +2606,10 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         CGFloat contentWidth = width - side * 2.0;
         _primaryConfigLabel.text = @"识别图像";
         _primaryConfigLabel.hidden = NO;
-        _primaryConfigLabel.frame = CGRectMake(side, 206, contentWidth, 20);
+        _primaryConfigLabel.frame = CGRectMake(side, configTopY, contentWidth, 20);
         [_captureButton setTitle:@"截图选择识别图像" forState:UIControlStateNormal];
         _captureButton.hidden = NO;
-        _captureButton.frame = CGRectMake(side, 228, contentWidth, 40);
+        _captureButton.frame = CGRectMake(side, configTopY + 22.0, contentWidth, 40);
         _captureButton.backgroundColor = [UIColor colorWithRed:0.31 green:0.22 blue:0.12 alpha:0.82];
         _captureButton.layer.borderColor = [UIColor colorWithRed:0.94 green:0.55 blue:0.12 alpha:0.94].CGColor;
         [_captureButton setTitleColor:[UIColor colorWithRed:1.0 green:0.63 blue:0.16 alpha:1.0] forState:UIControlStateNormal];
@@ -2483,7 +2617,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
         BOOL roomy = _panelView.bounds.size.height >= 580.0;
         CGFloat previewHeight = roomy ? 58.0 : 44.0;
-        CGFloat previewY = 274.0;
+        CGFloat previewY = configTopY + 68.0;
         _previewView.hidden = NO;
         _previewView.frame = CGRectMake(side, previewY, contentWidth, previewHeight);
 
@@ -2522,30 +2656,30 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         CGFloat contentWidth = width - side * 2.0;
         _primaryConfigLabel.text = @"目标文字";
         _primaryConfigLabel.hidden = NO;
-        _primaryConfigLabel.frame = CGRectMake(side, 206, contentWidth, 20);
+        _primaryConfigLabel.frame = CGRectMake(side, configTopY, contentWidth, 20);
         _ocrTargetField.hidden = NO;
-        _ocrTargetField.frame = CGRectMake(side, 228, contentWidth, 40);
+        _ocrTargetField.frame = CGRectMake(side, configTopY + 22.0, contentWidth, 40);
 
         _secondaryConfigLabel.text = @"识别模式";
         _secondaryConfigLabel.hidden = NO;
-        _secondaryConfigLabel.frame = CGRectMake(side, 278, contentWidth, 20);
+        _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 72.0, contentWidth, 20);
         [_ocrFastButton setTitle:@"快速 本地" forState:UIControlStateNormal];
         [_ocrAccurateButton setTitle:@"精准 本地" forState:UIControlStateNormal];
-        [self layoutButtons:@[_ocrFastButton, _ocrAccurateButton] x:side y:300 width:contentWidth height:36 gap:10.0];
+        [self layoutButtons:@[_ocrFastButton, _ocrAccurateButton] x:side y:configTopY + 94.0 width:contentWidth height:36 gap:10.0];
         [self styleSegmentButton:_ocrFastButton selected:_ocrMode == AnClickOCRModeFast];
         [self styleSegmentButton:_ocrAccurateButton selected:_ocrMode == AnClickOCRModeAccurate];
 
         _tertiaryConfigLabel.text = @"成功后动作类型";
         _tertiaryConfigLabel.hidden = NO;
-        _tertiaryConfigLabel.frame = CGRectMake(side, 346, contentWidth, 20);
+        _tertiaryConfigLabel.frame = CGRectMake(side, configTopY + 140.0, contentWidth, 20);
         [_recordSwipeButton setTitle:@"点击" forState:UIControlStateNormal];
         [_previewSwipeButton setTitle:@"双击" forState:UIControlStateNormal];
         [_clearActionButton setTitle:@"长按" forState:UIControlStateNormal];
-        [self layoutButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton] x:side y:368 width:contentWidth height:34 gap:8.0];
+        [self layoutButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton] x:side y:configTopY + 162.0 width:contentWidth height:34 gap:8.0];
         [self styleSegmentButton:_recordSwipeButton selected:_imageActionMode == AnClickActionModeTap];
         [self styleSegmentButton:_previewSwipeButton selected:_imageActionMode == AnClickActionModeDoubleTap];
         [self styleSegmentButton:_clearActionButton selected:_imageActionMode == AnClickActionModeLongPress];
-        [self layoutDoubleTimingFieldsAtY:398];
+        [self layoutDoubleTimingFieldsAtY:configTopY + 192.0];
     } else if (_actionMode == AnClickActionModeMacro) {
         _saveTaskButton.enabled = YES;
         _saveTaskButton.alpha = 1.0;
@@ -2555,15 +2689,15 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         BOOL recording = [AnClickRecorder shared].isRecording;
         _primaryConfigLabel.text = @"录制回放";
         _primaryConfigLabel.hidden = NO;
-        _primaryConfigLabel.frame = CGRectMake(side, 206, contentWidth, 20);
+        _primaryConfigLabel.frame = CGRectMake(side, configTopY, contentWidth, 20);
         [_macroRecordButton setTitle:recording ? @"停止录制" : (_recordedMacroEvents.count > 0 ? @"重新录制" : @"开始录制") forState:UIControlStateNormal];
         [_macroPlayButton setTitle:_recordedMacroEvents.count > 0 ? @"回放录制" : @"暂无录制" forState:UIControlStateNormal];
         _macroPlayButton.enabled = _recordedMacroEvents.count > 0 && !recording;
         _macroPlayButton.alpha = _macroPlayButton.enabled ? 1.0 : 0.45;
         [self styleRecordButton:_macroRecordButton active:recording];
         [self styleNormalButton:_macroPlayButton];
-        [self layoutButtons:@[_macroRecordButton, _macroPlayButton] x:side y:228 width:contentWidth height:40 gap:10.0];
-        [self layoutDoubleTimingFieldsAtY:286];
+        [self layoutButtons:@[_macroRecordButton, _macroPlayButton] x:side y:configTopY + 22.0 width:contentWidth height:40 gap:10.0];
+        [self layoutDoubleTimingFieldsAtY:configTopY + 80.0];
     } else if (_actionMode == AnClickActionModeSwipe) {
         _saveTaskButton.enabled = YES;
         _saveTaskButton.alpha = 1.0;
@@ -2572,19 +2706,19 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         CGFloat contentWidth = width - side * 2.0;
         _primaryConfigLabel.text = @"自定义位置";
         _primaryConfigLabel.hidden = NO;
-        _primaryConfigLabel.frame = CGRectMake(side, 206, contentWidth, 20);
+        _primaryConfigLabel.frame = CGRectMake(side, configTopY, contentWidth, 20);
         NSString *pickTitle = (_hasManualSwipeAnchor && !_hasManualSwipeEndPoint) ? @"继续选择终点" : [self pointSummaryForMode:AnClickActionModeSwipe emptyTitle:@"选择滑动起点"];
         [_pickPointButton setTitle:pickTitle forState:UIControlStateNormal];
         [self styleNormalButton:_pickPointButton];
         _pickPointButton.hidden = NO;
-        _pickPointButton.frame = CGRectMake(side, 228, contentWidth, 40);
+        _pickPointButton.frame = CGRectMake(side, configTopY + 22.0, contentWidth, 40);
         [self updateButtonShadowPath:_pickPointButton];
         [_swipeRecordButton setTitle:@"录制滑动轨迹" forState:UIControlStateNormal];
         [_previewActionButton setTitle:@"预览轨迹" forState:UIControlStateNormal];
         [self styleNormalButton:_swipeRecordButton];
         [self styleNormalButton:_previewActionButton];
-        [self layoutButtons:@[_swipeRecordButton, _previewActionButton] x:side y:278 width:contentWidth height:36 gap:10.0];
-        [self layoutDoubleTimingFieldsAtY:330];
+        [self layoutButtons:@[_swipeRecordButton, _previewActionButton] x:side y:configTopY + 72.0 width:contentWidth height:36 gap:10.0];
+        [self layoutDoubleTimingFieldsAtY:configTopY + 124.0];
     } else {
         _saveTaskButton.enabled = YES;
         _saveTaskButton.alpha = 1.0;
@@ -2593,18 +2727,18 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         CGFloat contentWidth = width - side * 2.0;
         _primaryConfigLabel.text = @"自定义位置";
         _primaryConfigLabel.hidden = NO;
-        _primaryConfigLabel.frame = CGRectMake(side, 206, contentWidth, 20);
+        _primaryConfigLabel.frame = CGRectMake(side, configTopY, contentWidth, 20);
         [_pickPointButton setTitle:[self pointSummaryForMode:_actionMode emptyTitle:@"选择点击位置"] forState:UIControlStateNormal];
         [self styleNormalButton:_pickPointButton];
         _pickPointButton.hidden = NO;
-        _pickPointButton.frame = CGRectMake(side, 228, contentWidth, 40);
+        _pickPointButton.frame = CGRectMake(side, configTopY + 22.0, contentWidth, 40);
         [self updateButtonShadowPath:_pickPointButton];
         [_previewActionButton setTitle:@"预览位置" forState:UIControlStateNormal];
         [_runManualButton setTitle:@"测试执行" forState:UIControlStateNormal];
         [self styleNormalButton:_previewActionButton];
         [self styleNormalButton:_runManualButton];
-        [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:278 width:contentWidth height:36 gap:10.0];
-        [self layoutDoubleTimingFieldsAtY:330];
+        [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:configTopY + 72.0 width:contentWidth height:36 gap:10.0];
+        [self layoutDoubleTimingFieldsAtY:configTopY + 124.0];
     }
     [self refreshTemplatePreview];
 }
@@ -4336,6 +4470,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             NSValue *rectValue = match[@"rect"];
             NSNumber *scoreNumber = match[@"score"];
             NSString *text = [match[@"text"] isKindOfClass:NSString.class] ? match[@"text"] : targetText;
+            BOOL usedFallback = [match[@"fallback"] boolValue];
             if (!pointValue || !rectValue) {
                 strongSelf->_statusLabel.text = @"文字未找到";
                 return;
@@ -4345,7 +4480,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             CGPoint actionPoint = pointValue.CGPointValue;
             [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
             strongSelf->_statusLabel.text = [NSString stringWithFormat:@"文字%@ %@ %.0f,%.0f",
-                                             [AnClickOCR backendNameForMode:ocrMode],
+                                             usedFallback ? @"快速补识" : [AnClickOCR backendNameForMode:ocrMode],
                                              text,
                                              actionPoint.x,
                                              actionPoint.y];

@@ -76,18 +76,11 @@
     }
 }
 
-+ (NSDictionary *)findText:(NSString *)targetText mode:(NSInteger)mode {
-    NSString *target = [self normalizedText:targetText];
-    if (target.length == 0) {
-        return @{@"error": @"文字未填写"};
-    }
-
-    UIImage *image = [AnClickCore captureCurrentWindowImage];
-    if (!image.CGImage) {
-        return @{@"error": @"截图失败"};
-    }
-
-    VNRequestTextRecognitionLevel level = mode == 1 ? VNRequestTextRecognitionLevelAccurate : VNRequestTextRecognitionLevelFast;
++ (NSDictionary *)matchNormalizedText:(NSString *)target
+                               inImage:(UIImage *)image
+                                 level:(VNRequestTextRecognitionLevel)level
+                    languageCorrection:(BOOL)languageCorrection
+                              fallback:(BOOL)fallback {
     __block NSArray<VNRecognizedTextObservation *> *observations = @[];
     VNRecognizeTextRequest *request = [[VNRecognizeTextRequest alloc] initWithCompletionHandler:^(VNRequest *finishedRequest, NSError *requestError) {
         if (requestError) {
@@ -98,7 +91,7 @@
         observations = [results isKindOfClass:NSArray.class] ? results : @[];
     }];
     request.recognitionLevel = level;
-    request.usesLanguageCorrection = (mode == 1);
+    request.usesLanguageCorrection = languageCorrection;
     [self configureRecognitionLanguagesForRequest:request level:level];
 
     VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:image.CGImage
@@ -132,11 +125,47 @@
             @"point": [NSValue valueWithCGPoint:point],
             @"rect": [NSValue valueWithCGRect:rect],
             @"score": @(score),
-            @"text": candidate.string
+            @"text": candidate.string,
+            @"fallback": @(fallback)
         };
     }
 
     return bestMatch ?: @{@"error": @"文字未找到"};
+}
+
++ (NSDictionary *)findText:(NSString *)targetText mode:(NSInteger)mode {
+    NSString *target = [self normalizedText:targetText];
+    if (target.length == 0) {
+        return @{@"error": @"文字未填写"};
+    }
+
+    UIImage *image = [AnClickCore captureCurrentWindowImage];
+    if (!image.CGImage) {
+        return @{@"error": @"截图失败"};
+    }
+
+    if (mode == 1) {
+        return [self matchNormalizedText:target
+                                 inImage:image
+                                   level:VNRequestTextRecognitionLevelAccurate
+                      languageCorrection:YES
+                                fallback:NO];
+    }
+
+    NSDictionary *fastMatch = [self matchNormalizedText:target
+                                                inImage:image
+                                                  level:VNRequestTextRecognitionLevelFast
+                                     languageCorrection:NO
+                                               fallback:NO];
+    if (![fastMatch[@"error"] isKindOfClass:NSString.class]) {
+        return fastMatch;
+    }
+
+    return [self matchNormalizedText:target
+                             inImage:image
+                               level:VNRequestTextRecognitionLevelAccurate
+                  languageCorrection:YES
+                            fallback:YES];
 }
 
 @end
