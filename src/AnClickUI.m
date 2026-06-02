@@ -1684,7 +1684,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _globalNetworkURLField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     _globalNetworkURLField.autocorrectionType = UITextAutocorrectionTypeNo;
     _globalNetworkURLField.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    _globalNetworkContainsField = [self globalSettingsTextFieldWithPlaceholder:@"例：百度 / ^true$"];
+    _globalNetworkContainsField = [self globalSettingsTextFieldWithPlaceholder:@"例：百度 / 成功"];
     _globalNetworkContainsField.keyboardType = UIKeyboardTypeDefault;
     _globalNetworkContainsField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     _globalNetworkContainsField.autocorrectionType = UITextAutocorrectionTypeNo;
@@ -4845,21 +4845,48 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     return body ?: @"";
 }
 
+- (BOOL)networkBody:(NSString *)body matchesRegexPattern:(NSString *)pattern {
+    NSString *regexPattern = [self trimmedActionDescription:pattern];
+    if (regexPattern.length == 0) {
+        return NO;
+    }
+
+    NSString *response = body ?: @"";
+    NSError *error = nil;
+    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:regexPattern
+                                                                           options:NSRegularExpressionCaseInsensitive
+                                                                             error:&error];
+    if (!regex || error) {
+        return NO;
+    }
+    NSRange range = NSMakeRange(0, response.length);
+    return [regex firstMatchInString:response options:0 range:range] != nil;
+}
+
+- (NSString *)networkRegexPatternFromRuleText:(NSString *)ruleText {
+    NSString *rule = [self trimmedActionDescription:ruleText];
+    NSString *lowercaseRule = [rule lowercaseString];
+    NSArray<NSString *> *prefixes = @[@"re:", @"regex:", @"正则:"];
+    for (NSString *prefix in prefixes) {
+        if ([lowercaseRule hasPrefix:prefix]) {
+            return [self trimmedActionDescription:[rule substringFromIndex:prefix.length]];
+        }
+    }
+    return nil;
+}
+
 - (BOOL)networkBody:(NSString *)body matchesRuleText:(NSString *)ruleText {
     NSString *rule = [self trimmedActionDescription:ruleText];
     if (rule.length == 0) {
         return NO;
     }
 
-    NSString *response = body ?: @"";
-    NSError *error = nil;
-    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:rule
-                                                                           options:NSRegularExpressionCaseInsensitive
-                                                                             error:&error];
-    if (regex && !error) {
-        NSRange range = NSMakeRange(0, response.length);
-        return [regex firstMatchInString:response options:0 range:range] != nil;
+    NSString *regexPattern = [self networkRegexPatternFromRuleText:rule];
+    if (regexPattern.length > 0) {
+        return [self networkBody:body matchesRegexPattern:regexPattern];
     }
+
+    NSString *response = body ?: @"";
     return [response rangeOfString:rule options:NSCaseInsensitiveSearch].location != NSNotFound;
 }
 
@@ -4898,7 +4925,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
 
     NSString *response = body ?: @"";
-    if ([self networkBody:response matchesRuleText:@"\"status\"\\s*:\\s*true"]) {
+    if ([self networkBody:response matchesRegexPattern:@"\"status\"\\s*:\\s*true"]) {
         return YES;
     }
     NSString *trimmed = [[response stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
@@ -4912,7 +4939,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
 
     NSString *response = body ?: @"";
-    if ([self networkBody:response matchesRuleText:@"\"status\"\\s*:\\s*false"]) {
+    if ([self networkBody:response matchesRegexPattern:@"\"status\"\\s*:\\s*false"]) {
         return YES;
     }
     NSString *trimmed = [[response stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
