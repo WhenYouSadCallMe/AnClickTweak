@@ -22,8 +22,6 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 typedef NS_ENUM(NSInteger, AnClickOCRMode) {
     AnClickOCRModeAppleVision = 0,
-    AnClickOCRModeRapidOCR = 1,
-    AnClickOCRModePaddleOCR = 2,
 };
 
 static const NSUInteger AnClickMacroMaxTrajectoryPoints = 2400;
@@ -94,9 +92,6 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     UIButton *_swipeRecordButton;
     UIButton *_macroRecordButton;
     UIButton *_macroPlayButton;
-    UIButton *_ocrAppleButton;
-    UIButton *_ocrRapidButton;
-    UIButton *_ocrPaddleButton;
     UIButton *_cancelEditButton;
     UIButton *_globalSettingsButton;
     NSArray<UIButton *> *_modeButtons;
@@ -601,21 +596,6 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _macroPlayButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 272, buttonWidth, 32);
     [_panelView addSubview:_macroPlayButton];
 
-    _ocrAppleButton = [self panelButtonWithTitle:@"苹果" action:@selector(selectOCRMode:)];
-    _ocrAppleButton.tag = AnClickOCRModeAppleVision;
-    _ocrAppleButton.frame = CGRectMake(gap, 310, buttonWidth, 32);
-    [_panelView addSubview:_ocrAppleButton];
-
-    _ocrRapidButton = [self panelButtonWithTitle:@"Rapid" action:@selector(selectOCRMode:)];
-    _ocrRapidButton.tag = AnClickOCRModeRapidOCR;
-    _ocrRapidButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 310, buttonWidth, 32);
-    [_panelView addSubview:_ocrRapidButton];
-
-    _ocrPaddleButton = [self panelButtonWithTitle:@"Paddle" action:@selector(selectOCRMode:)];
-    _ocrPaddleButton.tag = AnClickOCRModePaddleOCR;
-    _ocrPaddleButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 310, buttonWidth, 32);
-    [_panelView addSubview:_ocrPaddleButton];
-
     _editorBackButton = [self panelButtonWithTitle:@"返回" action:@selector(showTaskHome)];
     _editorBackButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 120, buttonWidth, 34);
     [_panelView addSubview:_editorBackButton];
@@ -928,9 +908,6 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _swipeRecordButton.hidden = YES;
     _macroRecordButton.hidden = YES;
     _macroPlayButton.hidden = YES;
-    _ocrAppleButton.hidden = YES;
-    _ocrRapidButton.hidden = YES;
-    _ocrPaddleButton.hidden = YES;
     _descriptionField.hidden = !visible;
     _thresholdField.hidden = YES;
     _delayField.hidden = YES;
@@ -2173,21 +2150,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         mode == AnClickActionModeLongPress;
 }
 
-- (AnClickOCRMode)normalizedOCRMode:(NSInteger)mode {
-    if (mode == AnClickOCRModeRapidOCR) {
-        return AnClickOCRModeRapidOCR;
-    }
-    if (mode == AnClickOCRModePaddleOCR) {
-        return AnClickOCRModePaddleOCR;
-    }
+- (AnClickOCRMode)ocrModeForTask:(__unused NSDictionary *)task {
     return AnClickOCRModeAppleVision;
-}
-
-- (AnClickOCRMode)ocrModeForTask:(NSDictionary *)task {
-    if (![task[@"ocrBackendVersion"] respondsToSelector:@selector(integerValue)]) {
-        return AnClickOCRModeAppleVision;
-    }
-    return [self normalizedOCRMode:[task[@"ocrMode"] integerValue]];
 }
 
 - (AnClickActionMode)modeForTask:(NSDictionary *)task {
@@ -2448,9 +2412,6 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _swipeRecordButton.hidden = YES;
     _macroRecordButton.hidden = YES;
     _macroPlayButton.hidden = YES;
-    _ocrAppleButton.hidden = YES;
-    _ocrRapidButton.hidden = YES;
-    _ocrPaddleButton.hidden = YES;
     _delayField.hidden = YES;
     _repeatField.hidden = YES;
     _thresholdField.hidden = YES;
@@ -2686,24 +2647,13 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         _ocrTargetField.hidden = NO;
         _ocrTargetField.frame = CGRectMake(side, configTopY + 22.0, contentWidth, 40);
 
-        _secondaryConfigLabel.text = @"识别模式";
+        _secondaryConfigLabel.text = @"成功后动作类型";
         _secondaryConfigLabel.hidden = NO;
         _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 72.0, contentWidth, 20);
-        [_ocrAppleButton setTitle:@"苹果" forState:UIControlStateNormal];
-        [_ocrRapidButton setTitle:@"Rapid" forState:UIControlStateNormal];
-        [_ocrPaddleButton setTitle:@"Paddle" forState:UIControlStateNormal];
-        [self layoutButtons:@[_ocrAppleButton, _ocrRapidButton, _ocrPaddleButton] x:side y:configTopY + 94.0 width:contentWidth height:36 gap:8.0];
-        [self styleSegmentButton:_ocrAppleButton selected:_ocrMode == AnClickOCRModeAppleVision];
-        [self styleSegmentButton:_ocrRapidButton selected:_ocrMode == AnClickOCRModeRapidOCR];
-        [self styleSegmentButton:_ocrPaddleButton selected:_ocrMode == AnClickOCRModePaddleOCR];
-
-        _tertiaryConfigLabel.text = @"成功后动作类型";
-        _tertiaryConfigLabel.hidden = NO;
-        _tertiaryConfigLabel.frame = CGRectMake(side, configTopY + 140.0, contentWidth, 20);
         [_recordSwipeButton setTitle:@"点击" forState:UIControlStateNormal];
         [_previewSwipeButton setTitle:@"双击" forState:UIControlStateNormal];
         [_clearActionButton setTitle:@"长按" forState:UIControlStateNormal];
-        CGFloat actionButtonY = configTopY + 162.0;
+        CGFloat actionButtonY = configTopY + 94.0;
         [self layoutButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton] x:side y:actionButtonY width:contentWidth height:34 gap:8.0];
         [self styleSegmentButton:_recordSwipeButton selected:_imageActionMode == AnClickActionModeTap];
         [self styleSegmentButton:_previewSwipeButton selected:_imageActionMode == AnClickActionModeDoubleTap];
@@ -2859,13 +2809,6 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
 - (void)selectImageActionMode:(UIButton *)sender {
     _imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)sender.tag];
-    [self refreshEditorConfigControls];
-    [self updateStatusForCurrentConfig];
-    [self autosaveSelectedTaskIfPossible];
-}
-
-- (void)selectOCRMode:(UIButton *)sender {
-    _ocrMode = [self normalizedOCRMode:sender.tag];
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
     [self autosaveSelectedTaskIfPossible];
