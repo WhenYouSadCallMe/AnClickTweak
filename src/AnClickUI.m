@@ -52,7 +52,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 @property (nonatomic, assign, getter=isRecording) BOOL recording;
 @end
 
-@interface AnClickUI : NSObject <UITextFieldDelegate, UIGestureRecognizerDelegate>
+@interface AnClickUI : NSObject <UITextFieldDelegate, UIGestureRecognizerDelegate, UIPickerViewDataSource, UIPickerViewDelegate>
 + (instancetype)shared;
 - (void)show;
 @end
@@ -121,7 +121,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     UIButton *_globalStopTimeButton;
     UIView *_globalTimePickerView;
     UIDatePicker *_globalTimePicker;
-    UITextField *_globalTimeSecondField;
+    UIPickerView *_globalTimeSecondPicker;
     UIScrollView *_configListView;
     NSMutableArray<NSValue *> *_recordedSwipePoints;
     NSMutableArray<NSValue *> *_liveSwipePoints;
@@ -186,6 +186,10 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
 - (UIColor *)themePanelDarkColor {
     return [UIColor colorWithRed:0.06 green:0.06 blue:0.05 alpha:1.0];
+}
+
+- (NSString *)toolDisplayName {
+    return @"安姐连点器v1.0";
 }
 
 - (NSSet *)archiveAllowedClasses {
@@ -492,7 +496,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [_panelView addSubview:_cancelEditButton];
 
     _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 52, panelWidth - 16, 24)];
-    _statusLabel.text = @"待机";
+    _statusLabel.text = [self toolDisplayName];
     _statusLabel.textColor = UIColor.whiteColor;
     _statusLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
     _statusLabel.adjustsFontSizeToFitWidth = YES;
@@ -949,7 +953,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [self hideGlobalSettings];
     [self setTaskEditorVisible:NO];
     [self refreshTaskList];
-    _statusLabel.text = _taskItems.count == 0 ? @"暂无任务" : @"任务列表";
+    _statusLabel.text = _taskItems.count == 0
+        ? [self toolDisplayName]
+        : [NSString stringWithFormat:@"%@ · %lu项", [self toolDisplayName], (unsigned long)_taskItems.count];
 }
 
 - (void)handleMoreOrCloseButton {
@@ -1290,7 +1296,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [_globalTimePickerView removeFromSuperview];
     _globalTimePickerView = nil;
     _globalTimePicker = nil;
-    _globalTimeSecondField = nil;
+    _globalTimeSecondPicker = nil;
 }
 
 - (void)hideGlobalSettings {
@@ -1392,9 +1398,33 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     return [currentMinute dateByAddingTimeInterval:(startTime ? 60.0 : 120.0)];
 }
 
-- (NSInteger)globalTimeSecondFromField {
-    NSString *text = [_globalTimeSecondField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    return text.length > 0 ? MIN(59, MAX(0, text.integerValue)) : 0;
+- (NSInteger)globalTimeSecondFromPicker {
+    return _globalTimeSecondPicker ? [_globalTimeSecondPicker selectedRowInComponent:0] : 0;
+}
+
+- (NSInteger)numberOfComponentsInPickerView:(UIPickerView *)pickerView {
+    return pickerView == _globalTimeSecondPicker ? 1 : 0;
+}
+
+- (NSInteger)pickerView:(UIPickerView *)pickerView numberOfRowsInComponent:(NSInteger)component {
+    return (pickerView == _globalTimeSecondPicker && component == 0) ? 60 : 0;
+}
+
+- (NSString *)pickerView:(UIPickerView *)pickerView titleForRow:(NSInteger)row forComponent:(NSInteger)component {
+    if (pickerView != _globalTimeSecondPicker || component != 0) {
+        return @"";
+    }
+    return [NSString stringWithFormat:@"%02ld", (long)row];
+}
+
+- (NSAttributedString *)pickerView:(UIPickerView *)pickerView attributedTitleForRow:(NSInteger)row forComponent:(NSInteger)component {
+    NSString *title = [self pickerView:pickerView titleForRow:row forComponent:component];
+    return [[NSAttributedString alloc] initWithString:title
+                                          attributes:@{NSForegroundColorAttributeName: UIColor.whiteColor}];
+}
+
+- (CGFloat)pickerView:(UIPickerView *)pickerView rowHeightForComponent:(NSInteger)component {
+    return (pickerView == _globalTimeSecondPicker && component == 0) ? 30.0 : 0.0;
 }
 
 - (void)showGlobalTimePickerForStart:(BOOL)startTime {
@@ -1432,8 +1462,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [card addSubview:titleLabel];
 
     CGFloat buttonY = cardHeight - 60.0;
-    CGFloat secondRowY = buttonY - 52.0;
-    CGFloat pickerHeight = MAX(110.0, secondRowY - 64.0);
+    CGFloat secondPickerHeight = 68.0;
+    CGFloat secondRowY = buttonY - secondPickerHeight - 8.0;
+    CGFloat pickerHeight = MAX(96.0, secondRowY - 64.0);
     _globalTimePicker = [[UIDatePicker alloc] initWithFrame:CGRectMake(0, 58, width, pickerHeight)];
     _globalTimePicker.datePickerMode = UIDatePickerModeTime;
     _globalTimePicker.minuteInterval = 1;
@@ -1448,21 +1479,20 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _globalTimePicker.date = defaultDate;
     [card addSubview:_globalTimePicker];
 
-    UILabel *secondLabel = [[UILabel alloc] initWithFrame:CGRectMake(22, secondRowY, width - 140.0, 42.0)];
+    UILabel *secondLabel = [[UILabel alloc] initWithFrame:CGRectMake(22, secondRowY + 14.0, width - 140.0, 34.0)];
     secondLabel.text = @"秒";
     secondLabel.textColor = [UIColor colorWithWhite:1 alpha:0.70];
     secondLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
     [card addSubview:secondLabel];
 
-    _globalTimeSecondField = [self configTextFieldWithPlaceholder:@"00"];
-    _globalTimeSecondField.keyboardType = UIKeyboardTypeNumberPad;
-    _globalTimeSecondField.font = [UIFont monospacedDigitSystemFontOfSize:22 weight:UIFontWeightBold];
-    _globalTimeSecondField.textAlignment = NSTextAlignmentCenter;
-    _globalTimeSecondField.leftView = nil;
-    _globalTimeSecondField.leftViewMode = UITextFieldViewModeNever;
-    _globalTimeSecondField.text = [NSString stringWithFormat:@"%02ld", (long)defaultComponents.second];
-    _globalTimeSecondField.frame = CGRectMake(width - 104.0, secondRowY, 82.0, 42.0);
-    [card addSubview:_globalTimeSecondField];
+    _globalTimeSecondPicker = [[UIPickerView alloc] initWithFrame:CGRectMake(width - 112.0, secondRowY, 92.0, secondPickerHeight)];
+    _globalTimeSecondPicker.dataSource = self;
+    _globalTimeSecondPicker.delegate = self;
+    if (@available(iOS 13.0, *)) {
+        _globalTimeSecondPicker.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    }
+    [card addSubview:_globalTimeSecondPicker];
+    [_globalTimeSecondPicker selectRow:MIN(59, MAX(0, defaultComponents.second)) inComponent:0 animated:NO];
 
     CGFloat buttonWidth = width / 3.0;
     NSArray<NSString *> *titles = @[@"关闭", @"取消", @"确定"];
@@ -1504,7 +1534,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 - (void)confirmGlobalTimePicker {
     NSDate *selectedDate = _globalTimePicker.date ? _globalTimePicker.date : [NSDate date];
     NSDateComponents *components = [NSCalendar.currentCalendar components:NSCalendarUnitHour | NSCalendarUnitMinute fromDate:selectedDate];
-    NSInteger second = [self globalTimeSecondFromField];
+    NSInteger second = [self globalTimeSecondFromPicker];
     if (_globalTimePickerEditingStartTime) {
         _globalStartEnabled = YES;
         _globalStartHour = components.hour;
