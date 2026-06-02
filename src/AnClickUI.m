@@ -52,7 +52,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 @property (nonatomic, assign, getter=isRecording) BOOL recording;
 @end
 
-@interface AnClickUI : NSObject <UITextFieldDelegate>
+@interface AnClickUI : NSObject <UITextFieldDelegate, UIGestureRecognizerDelegate>
 + (instancetype)shared;
 - (void)show;
 @end
@@ -133,6 +133,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     CGFloat _taskPanStartOffsetX;
     BOOL _taskPanDirectionLocked;
     BOOL _taskPanHorizontal;
+    BOOL _taskReordering;
     CGPoint _manualActionPoints[AnClickActionModeCount];
     BOOL _hasManualActionPoint[AnClickActionModeCount];
     CGPoint _manualSwipeAnchor;
@@ -157,6 +158,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     BOOL _taskRunActive;
     NSUInteger _panelRestoreGeneration;
     NSUInteger _taskRunGeneration;
+    CGFloat _taskReorderStartCenterY;
+    CGFloat _taskReorderStartLocationY;
     NSInteger _globalDelayMilliseconds;
     NSInteger _globalRunRepeatCount;
     NSInteger _globalStartHour;
@@ -303,6 +306,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _selectedTaskIndex = -1;
     _draggingTaskIndex = -1;
     _revealedDeleteTaskIndex = -1;
+    _taskReordering = NO;
     _imageUsesMatchPoint = YES;
     _imageActionMode = AnClickActionModeTap;
     _matchThreshold = 0.80;
@@ -325,7 +329,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         _recordedSwipePoints = [NSMutableArray array];
     }
     if (!_taskItems) {
-        _taskItems = [NSMutableArray array];
+        _taskItems = [self savedCurrentTaskList];
     }
 
     _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(8, 118, panelWidth, panelHeight)];
@@ -960,6 +964,51 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 - (NSString *)savedTaskConfigsPath {
     NSURL *documentsURL = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
     return [[documentsURL path] stringByAppendingPathComponent:@"anclick_task_configs.archive"];
+}
+
+- (NSString *)currentTaskListPath {
+    NSURL *documentsURL = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
+    return [[documentsURL path] stringByAppendingPathComponent:@"anclick_current_tasks.archive"];
+}
+
+- (NSMutableArray<NSMutableDictionary *> *)savedCurrentTaskList {
+    NSString *path = [self currentTaskListPath];
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (data.length == 0) {
+        return [NSMutableArray array];
+    }
+
+    NSError *error = nil;
+    id object = [NSKeyedUnarchiver unarchivedObjectOfClasses:[self archiveAllowedClasses] fromData:data error:&error];
+    if (error) {
+        NSLog(@"[AnClick] Current task list unarchive failed: %@", error.localizedDescription);
+        return [NSMutableArray array];
+    }
+
+    NSArray *tasks = nil;
+    if ([object isKindOfClass:NSArray.class]) {
+        tasks = (NSArray *)object;
+    } else if ([object isKindOfClass:NSDictionary.class]) {
+        id savedTasks = [(NSDictionary *)object objectForKey:@"tasks"];
+        tasks = [savedTasks isKindOfClass:NSArray.class] ? savedTasks : nil;
+    }
+    return [self mutableTasksFromSavedTasks:tasks ?: @[]];
+}
+
+- (void)persistCurrentTaskList {
+    NSArray *tasksSnapshot = [[self copyTaskItemsForSaving] copy];
+    NSString *path = [self currentTaskListPath];
+    dispatch_async([self diskIOQueue], ^{
+        NSError *error = nil;
+        NSData *data = [NSKeyedArchiver archivedDataWithRootObject:tasksSnapshot requiringSecureCoding:YES error:&error];
+        if (!data || error) {
+            NSLog(@"[AnClick] Current task list archive failed: %@", error.localizedDescription);
+            return;
+        }
+        if (![data writeToFile:path atomically:YES]) {
+            NSLog(@"[AnClick] Current task list write failed: %@", path);
+        }
+    });
 }
 
 - (NSMutableArray<NSMutableDictionary *> *)savedTaskConfigs {
@@ -1689,6 +1738,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [self resetCurrentActionConfiguration];
     [self hideFunctionMenu];
     [self showTaskHome];
+    [self persistCurrentTaskList];
     _statusLabel.text = [NSString stringWithFormat:@"已加载 %lu 个任务", (unsigned long)_taskItems.count];
 }
 
@@ -3332,6 +3382,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         return;
     }
     _taskItems[(NSUInteger)_selectedTaskIndex] = task;
+    [self persistCurrentTaskList];
     [self refreshCollapsedButtonTitle];
 }
 
@@ -3510,7 +3561,12 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
         UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleTaskPan:)];
         pan.cancelsTouchesInView = YES;
+        pan.delegate = self;
         [row addGestureRecognizer:pan];
+
+        UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleTaskLongPress:)];
+        longPress.minimumPressDuration = 0.55;
+        [row addGestureRecognizer:longPress];
         [_taskListView addSubview:row];
     }
     _taskListView.contentSize = CGSizeMake(width, MAX(_taskListView.bounds.size.height + 1.0, 16.0 + rowHeight * _taskItems.count));
@@ -3523,6 +3579,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _revealedDeleteTaskIndex = -1;
     [self resetCurrentActionConfiguration];
     [self showTaskHome];
+    [self persistCurrentTaskList];
     _statusLabel.text = [NSString stringWithFormat:@"已加任务%lu  点击任务设置", (unsigned long)_taskItems.count];
 }
 
@@ -3543,6 +3600,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
     _revealedDeleteTaskIndex = -1;
     [self showTaskHome];
+    [self persistCurrentTaskList];
     _statusLabel.text = _taskItems.count == 0 ? @"暂无任务" : [NSString stringWithFormat:@"已删剩%lu", (unsigned long)_taskItems.count];
 }
 
@@ -3568,6 +3626,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
     _revealedDeleteTaskIndex = -1;
     [self showTaskHome];
+    [self persistCurrentTaskList];
     _statusLabel.text = _taskItems.count == 0 ? @"暂无任务" : [NSString stringWithFormat:@"已删任务%ld  剩%lu", (long)index + 1, (unsigned long)_taskItems.count];
 }
 
@@ -3592,6 +3651,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [self refreshTaskList];
     _revealedDeleteTaskIndex = -1;
     [self showTaskHome];
+    [self persistCurrentTaskList];
     _statusLabel.text = [NSString stringWithFormat:@"%@任务%ld", updatingExistingTask ? @"已修改" : @"已保存", (long)_selectedTaskIndex + 1];
 }
 
@@ -3718,7 +3778,104 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
 }
 
+- (void)moveTaskAtIndex:(NSInteger)index toIndex:(NSInteger)targetIndex {
+    if (index < 0 ||
+        targetIndex < 0 ||
+        index >= (NSInteger)_taskItems.count ||
+        targetIndex >= (NSInteger)_taskItems.count ||
+        index == targetIndex) {
+        return;
+    }
+
+    NSMutableDictionary *task = _taskItems[(NSUInteger)index];
+    [_taskItems removeObjectAtIndex:(NSUInteger)index];
+    [_taskItems insertObject:task atIndex:(NSUInteger)targetIndex];
+    if (_selectedTaskIndex == index) {
+        _selectedTaskIndex = targetIndex;
+    } else if (_selectedTaskIndex > index && _selectedTaskIndex <= targetIndex) {
+        _selectedTaskIndex--;
+    } else if (_selectedTaskIndex < index && _selectedTaskIndex >= targetIndex) {
+        _selectedTaskIndex++;
+    }
+    _revealedDeleteTaskIndex = -1;
+    [self persistCurrentTaskList];
+}
+
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
+    if ([gestureRecognizer isKindOfClass:UIPanGestureRecognizer.class] &&
+        [gestureRecognizer.view.accessibilityIdentifier isEqualToString:@"AnClickTaskRow"]) {
+        CGPoint velocity = [(UIPanGestureRecognizer *)gestureRecognizer velocityInView:_taskListView];
+        return fabs(velocity.x) > fabs(velocity.y) * 1.25;
+    }
+    return YES;
+}
+
+- (void)handleTaskLongPress:(UILongPressGestureRecognizer *)recognizer {
+    UIView *row = recognizer.view;
+    if (!row) {
+        return;
+    }
+
+    NSInteger index = row.tag;
+    if (index < 0 || index >= (NSInteger)_taskItems.count) {
+        return;
+    }
+
+    CGFloat rowHeight = 78.0;
+    CGPoint location = [recognizer locationInView:_taskListView];
+    if (recognizer.state == UIGestureRecognizerStateBegan) {
+        _taskReordering = YES;
+        _draggingTaskIndex = index;
+        _taskReorderStartCenterY = row.center.y;
+        _taskReorderStartLocationY = location.y;
+        _revealedDeleteTaskIndex = -1;
+        [self resetRevealedTaskRowsExceptIndex:index animated:YES];
+        [_taskListView bringSubviewToFront:row];
+        [UIView animateWithDuration:0.12 animations:^{
+            row.transform = CGAffineTransformMakeScale(1.025, 1.025);
+            row.alpha = 0.94;
+        }];
+        _statusLabel.text = [NSString stringWithFormat:@"拖动排序任务%ld", (long)index + 1];
+        return;
+    }
+
+    if (!_taskReordering || _draggingTaskIndex != index) {
+        return;
+    }
+
+    if (recognizer.state == UIGestureRecognizerStateChanged) {
+        CGFloat deltaY = location.y - _taskReorderStartLocationY;
+        CGFloat minCenterY = 8.0 + rowHeight * 0.5;
+        CGFloat maxCenterY = 8.0 + rowHeight * ((CGFloat)_taskItems.count - 0.5);
+        CGFloat centerY = MIN(MAX(_taskReorderStartCenterY + deltaY, minCenterY), maxCenterY);
+        row.center = CGPointMake(row.center.x, centerY);
+        return;
+    }
+
+    if (recognizer.state == UIGestureRecognizerStateEnded ||
+        recognizer.state == UIGestureRecognizerStateCancelled ||
+        recognizer.state == UIGestureRecognizerStateFailed) {
+        NSInteger targetIndex = (NSInteger)floor((row.center.y - 8.0) / rowHeight);
+        targetIndex = MIN(MAX(targetIndex, 0), (NSInteger)_taskItems.count - 1);
+        row.transform = CGAffineTransformIdentity;
+        row.alpha = 1.0;
+        [self moveTaskAtIndex:index toIndex:targetIndex];
+        _taskReordering = NO;
+        _draggingTaskIndex = -1;
+        _taskReorderStartCenterY = 0;
+        _taskReorderStartLocationY = 0;
+        [self refreshTaskList];
+        _statusLabel.text = targetIndex == index
+            ? @"排序未变化"
+            : [NSString stringWithFormat:@"已移到第%ld", (long)targetIndex + 1];
+    }
+}
+
 - (void)handleTaskPan:(UIPanGestureRecognizer *)recognizer {
+    if (_taskReordering) {
+        return;
+    }
+
     UIView *row = recognizer.view;
     if (!row) {
         return;
@@ -3730,7 +3887,6 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
 
     CGPoint translation = [recognizer translationInView:_taskListView];
-    CGFloat rowHeight = 78.0;
     CGFloat revealWidth = 88.0;
     if (recognizer.state == UIGestureRecognizerStateBegan) {
         _draggingTaskIndex = index;
@@ -3755,8 +3911,6 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         if (_taskPanHorizontal) {
             CGFloat offsetX = MIN(MAX(_taskPanStartOffsetX + translation.x, -revealWidth), 0.0);
             row.transform = CGAffineTransformMakeTranslation(offsetX, 0);
-        } else {
-            row.transform = CGAffineTransformMakeTranslation(0, translation.y);
         }
     } else if (recognizer.state == UIGestureRecognizerStateEnded ||
                recognizer.state == UIGestureRecognizerStateCancelled ||
@@ -3779,22 +3933,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             return;
         }
 
-        NSInteger targetIndex = index + (NSInteger)llround(translation.y / rowHeight);
-        targetIndex = MIN(MAX(targetIndex, 0), (NSInteger)_taskItems.count - 1);
         row.transform = CGAffineTransformIdentity;
-        if (targetIndex != index) {
-            NSMutableDictionary *task = _taskItems[(NSUInteger)index];
-            [_taskItems removeObjectAtIndex:(NSUInteger)index];
-            [_taskItems insertObject:task atIndex:(NSUInteger)targetIndex];
-            if (_selectedTaskIndex == index) {
-                _selectedTaskIndex = targetIndex;
-            } else if (_selectedTaskIndex > index && _selectedTaskIndex <= targetIndex) {
-                _selectedTaskIndex--;
-            } else if (_selectedTaskIndex < index && _selectedTaskIndex >= targetIndex) {
-                _selectedTaskIndex++;
-            }
-            _revealedDeleteTaskIndex = -1;
-        }
         _draggingTaskIndex = -1;
         _taskPanDirectionLocked = NO;
         _taskPanHorizontal = NO;
