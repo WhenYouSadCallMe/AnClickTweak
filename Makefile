@@ -21,7 +21,7 @@ AnClick_CCFLAGS = -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
 AnClick_OBJCCFLAGS = -fobjc-arc -std=c++17 -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
 AnClick_CXXFLAGS = -std=c++17 -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
 AnClick_LDFLAGS = $(OPENCV_LIB) -lc++ -lz
-AnClick_FRAMEWORKS = UIKit Foundation QuartzCore CoreGraphics Accelerate Vision ImageIO AVFoundation
+AnClick_FRAMEWORKS = UIKit Foundation QuartzCore CoreGraphics Accelerate Vision ImageIO AVFoundation MediaPlayer
 AnClick_PRIVATE_FRAMEWORKS = IOKit
 
 include $(THEOS_MAKE_PATH)/tweak.mk

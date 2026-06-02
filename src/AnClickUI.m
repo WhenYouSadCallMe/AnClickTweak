@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <AVFoundation/AVFoundation.h>
+#import <MediaPlayer/MediaPlayer.h>
 #import <math.h>
 
 typedef NS_ENUM(NSInteger, AnClickActionMode) {
@@ -73,7 +74,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
 @implementation AnClickUI {
     UIWindow *_panelWindow;
+    UIWindow *_toastWindow;
     UIView *_panelView;
+    UIView *_toastView;
     UIButton *_collapsedButton;
     UIButton *_captureButton;
     UIButton *_playButton;
@@ -101,6 +104,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     NSArray<UIButton *> *_modeButtons;
     UIScrollView *_taskListView;
     UILabel *_statusLabel;
+    UILabel *_toastLabel;
     UILabel *_toolTitleLabel;
     UILabel *_editorTitleLabel;
     UILabel *_descriptionCaptionLabel;
@@ -193,10 +197,13 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     BOOL _taskRunActive;
     BOOL _volumeShortcutRegistered;
     BOOL _hasObservedSystemVolume;
+    BOOL _adjustingSystemVolume;
     NSUInteger _panelRestoreGeneration;
     NSUInteger _taskRunGeneration;
+    NSUInteger _toastGeneration;
     CGFloat _taskReorderStartCenterY;
     CGFloat _taskReorderStartLocationY;
+    CFTimeInterval _lastVolumeShortcutTime;
     NSInteger _globalDelayMilliseconds;
     NSInteger _globalRunRepeatCount;
     NSInteger _globalStartHour;
@@ -220,6 +227,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     double _colorTolerance;
     NSTimer *_globalStartTimer;
     NSTimer *_globalStopTimer;
+    MPVolumeView *_volumeView;
+    UISlider *_volumeSlider;
     double _matchThreshold;
     NSTimeInterval _actionDelay;
     NSInteger _actionRepeatCount;
@@ -329,6 +338,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 }
 
 - (void)registerVolumeShortcutObserver {
+    [self activateVolumeShortcutAudioSession];
+    [self installVolumeShortcutControl];
+
     if (_volumeShortcutRegistered) {
         return;
     }
@@ -342,17 +354,120 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
                                                object:nil];
 }
 
+- (void)activateVolumeShortcutAudioSession {
+    AVAudioSession *session = AVAudioSession.sharedInstance;
+    NSError *error = nil;
+    if (![session setCategory:AVAudioSessionCategoryAmbient withOptions:AVAudioSessionCategoryOptionMixWithOthers error:&error]) {
+        NSLog(@"[AnClick] Volume shortcut audio category error: %@", error);
+    }
+    error = nil;
+    if (![session setActive:YES error:&error]) {
+        NSLog(@"[AnClick] Volume shortcut audio active error: %@", error);
+    }
+}
+
+- (UISlider *)volumeSliderInView:(UIView *)view {
+    if ([view isKindOfClass:UISlider.class]) {
+        return (UISlider *)view;
+    }
+    for (UIView *subview in view.subviews) {
+        UISlider *slider = [self volumeSliderInView:subview];
+        if (slider) {
+            return slider;
+        }
+    }
+    return nil;
+}
+
+- (void)refreshVolumeSliderReference {
+    _volumeSlider = _volumeView ? [self volumeSliderInView:_volumeView] : nil;
+}
+
+- (void)installVolumeShortcutControl {
+    UIView *hostView = _panelWindow.rootViewController.view;
+    if (!hostView) {
+        return;
+    }
+
+    if (!_volumeView) {
+        _volumeView = [[MPVolumeView alloc] initWithFrame:CGRectMake(0, 0, 2, 2)];
+        _volumeView.alpha = 0.01;
+        _volumeView.userInteractionEnabled = NO;
+        _volumeView.showsRouteButton = NO;
+        _volumeView.showsVolumeSlider = YES;
+        _volumeView.accessibilityElementsHidden = YES;
+    }
+    if (_volumeView.superview != hostView) {
+        [_volumeView removeFromSuperview];
+        [hostView insertSubview:_volumeView atIndex:0];
+    }
+    [_volumeView setNeedsLayout];
+    [_volumeView layoutIfNeeded];
+    [self refreshVolumeSliderReference];
+    float currentVolume = AVAudioSession.sharedInstance.outputVolume;
+    _lastObservedSystemVolume = currentVolume;
+    _hasObservedSystemVolume = YES;
+    if (_volumeSlider && (currentVolume <= 0.08f || currentVolume >= 0.92f)) {
+        [self resetVolumeShortcutLevelIfNeeded];
+    }
+
+    if (!_volumeSlider) {
+        __weak typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            [strongSelf refreshVolumeSliderReference];
+            float delayedVolume = AVAudioSession.sharedInstance.outputVolume;
+            strongSelf->_lastObservedSystemVolume = delayedVolume;
+            strongSelf->_hasObservedSystemVolume = YES;
+            if (strongSelf->_volumeSlider && (delayedVolume <= 0.08f || delayedVolume >= 0.92f)) {
+                [strongSelf resetVolumeShortcutLevelIfNeeded];
+            }
+        });
+    }
+}
+
+- (void)resetVolumeShortcutLevelIfNeeded {
+    [self refreshVolumeSliderReference];
+    if (!_volumeSlider) {
+        return;
+    }
+
+    _adjustingSystemVolume = YES;
+    float targetVolume = 0.50f;
+    [_volumeSlider setValue:targetVolume animated:NO];
+    [_volumeSlider sendActionsForControlEvents:UIControlEventValueChanged];
+    _lastObservedSystemVolume = targetVolume;
+    _hasObservedSystemVolume = YES;
+
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.28 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+        strongSelf->_adjustingSystemVolume = NO;
+        strongSelf->_lastObservedSystemVolume = AVAudioSession.sharedInstance.outputVolume;
+        strongSelf->_hasObservedSystemVolume = YES;
+    });
+}
+
 - (void)handleVolumeShortcutPlay {
     if ([AnClickRecorder shared].isRecording) {
         _statusLabel.text = @"录制中无法播放";
+        [self showToast:@"音量- 录制中无法播放"];
         [self refreshCollapsedButtonTitle];
         return;
     }
     if (_taskRunActive) {
         _statusLabel.text = @"播放中";
+        [self showToast:@"音量- 播放中"];
         [self refreshCollapsedButtonTitle];
         return;
     }
+    [self showToast:@"音量- 播放"];
     [self startTaskListRunScheduled:NO];
 }
 
@@ -360,6 +475,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     if ([AnClickRecorder shared].isRecording) {
         [self toggleMacroRecording];
         _statusLabel.text = @"音量停止录制";
+        [self showToast:@"音量+ 停止录制"];
         [self refreshCollapsedButtonTitle];
         return;
     }
@@ -368,10 +484,22 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         return;
     }
     _statusLabel.text = @"未播放";
+    [self showToast:@"音量+ 未播放"];
     [self refreshCollapsedButtonTitle];
 }
 
 - (void)handleSystemVolumeDidChange:(NSNotification *)notification {
+    if (_adjustingSystemVolume) {
+        NSNumber *resetVolumeNumber = [notification.userInfo[@"AVSystemController_AudioVolumeNotificationParameter"] isKindOfClass:NSNumber.class]
+            ? notification.userInfo[@"AVSystemController_AudioVolumeNotificationParameter"]
+            : nil;
+        if (resetVolumeNumber) {
+            _lastObservedSystemVolume = resetVolumeNumber.floatValue;
+            _hasObservedSystemVolume = YES;
+        }
+        return;
+    }
+
     NSDictionary *userInfo = notification.userInfo;
     NSString *reason = [userInfo[@"AVSystemController_AudioVolumeChangeReasonNotificationParameter"] isKindOfClass:NSString.class]
         ? userInfo[@"AVSystemController_AudioVolumeChangeReasonNotificationParameter"]
@@ -400,6 +528,12 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         return;
     }
 
+    CFTimeInterval now = CACurrentMediaTime();
+    if (_lastVolumeShortcutTime > 0 && now - _lastVolumeShortcutTime < 0.35) {
+        return;
+    }
+    _lastVolumeShortcutTime = now;
+
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
         __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -411,6 +545,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         } else {
             [strongSelf handleVolumeShortcutStop];
         }
+        [strongSelf resetVolumeShortcutLevelIfNeeded];
     });
 }
 
@@ -495,6 +630,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     UIViewController *controller = [[UIViewController alloc] init];
     _panelWindow.rootViewController = controller;
+    [self installVolumeShortcutControl];
 
     _collapsedButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _collapsedButton.frame = CGRectMake(0, 0, 48, 48);
@@ -913,6 +1049,109 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     label.adjustsFontSizeToFitWidth = YES;
     label.minimumScaleFactor = 0.7;
     return label;
+}
+
+- (void)ensureToastWindow {
+    CGRect bounds = UIScreen.mainScreen.bounds;
+    if (!_toastWindow) {
+        _toastWindow = [[UIWindow alloc] initWithFrame:bounds];
+        if (@available(iOS 13.0, *)) {
+            _toastWindow.windowScene = [self activeWindowScene];
+        }
+        _toastWindow.windowLevel = UIWindowLevelAlert + 3000;
+        _toastWindow.backgroundColor = UIColor.clearColor;
+        _toastWindow.userInteractionEnabled = NO;
+        _toastWindow.rootViewController = [[UIViewController alloc] init];
+
+        _toastView = [[UIView alloc] initWithFrame:CGRectZero];
+        _toastView.backgroundColor = [UIColor colorWithWhite:0 alpha:0.82];
+        _toastView.layer.cornerRadius = 10.0;
+        _toastView.layer.borderWidth = 1.0;
+        _toastView.layer.borderColor = [[self themeHighlightColor] colorWithAlphaComponent:0.35].CGColor;
+        _toastView.layer.shadowColor = UIColor.blackColor.CGColor;
+        _toastView.layer.shadowOpacity = 0.45;
+        _toastView.layer.shadowRadius = 12.0;
+        _toastView.layer.shadowOffset = CGSizeMake(0, 6);
+        _toastView.alpha = 0.0;
+        [_toastWindow.rootViewController.view addSubview:_toastView];
+
+        _toastLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+        _toastLabel.textColor = UIColor.whiteColor;
+        _toastLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
+        _toastLabel.textAlignment = NSTextAlignmentCenter;
+        _toastLabel.numberOfLines = 2;
+        _toastLabel.adjustsFontSizeToFitWidth = YES;
+        _toastLabel.minimumScaleFactor = 0.72;
+        [_toastView addSubview:_toastLabel];
+    }
+
+    _toastWindow.frame = bounds;
+    _toastWindow.rootViewController.view.frame = bounds;
+    if (@available(iOS 13.0, *)) {
+        if (!_toastWindow.windowScene) {
+            _toastWindow.windowScene = [self activeWindowScene];
+        }
+    }
+}
+
+- (void)layoutToastWithMessage:(NSString *)message {
+    if (!_toastWindow || !_toastView || !_toastLabel) {
+        return;
+    }
+
+    CGRect bounds = _toastWindow.bounds;
+    CGFloat horizontalMargin = 18.0;
+    CGFloat maxWidth = MIN(bounds.size.width - horizontalMargin * 2.0, 340.0);
+    CGSize fittingSize = [message boundingRectWithSize:CGSizeMake(maxWidth - 28.0, 44.0)
+                                               options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+                                            attributes:@{NSFontAttributeName: _toastLabel.font}
+                                               context:nil].size;
+    CGFloat width = MIN(maxWidth, MAX(138.0, ceil(fittingSize.width) + 30.0));
+    CGFloat height = MAX(42.0, ceil(fittingSize.height) + 18.0);
+    CGFloat safeBottom = 0.0;
+    if (@available(iOS 11.0, *)) {
+        safeBottom = _toastWindow.safeAreaInsets.bottom;
+    }
+    CGFloat y = bounds.size.height - safeBottom - height - 78.0;
+    if (y < 40.0) {
+        y = MAX(20.0, bounds.size.height - height - 24.0);
+    }
+    _toastView.frame = CGRectMake((bounds.size.width - width) * 0.5, y, width, height);
+    _toastLabel.frame = CGRectInset(_toastView.bounds, 14.0, 7.0);
+    _toastView.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:_toastView.bounds cornerRadius:_toastView.layer.cornerRadius].CGPath;
+}
+
+- (void)showToast:(NSString *)message {
+    NSString *text = [self trimmedActionDescription:message];
+    if (text.length == 0) {
+        return;
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self ensureToastWindow];
+        self->_toastLabel.text = text;
+        [self layoutToastWithMessage:text];
+        self->_toastWindow.hidden = NO;
+        NSUInteger generation = ++self->_toastGeneration;
+        [self->_toastView.layer removeAllAnimations];
+        self->_toastView.alpha = 1.0;
+        self->_toastView.transform = CGAffineTransformMakeScale(0.98, 0.98);
+        [UIView animateWithDuration:0.16 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
+            self->_toastView.transform = CGAffineTransformIdentity;
+        } completion:nil];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (generation != self->_toastGeneration) {
+                return;
+            }
+            [UIView animateWithDuration:0.22 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseIn animations:^{
+                self->_toastView.alpha = 0.0;
+            } completion:^(BOOL finished) {
+                if (finished && generation == self->_toastGeneration) {
+                    self->_toastWindow.hidden = YES;
+                }
+            }];
+        });
+    });
 }
 
 - (CGSize)expandedPanelSize {
@@ -4353,6 +4592,45 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     return [NSString stringWithFormat:@"任务 %lu - %@\n%@", (unsigned long)index + 1, name, subtitle];
 }
 
+- (NSString *)shortToastDetail:(NSString *)detail maxLength:(NSUInteger)maxLength {
+    NSString *text = [self trimmedActionDescription:detail];
+    if (text.length == 0 || maxLength == 0) {
+        return @"";
+    }
+    if (text.length <= maxLength) {
+        return text;
+    }
+    return [[text substringToIndex:maxLength] stringByAppendingString:@"..."];
+}
+
+- (NSString *)toastTextForTask:(NSDictionary *)task index:(NSUInteger)index {
+    AnClickActionMode mode = [self modeForTask:task];
+    NSString *name = (mode == AnClickActionModeNone) ? @"动作" : [self actionNameForMode:mode];
+    NSString *detail = [self trimmedActionDescription:task[@"desc"]];
+    if (detail.length == 0 && mode == AnClickActionModeOCR) {
+        detail = [self trimmedActionDescription:task[@"ocrText"]];
+    } else if (detail.length == 0 && mode == AnClickActionModeColor) {
+        if ([task[@"colorRed"] respondsToSelector:@selector(integerValue)] &&
+            [task[@"colorGreen"] respondsToSelector:@selector(integerValue)] &&
+            [task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
+            detail = [NSString stringWithFormat:@"#%02lX%02lX%02lX",
+                      (long)[task[@"colorRed"] integerValue],
+                      (long)[task[@"colorGreen"] integerValue],
+                      (long)[task[@"colorBlue"] integerValue]];
+        }
+    } else if (detail.length == 0 && mode == AnClickActionModeNetwork) {
+        BOOL requestOnly = [self networkTaskIsOneShot:task];
+        detail = requestOnly ? @"仅请求" : @"判断返回";
+    }
+
+    NSString *prefix = [NSString stringWithFormat:@"任务%lu/%lu %@",
+                        (unsigned long)index + 1,
+                        (unsigned long)MAX((NSUInteger)1, _taskItems.count),
+                        name];
+    NSString *shortDetail = [self shortToastDetail:detail maxLength:14];
+    return shortDetail.length > 0 ? [prefix stringByAppendingFormat:@" %@", shortDetail] : prefix;
+}
+
 - (void)refreshTaskList {
     [self refreshCollapsedButtonTitle];
     BOOL hasTasks = _taskItems.count > 0;
@@ -5136,6 +5414,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     NSString *falseText = [self trimmedActionDescription:task[@"networkFalse"]];
     if (url.length == 0) {
         _statusLabel.text = @"网络未填链接";
+        [self showToast:@"网络未填链接"];
         if (completion) {
             completion(NO, NO, NO);
         }
@@ -5144,6 +5423,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     BOOL oneShot = [self networkTaskIsOneShot:task];
     NSTimeInterval timeout = [self networkTimeoutForTask:task];
+    [self showToast:oneShot ? @"网络仅请求" : @"网络请求中"];
     [self performNetworkRequestWithURLString:url trueText:contains falseText:falseText defaultExpectedTrue:!oneShot timeout:timeout completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
         if (runGeneration != 0 && (!self->_taskRunActive || runGeneration != self->_taskRunGeneration)) {
             return;
@@ -5152,6 +5432,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         self->_statusLabel.text = oneShot
             ? (requestSucceeded ? @"网络请求完成" : [self networkStatusTextWithMatched:NO requestSucceeded:requestSucceeded statusCode:statusCode error:error])
             : (blocked ? @"命中不运行" : [self networkStatusTextWithMatched:matched requestSucceeded:requestSucceeded statusCode:statusCode error:error]);
+        [self showToast:self->_statusLabel.text];
         if (completion) {
             completion(matched, requestSucceeded, blocked);
         }
@@ -5186,6 +5467,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         }
 
         self->_statusLabel.text = blocked ? @"命中不运行" : (requestSucceeded ? @"网络不运行" : @"网络重试中");
+        [self showToast:self->_statusLabel.text];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self pollNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration];
         });
@@ -5195,6 +5477,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 - (void)runNetworkTask:(NSDictionary *)task atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
     NSTimeInterval delay = [self delayForTask:task];
     _statusLabel.text = @"网络请求";
+    [self showToast:[self toastTextForTask:task index:index]];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self pollNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration];
     });
@@ -5265,6 +5548,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             }
             if (!match) {
                 strongSelf->_statusLabel.text = @"识图未找到";
+                [strongSelf showToast:@"识图未找到"];
                 return;
             }
             NSValue *matchPointValue = match[@"point"];
@@ -5272,6 +5556,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             NSNumber *scoreNumber = match[@"score"];
             if (!matchPointValue || !rectValue) {
                 strongSelf->_statusLabel.text = @"识图异常";
+                [strongSelf showToast:@"识图异常"];
                 return;
             }
             UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
@@ -5284,6 +5569,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
                                              [strongSelf actionNameForMode:imageActionMode],
                                              actionPoint.x,
                                              actionPoint.y];
+            [strongSelf showToast:strongSelf->_statusLabel.text];
         });
     });
 }
@@ -5323,6 +5609,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             NSString *error = [match[@"error"] isKindOfClass:NSString.class] ? match[@"error"] : nil;
             if (error.length > 0) {
                 strongSelf->_statusLabel.text = error;
+                [strongSelf showToast:error];
                 return;
             }
             NSValue *pointValue = match[@"point"];
@@ -5331,6 +5618,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             NSString *text = [match[@"text"] isKindOfClass:NSString.class] ? match[@"text"] : targetText;
             if (!pointValue || !rectValue) {
                 strongSelf->_statusLabel.text = @"识字未找到";
+                [strongSelf showToast:@"识字未找到"];
                 return;
             }
             UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
@@ -5341,6 +5629,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
                                              text,
                                              actionPoint.x,
                                              actionPoint.y];
+            [strongSelf showToast:strongSelf->_statusLabel.text];
         });
     });
 }
@@ -5379,6 +5668,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             }
             if (!match) {
                 strongSelf->_statusLabel.text = @"颜色未找到";
+                [strongSelf showToast:@"颜色未找到"];
                 return;
             }
             NSValue *pointValue = match[@"point"];
@@ -5386,6 +5676,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             NSNumber *scoreNumber = match[@"score"];
             if (!pointValue || !rectValue) {
                 strongSelf->_statusLabel.text = @"识色异常";
+                [strongSelf showToast:@"识色异常"];
                 return;
             }
             UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
@@ -5398,6 +5689,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
                                              (long)blue,
                                              actionPoint.x,
                                              actionPoint.y];
+            [strongSelf showToast:strongSelf->_statusLabel.text];
         });
     });
 }
@@ -5575,6 +5867,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         }
         if (matched) {
             self->_statusLabel.text = scheduled ? @"定时命中运行" : @"命中运行";
+            [self showToast:self->_statusLabel.text];
             [self refreshCollapsedButtonTitle];
             [self runTaskAtIndex:0 inWindow:hostWindow generation:runGeneration];
             return;
@@ -5583,6 +5876,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         self->_statusLabel.text = requestSucceeded
             ? @"网络监控中"
             : [self networkStatusTextWithMatched:NO requestSucceeded:requestSucceeded statusCode:statusCode error:error];
+        [self showToast:self->_statusLabel.text];
         [self refreshCollapsedButtonTitle];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self monitorGlobalNetworkGateWithHostWindow:hostWindow scheduled:scheduled generation:runGeneration];
@@ -5593,26 +5887,31 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 - (void)startTaskListRunScheduled:(BOOL)scheduled {
     if (_taskItems.count == 0) {
         _statusLabel.text = scheduled ? @"定时启动无任务" : @"先加任务";
+        [self showToast:_statusLabel.text];
         return;
     }
 
     UIWindow *hostWindow = [self hostWindow];
     if (!hostWindow) {
         _statusLabel.text = @"无窗口";
+        [self showToast:@"无窗口"];
         return;
     }
 
     if ([AnClickRecorder shared].isRecording) {
         _statusLabel.text = @"录制中无法播放";
+        [self showToast:@"录制中无法播放"];
         return;
     }
 
     if (_globalNetworkGateEnabled && _globalNetworkURL.length == 0) {
         _statusLabel.text = @"网络联动未填链接";
+        [self showToast:_statusLabel.text];
         return;
     }
     if (_globalNetworkGateEnabled && ![self normalizedNetworkURLString:_globalNetworkURL]) {
         _statusLabel.text = @"网络联动链接无效";
+        [self showToast:_statusLabel.text];
         return;
     }
 
@@ -5620,6 +5919,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _currentGlobalRunCycle = 0;
     NSUInteger runGeneration = ++_taskRunGeneration;
     _statusLabel.text = _globalNetworkGateEnabled ? @"网络监控中" : (scheduled ? @"定时启动" : @"播放中");
+    [self showToast:_statusLabel.text];
     [self refreshTaskList];
     [self collapsePanel];
     if (_globalNetworkGateEnabled) {
@@ -5638,6 +5938,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _currentGlobalRunCycle = 0;
     _taskRunGeneration++;
     _statusLabel.text = status.length > 0 ? status : @"已停止";
+    [self showToast:_statusLabel.text];
     [self refreshCollapsedButtonTitle];
     [self refreshTaskList];
 }
@@ -5661,16 +5962,19 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
         _taskRunActive = NO;
         _statusLabel.text = @"任务完成";
+        [self showToast:@"任务完成"];
         [self refreshCollapsedButtonTitle];
         [self refreshTaskList];
         return;
     }
 
     UIWindow *currentHostWindow = [self hostWindow] ?: hostWindow;
+    [self showToast:[self toastTextForTask:_taskItems[index] index:index]];
     if ([self modeForTask:_taskItems[index]] == AnClickActionModeNetwork) {
         if (![self taskIsComplete:_taskItems[index]]) {
             _taskRunActive = NO;
             [self expandPanel];
+            [self showToast:_statusLabel.text];
             [self refreshCollapsedButtonTitle];
             return;
         }
@@ -5682,6 +5986,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     if (duration <= 0) {
         _taskRunActive = NO;
         [self expandPanel];
+        [self showToast:_statusLabel.text];
         [self refreshCollapsedButtonTitle];
         return;
     }
