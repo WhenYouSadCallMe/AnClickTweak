@@ -125,6 +125,7 @@
     const updatedAt = document.getElementById('updatedAt');
     const result = document.getElementById('result');
     const buttons = Array.from(document.querySelectorAll('button'));
+    let polling = false;
 
     function setBusy(busy) {
       buttons.forEach(button => button.disabled = busy);
@@ -139,20 +140,40 @@
       updatedAt.textContent = new Date().toLocaleTimeString();
     }
 
-    async function request(path, refreshAfter) {
-      setBusy(true);
+    async function request(path, refreshAfter, silent = false) {
+      if (!silent) {
+        setBusy(true);
+      }
       try {
         const response = await fetch(path, { cache: 'no-store' });
         const data = await response.json();
-        result.textContent = JSON.stringify(data, null, 2);
+        if (!silent) {
+          result.textContent = JSON.stringify(data, null, 2);
+        }
         renderStatus(data);
         if (refreshAfter) {
-          await request('/get_status_anclick', false);
+          await request('/get_status_anclick', false, true);
         }
       } catch (error) {
-        result.textContent = '请求失败: ' + error.message;
+        if (!silent) {
+          result.textContent = '请求失败: ' + error.message;
+        }
       } finally {
-        setBusy(false);
+        if (!silent) {
+          setBusy(false);
+        }
+      }
+    }
+
+    async function pollStatus() {
+      if (polling) {
+        return;
+      }
+      polling = true;
+      try {
+        await request('/get_status_anclick', false, true);
+      } finally {
+        polling = false;
       }
     }
 
@@ -161,7 +182,7 @@
     document.getElementById('falseBtn').addEventListener('click', () => request('/set_false_anclick', true));
 
     request('/get_status_anclick', false);
-    setInterval(() => request('/get_status_anclick', false), 5000);
+    setInterval(pollStatus, 5000);
   </script>
 </body>
 </html>
