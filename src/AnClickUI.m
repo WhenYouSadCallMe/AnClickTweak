@@ -393,7 +393,6 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         _volumeView = [[MPVolumeView alloc] initWithFrame:CGRectMake(0, 0, 2, 2)];
         _volumeView.alpha = 0.01;
         _volumeView.userInteractionEnabled = NO;
-        _volumeView.showsRouteButton = NO;
         _volumeView.showsVolumeSlider = YES;
         _volumeView.accessibilityElementsHidden = YES;
     }
