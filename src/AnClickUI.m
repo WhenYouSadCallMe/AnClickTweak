@@ -86,6 +86,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     NSArray<UIButton *> *_modeButtons;
     UIScrollView *_taskListView;
     UILabel *_statusLabel;
+    UILabel *_toolTitleLabel;
     UILabel *_editorTitleLabel;
     UILabel *_descriptionCaptionLabel;
     UILabel *_primaryConfigLabel;
@@ -120,8 +121,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     UIButton *_globalStartTimeButton;
     UIButton *_globalStopTimeButton;
     UIView *_globalTimePickerView;
-    UIDatePicker *_globalTimePicker;
-    UIPickerView *_globalTimeSecondPicker;
+    UIPickerView *_globalTimePicker;
     UIScrollView *_configListView;
     NSMutableArray<NSValue *> *_recordedSwipePoints;
     NSMutableArray<NSValue *> *_liveSwipePoints;
@@ -495,9 +495,18 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _cancelEditButton.frame = CGRectMake(gap, 158, buttonWidth, 34);
     [_panelView addSubview:_cancelEditButton];
 
+    _toolTitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(50, 8, panelWidth - 100, 22)];
+    _toolTitleLabel.text = [self toolDisplayName];
+    _toolTitleLabel.textColor = UIColor.whiteColor;
+    _toolTitleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightBold];
+    _toolTitleLabel.adjustsFontSizeToFitWidth = YES;
+    _toolTitleLabel.minimumScaleFactor = 0.68;
+    _toolTitleLabel.textAlignment = NSTextAlignmentCenter;
+    [_panelView addSubview:_toolTitleLabel];
+
     _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 52, panelWidth - 16, 24)];
-    _statusLabel.text = [self toolDisplayName];
-    _statusLabel.textColor = UIColor.whiteColor;
+    _statusLabel.text = @"待机";
+    _statusLabel.textColor = [UIColor colorWithWhite:1 alpha:0.78];
     _statusLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
     _statusLabel.adjustsFontSizeToFitWidth = YES;
     _statusLabel.minimumScaleFactor = 0.6;
@@ -756,6 +765,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     for (UIButton *button in _modeButtons) {
         button.hidden = !visible;
     }
+    _toolTitleLabel.hidden = NO;
     _editorTitleLabel.hidden = !visible;
     _descriptionCaptionLabel.hidden = !visible;
     _primaryConfigLabel.hidden = YES;
@@ -864,9 +874,16 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [_globalSettingsButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     [self updateButtonShadowPath:_globalSettingsButton];
 
-    _statusLabel.frame = CGRectMake(50, 10, width - closeSize - 84.0, 24);
-    _statusLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    _taskListView.frame = CGRectMake(10, 46, width - 20, MAX(80.0, buttonY - 54.0));
+    _toolTitleLabel.hidden = NO;
+    _toolTitleLabel.text = [self toolDisplayName];
+    _toolTitleLabel.frame = CGRectMake(50, 7, width - closeSize - 84.0, 20);
+    _toolTitleLabel.textColor = UIColor.whiteColor;
+    _toolTitleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightBold];
+
+    _statusLabel.frame = CGRectMake(50, 28, width - closeSize - 84.0, 18);
+    _statusLabel.textColor = [UIColor colorWithWhite:1 alpha:0.72];
+    _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+    _taskListView.frame = CGRectMake(10, 56, width - 20, MAX(80.0, buttonY - 64.0));
     if (_globalSettingsView) {
         _globalSettingsView.frame = _panelView.bounds;
         [_panelView bringSubviewToFront:_globalSettingsView];
@@ -912,8 +929,14 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _collapseButton.tintColor = UIColor.whiteColor;
     [self updateButtonShadowPath:_collapseButton];
 
+    _toolTitleLabel.hidden = NO;
+    _toolTitleLabel.text = [self toolDisplayName];
+    _toolTitleLabel.frame = CGRectMake(66, 7, width - 132, 17);
+    _toolTitleLabel.textColor = [UIColor colorWithWhite:1 alpha:0.70];
+    _toolTitleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+
     _editorTitleLabel.text = (_actionMode == AnClickActionModeNone) ? @"选择动作" : [self currentActionName];
-    _editorTitleLabel.frame = CGRectMake(66, 8, width - 132, 40);
+    _editorTitleLabel.frame = CGRectMake(66, 22, width - 132, 30);
 
     UIView *divider = [_panelView viewWithTag:8811];
     if (!divider) {
@@ -931,6 +954,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
 
     _statusLabel.frame = CGRectMake(16, 102, width - 32, 22);
+    _statusLabel.textColor = UIColor.whiteColor;
     _statusLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
 
     _descriptionCaptionLabel.frame = CGRectMake(side, 130, width - side * 2.0, 20);
@@ -954,8 +978,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [self setTaskEditorVisible:NO];
     [self refreshTaskList];
     _statusLabel.text = _taskItems.count == 0
-        ? [self toolDisplayName]
-        : [NSString stringWithFormat:@"%@ · %lu项", [self toolDisplayName], (unsigned long)_taskItems.count];
+        ? @"暂无任务"
+        : [NSString stringWithFormat:@"任务列表 · %lu项", (unsigned long)_taskItems.count];
 }
 
 - (void)handleMoreOrCloseButton {
@@ -1296,7 +1320,6 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [_globalTimePickerView removeFromSuperview];
     _globalTimePickerView = nil;
     _globalTimePicker = nil;
-    _globalTimeSecondPicker = nil;
 }
 
 - (void)hideGlobalSettings {
@@ -1329,9 +1352,11 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     CGFloat width = _globalSettingsView.bounds.size.width;
     CGFloat height = _globalSettingsView.bounds.size.height;
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(18, 14, width - 76, 34)];
-    titleLabel.text = @"设置";
+    titleLabel.text = [NSString stringWithFormat:@"%@ 设置", [self toolDisplayName]];
     titleLabel.textColor = UIColor.whiteColor;
-    titleLabel.font = [UIFont systemFontOfSize:24 weight:UIFontWeightBold];
+    titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
+    titleLabel.adjustsFontSizeToFitWidth = YES;
+    titleLabel.minimumScaleFactor = 0.68;
     [_globalSettingsView addSubview:titleLabel];
 
     UIButton *closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -1398,33 +1423,70 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     return [currentMinute dateByAddingTimeInterval:(startTime ? 60.0 : 120.0)];
 }
 
-- (NSInteger)globalTimeSecondFromPicker {
-    return _globalTimeSecondPicker ? [_globalTimeSecondPicker selectedRowInComponent:0] : 0;
+- (NSInteger)globalTimePickerRowCountForComponent:(NSInteger)component {
+    if (component == 0) {
+        return 24;
+    }
+    if (component == 1 || component == 2) {
+        return 60;
+    }
+    return 0;
+}
+
+- (NSString *)globalTimePickerUnitForComponent:(NSInteger)component {
+    if (component == 0) {
+        return @"时";
+    }
+    if (component == 1) {
+        return @"分";
+    }
+    if (component == 2) {
+        return @"秒";
+    }
+    return @"";
+}
+
+- (NSInteger)globalTimePickerSelectedValueForComponent:(NSInteger)component {
+    NSInteger rows = [self globalTimePickerRowCountForComponent:component];
+    if (!_globalTimePicker || rows <= 0) {
+        return 0;
+    }
+    return MIN(rows - 1, MAX(0, [_globalTimePicker selectedRowInComponent:component]));
 }
 
 - (NSInteger)numberOfComponentsInPickerView:(UIPickerView *)pickerView {
-    return pickerView == _globalTimeSecondPicker ? 1 : 0;
+    return pickerView == _globalTimePicker ? 3 : 0;
 }
 
 - (NSInteger)pickerView:(UIPickerView *)pickerView numberOfRowsInComponent:(NSInteger)component {
-    return (pickerView == _globalTimeSecondPicker && component == 0) ? 60 : 0;
+    return pickerView == _globalTimePicker ? [self globalTimePickerRowCountForComponent:component] : 0;
 }
 
 - (NSString *)pickerView:(UIPickerView *)pickerView titleForRow:(NSInteger)row forComponent:(NSInteger)component {
-    if (pickerView != _globalTimeSecondPicker || component != 0) {
+    if (pickerView != _globalTimePicker) {
         return @"";
     }
-    return [NSString stringWithFormat:@"%02ld", (long)row];
+    return [NSString stringWithFormat:@"%02ld %@", (long)row, [self globalTimePickerUnitForComponent:component]];
 }
 
 - (NSAttributedString *)pickerView:(UIPickerView *)pickerView attributedTitleForRow:(NSInteger)row forComponent:(NSInteger)component {
     NSString *title = [self pickerView:pickerView titleForRow:row forComponent:component];
     return [[NSAttributedString alloc] initWithString:title
-                                          attributes:@{NSForegroundColorAttributeName: UIColor.whiteColor}];
+                                          attributes:@{
+                                              NSForegroundColorAttributeName: UIColor.whiteColor,
+                                              NSFontAttributeName: [UIFont monospacedDigitSystemFontOfSize:20 weight:UIFontWeightSemibold]
+                                          }];
 }
 
 - (CGFloat)pickerView:(UIPickerView *)pickerView rowHeightForComponent:(NSInteger)component {
-    return (pickerView == _globalTimeSecondPicker && component == 0) ? 30.0 : 0.0;
+    return pickerView == _globalTimePicker ? 34.0 : 0.0;
+}
+
+- (CGFloat)pickerView:(UIPickerView *)pickerView widthForComponent:(NSInteger)component {
+    if (pickerView != _globalTimePicker || component < 0 || component > 2) {
+        return 0.0;
+    }
+    return floor((pickerView.bounds.size.width - 18.0) / 3.0);
 }
 
 - (void)showGlobalTimePickerForStart:(BOOL)startTime {
@@ -1455,44 +1517,29 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [overlay addSubview:card];
 
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 20, width - 32, 34)];
-    titleLabel.text = startTime ? @"设置启动时间" : @"设置停止时间";
+    titleLabel.text = [NSString stringWithFormat:@"%@ %@", [self toolDisplayName], startTime ? @"启动时间" : @"停止时间"];
     titleLabel.textColor = UIColor.whiteColor;
     titleLabel.textAlignment = NSTextAlignmentCenter;
-    titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
+    titleLabel.font = [UIFont systemFontOfSize:19 weight:UIFontWeightBold];
+    titleLabel.adjustsFontSizeToFitWidth = YES;
+    titleLabel.minimumScaleFactor = 0.68;
     [card addSubview:titleLabel];
 
     CGFloat buttonY = cardHeight - 60.0;
-    CGFloat secondPickerHeight = 68.0;
-    CGFloat secondRowY = buttonY - secondPickerHeight - 8.0;
-    CGFloat pickerHeight = MAX(96.0, secondRowY - 64.0);
-    _globalTimePicker = [[UIDatePicker alloc] initWithFrame:CGRectMake(0, 58, width, pickerHeight)];
-    _globalTimePicker.datePickerMode = UIDatePickerModeTime;
-    _globalTimePicker.minuteInterval = 1;
+    CGFloat pickerY = 68.0;
+    CGFloat pickerHeight = MAX(150.0, buttonY - pickerY - 10.0);
+    _globalTimePicker = [[UIPickerView alloc] initWithFrame:CGRectMake(10.0, pickerY, width - 20.0, pickerHeight)];
+    _globalTimePicker.dataSource = self;
+    _globalTimePicker.delegate = self;
     if (@available(iOS 13.0, *)) {
         _globalTimePicker.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     }
-    if (@available(iOS 13.4, *)) {
-        _globalTimePicker.preferredDatePickerStyle = UIDatePickerStyleWheels;
-    }
     NSDate *defaultDate = [self defaultGlobalTimePickerDateForStart:startTime];
     NSDateComponents *defaultComponents = [NSCalendar.currentCalendar components:NSCalendarUnitHour | NSCalendarUnitMinute | NSCalendarUnitSecond fromDate:defaultDate];
-    _globalTimePicker.date = defaultDate;
     [card addSubview:_globalTimePicker];
-
-    UILabel *secondLabel = [[UILabel alloc] initWithFrame:CGRectMake(22, secondRowY + 14.0, width - 140.0, 34.0)];
-    secondLabel.text = @"秒";
-    secondLabel.textColor = [UIColor colorWithWhite:1 alpha:0.70];
-    secondLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
-    [card addSubview:secondLabel];
-
-    _globalTimeSecondPicker = [[UIPickerView alloc] initWithFrame:CGRectMake(width - 112.0, secondRowY, 92.0, secondPickerHeight)];
-    _globalTimeSecondPicker.dataSource = self;
-    _globalTimeSecondPicker.delegate = self;
-    if (@available(iOS 13.0, *)) {
-        _globalTimeSecondPicker.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-    }
-    [card addSubview:_globalTimeSecondPicker];
-    [_globalTimeSecondPicker selectRow:MIN(59, MAX(0, defaultComponents.second)) inComponent:0 animated:NO];
+    [_globalTimePicker selectRow:MIN(23, MAX(0, defaultComponents.hour)) inComponent:0 animated:NO];
+    [_globalTimePicker selectRow:MIN(59, MAX(0, defaultComponents.minute)) inComponent:1 animated:NO];
+    [_globalTimePicker selectRow:MIN(59, MAX(0, defaultComponents.second)) inComponent:2 animated:NO];
 
     CGFloat buttonWidth = width / 3.0;
     NSArray<NSString *> *titles = @[@"关闭", @"取消", @"确定"];
@@ -1532,18 +1579,18 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 }
 
 - (void)confirmGlobalTimePicker {
-    NSDate *selectedDate = _globalTimePicker.date ? _globalTimePicker.date : [NSDate date];
-    NSDateComponents *components = [NSCalendar.currentCalendar components:NSCalendarUnitHour | NSCalendarUnitMinute fromDate:selectedDate];
-    NSInteger second = [self globalTimeSecondFromPicker];
+    NSInteger hour = [self globalTimePickerSelectedValueForComponent:0];
+    NSInteger minute = [self globalTimePickerSelectedValueForComponent:1];
+    NSInteger second = [self globalTimePickerSelectedValueForComponent:2];
     if (_globalTimePickerEditingStartTime) {
         _globalStartEnabled = YES;
-        _globalStartHour = components.hour;
-        _globalStartMinute = components.minute;
+        _globalStartHour = hour;
+        _globalStartMinute = minute;
         _globalStartSecond = second;
     } else {
         _globalStopEnabled = YES;
-        _globalStopHour = components.hour;
-        _globalStopMinute = components.minute;
+        _globalStopHour = hour;
+        _globalStopMinute = minute;
         _globalStopSecond = second;
     }
     [self hideGlobalTimePicker];
@@ -1617,9 +1664,11 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [_panelView addSubview:_functionMenuView];
 
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(18, 14, _functionMenuView.bounds.size.width - 76, 34)];
-    titleLabel.text = @"功能";
+    titleLabel.text = [NSString stringWithFormat:@"%@ 功能", [self toolDisplayName]];
     titleLabel.textColor = UIColor.whiteColor;
-    titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
+    titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
+    titleLabel.adjustsFontSizeToFitWidth = YES;
+    titleLabel.minimumScaleFactor = 0.68;
     [_functionMenuView addSubview:titleLabel];
 
     UIButton *closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -1700,9 +1749,11 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
 
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(18, 14, _functionMenuView.bounds.size.width - 76, 34)];
-    titleLabel.text = deleting ? @"删除任务配置" : @"选择任务配置";
+    titleLabel.text = [NSString stringWithFormat:@"%@ %@", [self toolDisplayName], deleting ? @"删除配置" : @"选择配置"];
     titleLabel.textColor = UIColor.whiteColor;
-    titleLabel.font = [UIFont systemFontOfSize:21 weight:UIFontWeightBold];
+    titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
+    titleLabel.adjustsFontSizeToFitWidth = YES;
+    titleLabel.minimumScaleFactor = 0.68;
     [_functionMenuView addSubview:titleLabel];
 
     UIButton *backButton = [UIButton buttonWithType:UIButtonTypeSystem];
