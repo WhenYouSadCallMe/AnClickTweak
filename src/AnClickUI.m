@@ -174,6 +174,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     BOOL _panelExpanded;
     BOOL _taskEditorVisible;
     BOOL _imageUsesMatchPoint;
+    BOOL _ocrUsesMatchPoint;
     BOOL _returnToEditorAfterRecording;
     BOOL _globalStartEnabled;
     BOOL _globalStopEnabled;
@@ -437,6 +438,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _revealedDeleteTaskIndex = -1;
     _taskReordering = NO;
     _imageUsesMatchPoint = YES;
+    _ocrUsesMatchPoint = YES;
     _imageActionMode = AnClickActionModeTap;
     _ocrMode = AnClickOCRModeAppleVision;
     _colorTolerance = 18.0;
@@ -511,7 +513,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     CGFloat gap = 12.0;
     CGFloat modeWidth = floor((panelWidth - gap * 4.0) / 3.0);
-    NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"滑动", @"识图", @"文字", @"识色", @"录制"];
+    NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"滑动", @"识图", @"文字识别", @"识色", @"录制"];
     NSArray<NSNumber *> *modeTags = @[
         @(AnClickActionModeTap),
         @(AnClickActionModeDoubleTap),
@@ -2024,6 +2026,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
     _currentTemplatePath = nil;
     _imageUsesMatchPoint = YES;
+    _ocrUsesMatchPoint = YES;
     _imageActionMode = AnClickActionModeTap;
     _ocrMode = AnClickOCRModeAppleVision;
     _ocrTargetText = nil;
@@ -2043,6 +2046,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [self resetEditorActionState];
     _actionMode = AnClickActionModeNone;
     _imageUsesMatchPoint = YES;
+    _ocrUsesMatchPoint = YES;
     _imageActionMode = AnClickActionModeTap;
     _templateSearchInProgress = NO;
     [self refreshModeButtons];
@@ -2163,7 +2167,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 }
 
 - (NSString *)actionNameForMode:(AnClickActionMode)mode {
-    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动", @"二指", @"缩小", @"放大", @"旋转", @"识图", @"录制", @"文字", @"识色"];
+    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动", @"二指", @"缩小", @"放大", @"旋转", @"识图", @"录制", @"文字识别", @"识色"];
     if (mode < AnClickActionModeTap || mode >= AnClickActionModeCount) {
         return @"动作";
     }
@@ -2736,13 +2740,23 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         _ocrTargetField.hidden = NO;
         _ocrTargetField.frame = CGRectMake(side, configTopY + 22.0, contentWidth, 40);
 
-        _secondaryConfigLabel.text = @"成功后动作类型";
+        _secondaryConfigLabel.text = @"点击模式";
         _secondaryConfigLabel.hidden = NO;
         _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 72.0, contentWidth, 20);
+        [_playButton setTitle:@"识别文字位置" forState:UIControlStateNormal];
+        [_pickPointButton setTitle:_ocrUsesMatchPoint ? @"自定义位置" : [self pointSummaryForMode:AnClickActionModeOCR emptyTitle:@"自定义位置"] forState:UIControlStateNormal];
+        CGFloat modeButtonY = configTopY + 94.0;
+        [self layoutButtons:@[_playButton, _pickPointButton] x:side y:modeButtonY width:contentWidth height:34 gap:10.0];
+        [self styleSegmentButton:_playButton selected:_ocrUsesMatchPoint];
+        [self styleSegmentButton:_pickPointButton selected:!_ocrUsesMatchPoint];
+
+        _tertiaryConfigLabel.text = @"成功后动作类型";
+        _tertiaryConfigLabel.hidden = NO;
+        _tertiaryConfigLabel.frame = CGRectMake(side, configTopY + 140.0, contentWidth, 20);
         [_recordSwipeButton setTitle:@"点击" forState:UIControlStateNormal];
         [_previewSwipeButton setTitle:@"双击" forState:UIControlStateNormal];
         [_clearActionButton setTitle:@"长按" forState:UIControlStateNormal];
-        CGFloat actionButtonY = configTopY + 94.0;
+        CGFloat actionButtonY = configTopY + 162.0;
         [self layoutButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton] x:side y:actionButtonY width:contentWidth height:34 gap:8.0];
         [self styleSegmentButton:_recordSwipeButton selected:_imageActionMode == AnClickActionModeTap];
         [self styleSegmentButton:_previewSwipeButton selected:_imageActionMode == AnClickActionModeDoubleTap];
@@ -2865,9 +2879,10 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     if (_actionMode == AnClickActionModeOCR) {
         NSString *targetState = _ocrTargetText.length > 0 ? _ocrTargetText : @"先填文字";
-        _statusLabel.text = [NSString stringWithFormat:@"文字 %@ %@ 后%@",
-                             [AnClickOCR backendNameForMode:_ocrMode],
+        NSString *pointState = _ocrUsesMatchPoint ? @"识别点" : ([self hasManualPointForMode:AnClickActionModeOCR] ? @"自定义点" : @"先取点击点");
+        _statusLabel.text = [NSString stringWithFormat:@"文字识别 %@ %@ 后%@",
                              targetState,
+                             pointState,
                              [self actionNameForMode:_imageActionMode]];
         return;
     }
@@ -2918,6 +2933,11 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 - (void)handleSecondaryConfigButton {
     if (_actionMode == AnClickActionModeImage) {
         _imageUsesMatchPoint = YES;
+        [self refreshEditorConfigControls];
+        [self updateStatusForCurrentConfig];
+        [self autosaveSelectedTaskIfPossible];
+    } else if (_actionMode == AnClickActionModeOCR) {
+        _ocrUsesMatchPoint = YES;
         [self refreshEditorConfigControls];
         [self updateStatusForCurrentConfig];
         [self autosaveSelectedTaskIfPossible];
@@ -3888,7 +3908,16 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         }
         task[@"ocrMode"] = @(_ocrMode);
         task[@"ocrBackendVersion"] = @1;
+        task[@"useMatchPoint"] = @(_ocrUsesMatchPoint);
         task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
+        if (!_ocrUsesMatchPoint) {
+            if ([self hasManualPointForMode:AnClickActionModeOCR]) {
+                task[@"point"] = [NSValue valueWithCGPoint:_manualActionPoints[(NSUInteger)AnClickActionModeOCR]];
+            } else if (requireComplete) {
+                _statusLabel.text = @"先取点击点";
+                return nil;
+            }
+        }
         return task;
     }
 
@@ -3956,9 +3985,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         subtitle = events.count > 0 ? [NSString stringWithFormat:@"已录 %lu 步", (unsigned long)events.count] : @"未录制";
     } else if (desc.length == 0 && mode == AnClickActionModeOCR) {
         NSString *text = [self trimmedActionDescription:task[@"ocrText"]];
-        AnClickOCRMode ocrMode = [self ocrModeForTask:task];
         subtitle = text.length > 0
-            ? [NSString stringWithFormat:@"%@ · %@", [AnClickOCR backendNameForMode:ocrMode], text]
+            ? [NSString stringWithFormat:@"文字识别 · %@", text]
             : @"未设置文字";
     } else if (desc.length == 0 && mode == AnClickActionModeColor) {
         if ([task[@"colorRed"] respondsToSelector:@selector(integerValue)] &&
@@ -4201,7 +4229,14 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     } else if (mode == AnClickActionModeOCR) {
         _ocrTargetText = [self trimmedActionDescription:task[@"ocrText"]];
         _ocrMode = [self ocrModeForTask:task];
+        NSNumber *useMatchPointNumber = task[@"useMatchPoint"];
+        _ocrUsesMatchPoint = useMatchPointNumber ? useMatchPointNumber.boolValue : YES;
         _imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+        NSValue *pointValue = task[@"point"];
+        if (pointValue) {
+            _manualActionPoints[(NSUInteger)AnClickActionModeOCR] = pointValue.CGPointValue;
+            _hasManualActionPoint[(NSUInteger)AnClickActionModeOCR] = YES;
+        }
     } else if (mode == AnClickActionModeColor) {
         if ([task[@"colorRed"] respondsToSelector:@selector(integerValue)] &&
             [task[@"colorGreen"] respondsToSelector:@selector(integerValue)] &&
@@ -4589,12 +4624,18 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 - (void)performOCRTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow runGeneration:(NSUInteger)runGeneration {
     NSString *targetText = [self trimmedActionDescription:task[@"ocrText"]];
     if (targetText.length == 0) {
-        _statusLabel.text = @"文字未填写";
+        _statusLabel.text = @"文字识别未填写";
         return;
     }
 
     AnClickOCRMode ocrMode = [self ocrModeForTask:task];
     AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+    BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
+    NSValue *customPointValue = task[@"point"];
+    if (!useMatchPoint && !customPointValue) {
+        _statusLabel.text = @"文字识别未取点";
+        return;
+    }
     _templateSearchInProgress = YES;
     __weak typeof(self) weakSelf = self;
     dispatch_async([self templateSearchQueue], ^{
@@ -4617,17 +4658,15 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             NSValue *rectValue = match[@"rect"];
             NSNumber *scoreNumber = match[@"score"];
             NSString *text = [match[@"text"] isKindOfClass:NSString.class] ? match[@"text"] : targetText;
-            BOOL usedFallback = [match[@"fallback"] boolValue];
             if (!pointValue || !rectValue) {
-                strongSelf->_statusLabel.text = @"文字未找到";
+                strongSelf->_statusLabel.text = @"文字识别未找到";
                 return;
             }
             UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
             [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
-            CGPoint actionPoint = pointValue.CGPointValue;
+            CGPoint actionPoint = useMatchPoint ? pointValue.CGPointValue : customPointValue.CGPointValue;
             [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
-            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"文字%@ %@ %.0f,%.0f",
-                                             usedFallback ? @"苹果补识" : [AnClickOCR backendNameForMode:ocrMode],
+            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"文字识别 %@ %.0f,%.0f",
                                              text,
                                              actionPoint.x,
                                              actionPoint.y];
@@ -4722,7 +4761,12 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     if (mode == AnClickActionModeOCR) {
         NSString *targetText = [self trimmedActionDescription:task[@"ocrText"]];
         if (targetText.length == 0) {
-            _statusLabel.text = @"任务文字未填写";
+            _statusLabel.text = @"任务文字识别未填写";
+            return NO;
+        }
+        BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
+        if (!useMatchPoint && !task[@"point"]) {
+            _statusLabel.text = @"任务文字识别未取点";
             return NO;
         }
         return YES;
@@ -5229,6 +5273,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         if (_actionMode == AnClickActionModeImage) {
             _imageUsesMatchPoint = NO;
             [self refreshEditorConfigControls];
+        } else if (_actionMode == AnClickActionModeOCR) {
+            _ocrUsesMatchPoint = NO;
+            [self refreshEditorConfigControls];
         }
     }
 
@@ -5336,9 +5383,10 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
     _pendingPointPickPoint = [self clampedPointPickPoint:_pendingPointPickPoint inOverlay:_pointPickOverlay];
     _pointCursorView.center = _pendingPointPickPoint;
+    BOOL pickingCustomClickPoint = _actionMode == AnClickActionModeImage || _actionMode == AnClickActionModeOCR;
     NSString *stage = (_actionMode == AnClickActionModeSwipe)
         ? (_pickingSwipeEndPoint ? @"终点" : @"起点")
-        : (_actionMode == AnClickActionModeImage ? @"点击点" : [self currentActionName]);
+        : (pickingCustomClickPoint ? @"点击点" : [self currentActionName]);
     _pointCoordinateLabel.text = [NSString stringWithFormat:@"%@  X %.0f  Y %.0f",
                                   stage,
                                   _pendingPointPickPoint.x,
@@ -5657,6 +5705,32 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             }
             [strongSelf showOperationTraceForMode:imageActionMode atPoint:point inWindow:hostWindow duration:previewDuration];
             strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览识图%@ %.0f,%.0f", [strongSelf actionNameForMode:imageActionMode], point.x, point.y];
+            [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
+        });
+        return;
+    }
+
+    if (_actionMode == AnClickActionModeOCR) {
+        if (_ocrUsesMatchPoint) {
+            _statusLabel.text = _ocrTargetText.length > 0 ? @"文字识别点随识别结果" : @"先填目标文字";
+            return;
+        }
+        if (![self hasManualPointForMode:AnClickActionModeOCR]) {
+            _statusLabel.text = @"先取点击点";
+            return;
+        }
+        CGPoint point = _manualActionPoints[(NSUInteger)AnClickActionModeOCR];
+        NSTimeInterval previewDuration = (_imageActionMode == AnClickActionModeLongPress) ? 2.0 : 1.0;
+        AnClickActionMode actionMode = _imageActionMode;
+        [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+        __weak typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:previewDuration];
+            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览文字识别%@ %.0f,%.0f", [strongSelf actionNameForMode:actionMode], point.x, point.y];
             [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
         });
         return;

@@ -15,7 +15,7 @@
 @implementation AnClickOCR
 
 + (NSString *)backendNameForMode:(__unused NSInteger)mode {
-    return @"苹果Vision";
+    return @"文字识别";
 }
 
 + (NSString *)normalizedText:(NSString *)text {
@@ -130,13 +130,13 @@
         };
     }
 
-    return bestMatch ?: @{@"error": @"文字未找到"};
+    return bestMatch ?: @{@"error": @"文字识别未找到"};
 }
 
 + (NSDictionary *)findText:(NSString *)targetText mode:(__unused NSInteger)mode {
     NSString *target = [self normalizedText:targetText];
     if (target.length == 0) {
-        return @{@"error": @"文字未填写"};
+        return @{@"error": @"文字识别未填写"};
     }
 
     UIImage *image = [AnClickCore captureCurrentWindowImage];
