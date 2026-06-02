@@ -121,6 +121,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     UIButton *_globalStopTimeButton;
     UIView *_globalTimePickerView;
     UIDatePicker *_globalTimePicker;
+    UITextField *_globalTimeSecondField;
     UIScrollView *_configListView;
     NSMutableArray<NSValue *> *_recordedSwipePoints;
     NSMutableArray<NSValue *> *_liveSwipePoints;
@@ -160,8 +161,10 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     NSInteger _globalRunRepeatCount;
     NSInteger _globalStartHour;
     NSInteger _globalStartMinute;
+    NSInteger _globalStartSecond;
     NSInteger _globalStopHour;
     NSInteger _globalStopMinute;
+    NSInteger _globalStopSecond;
     NSInteger _currentGlobalRunCycle;
     NSTimer *_globalStartTimer;
     NSTimer *_globalStopTimer;
@@ -311,8 +314,10 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _globalStopEnabled = NO;
     _globalStartHour = 8;
     _globalStartMinute = 0;
+    _globalStartSecond = 0;
     _globalStopHour = 23;
     _globalStopMinute = 0;
+    _globalStopSecond = 0;
     _currentGlobalRunCycle = 0;
     _taskRunActive = NO;
     [self loadGlobalSettings];
@@ -1030,8 +1035,10 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         @"stopEnabled": @(_globalStopEnabled),
         @"startHour": @(_globalStartHour),
         @"startMinute": @(_globalStartMinute),
+        @"startSecond": @(_globalStartSecond),
         @"stopHour": @(_globalStopHour),
         @"stopMinute": @(_globalStopMinute),
+        @"stopSecond": @(_globalStopSecond),
     };
 }
 
@@ -1046,8 +1053,10 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _globalStopEnabled = [settings[@"stopEnabled"] boolValue];
     _globalStartHour = MIN(23, MAX(0, [settings[@"startHour"] integerValue]));
     _globalStartMinute = MIN(59, MAX(0, [settings[@"startMinute"] integerValue]));
+    _globalStartSecond = MIN(59, MAX(0, [settings[@"startSecond"] integerValue]));
     _globalStopHour = MIN(23, MAX(0, [settings[@"stopHour"] integerValue]));
     _globalStopMinute = MIN(59, MAX(0, [settings[@"stopMinute"] integerValue]));
+    _globalStopSecond = MIN(59, MAX(0, [settings[@"stopSecond"] integerValue]));
 }
 
 - (void)loadGlobalSettings {
@@ -1091,18 +1100,18 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [self scheduleGlobalTimers];
 }
 
-- (NSDate *)dateTodayWithHour:(NSInteger)hour minute:(NSInteger)minute {
+- (NSDate *)dateTodayWithHour:(NSInteger)hour minute:(NSInteger)minute second:(NSInteger)second {
     NSCalendar *calendar = NSCalendar.currentCalendar;
     NSDateComponents *components = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:[NSDate date]];
     components.hour = hour;
     components.minute = minute;
-    components.second = 0;
+    components.second = second;
     NSDate *date = [calendar dateFromComponents:components];
     return date ? date : [NSDate date];
 }
 
-- (NSDate *)nextFireDateForHour:(NSInteger)hour minute:(NSInteger)minute {
-    NSDate *date = [self dateTodayWithHour:hour minute:minute];
+- (NSDate *)nextFireDateForHour:(NSInteger)hour minute:(NSInteger)minute second:(NSInteger)second {
+    NSDate *date = [self dateTodayWithHour:hour minute:minute second:second];
     if ([date timeIntervalSinceNow] <= 0.5) {
         date = [date dateByAddingTimeInterval:24.0 * 60.0 * 60.0];
     }
@@ -1116,12 +1125,12 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _globalStopTimer = nil;
 
     if (_globalStartEnabled) {
-        NSDate *startDate = [self nextFireDateForHour:_globalStartHour minute:_globalStartMinute];
+        NSDate *startDate = [self nextFireDateForHour:_globalStartHour minute:_globalStartMinute second:_globalStartSecond];
         _globalStartTimer = [[NSTimer alloc] initWithFireDate:startDate interval:0 target:self selector:@selector(handleGlobalStartTimer:) userInfo:nil repeats:NO];
         [NSRunLoop.mainRunLoop addTimer:_globalStartTimer forMode:NSRunLoopCommonModes];
     }
     if (_globalStopEnabled) {
-        NSDate *stopDate = [self nextFireDateForHour:_globalStopHour minute:_globalStopMinute];
+        NSDate *stopDate = [self nextFireDateForHour:_globalStopHour minute:_globalStopMinute second:_globalStopSecond];
         _globalStopTimer = [[NSTimer alloc] initWithFireDate:stopDate interval:0 target:self selector:@selector(handleGlobalStopTimer:) userInfo:nil repeats:NO];
         [NSRunLoop.mainRunLoop addTimer:_globalStopTimer forMode:NSRunLoopCommonModes];
     }
@@ -1151,8 +1160,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     return _globalRunRepeatCount > 0 ? [NSString stringWithFormat:@"%ld", (long)_globalRunRepeatCount] : @"";
 }
 
-- (NSString *)globalTimeTitleEnabled:(BOOL)enabled hour:(NSInteger)hour minute:(NSInteger)minute {
-    return enabled ? [NSString stringWithFormat:@"%02ld:%02ld", (long)hour, (long)minute] : @"关闭";
+- (NSString *)globalTimeTitleEnabled:(BOOL)enabled hour:(NSInteger)hour minute:(NSInteger)minute second:(NSInteger)second {
+    return enabled ? [NSString stringWithFormat:@"%02ld:%02ld:%02ld", (long)hour, (long)minute, (long)second] : @"关闭";
 }
 
 - (UITextField *)globalSettingsTextFieldWithPlaceholder:(NSString *)placeholder {
@@ -1191,8 +1200,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     if (_globalRepeatField && !_globalRepeatField.isFirstResponder) {
         _globalRepeatField.text = [self globalRepeatFieldText];
     }
-    [_globalStartTimeButton setTitle:[self globalTimeTitleEnabled:_globalStartEnabled hour:_globalStartHour minute:_globalStartMinute] forState:UIControlStateNormal];
-    [_globalStopTimeButton setTitle:[self globalTimeTitleEnabled:_globalStopEnabled hour:_globalStopHour minute:_globalStopMinute] forState:UIControlStateNormal];
+    [_globalStartTimeButton setTitle:[self globalTimeTitleEnabled:_globalStartEnabled hour:_globalStartHour minute:_globalStartMinute second:_globalStartSecond] forState:UIControlStateNormal];
+    [_globalStopTimeButton setTitle:[self globalTimeTitleEnabled:_globalStopEnabled hour:_globalStopHour minute:_globalStopMinute second:_globalStopSecond] forState:UIControlStateNormal];
     _globalStartTimeButton.alpha = _globalStartEnabled ? 1.0 : 0.78;
     _globalStopTimeButton.alpha = _globalStopEnabled ? 1.0 : 0.78;
 }
@@ -1232,6 +1241,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [_globalTimePickerView removeFromSuperview];
     _globalTimePickerView = nil;
     _globalTimePicker = nil;
+    _globalTimeSecondField = nil;
 }
 
 - (void)hideGlobalSettings {
@@ -1325,6 +1335,19 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [self showGlobalTimePickerForStart:NO];
 }
 
+- (NSDate *)defaultGlobalTimePickerDateForStart:(BOOL)startTime {
+    NSCalendar *calendar = NSCalendar.currentCalendar;
+    NSDateComponents *components = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay | NSCalendarUnitHour | NSCalendarUnitMinute fromDate:[NSDate date]];
+    components.second = 0;
+    NSDate *currentMinute = [calendar dateFromComponents:components] ?: [NSDate date];
+    return [currentMinute dateByAddingTimeInterval:(startTime ? 60.0 : 120.0)];
+}
+
+- (NSInteger)globalTimeSecondFromField {
+    NSString *text = [_globalTimeSecondField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return text.length > 0 ? MIN(59, MAX(0, text.integerValue)) : 0;
+}
+
 - (void)showGlobalTimePickerForStart:(BOOL)startTime {
     if (!_globalSettingsView) {
         return;
@@ -1340,7 +1363,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     CGFloat width = overlay.bounds.size.width;
     CGFloat height = overlay.bounds.size.height;
-    CGFloat cardHeight = MIN(330.0, height - 48.0);
+    CGFloat cardHeight = MIN(380.0, height - 48.0);
     UIView *card = [[UIView alloc] initWithFrame:CGRectMake(0, MAX(40.0, (height - cardHeight) * 0.5), width, cardHeight)];
     card.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.98];
     card.layer.cornerRadius = 22;
@@ -1359,7 +1382,10 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
     [card addSubview:titleLabel];
 
-    _globalTimePicker = [[UIDatePicker alloc] initWithFrame:CGRectMake(0, 58, width, cardHeight - 118)];
+    CGFloat buttonY = cardHeight - 60.0;
+    CGFloat secondRowY = buttonY - 52.0;
+    CGFloat pickerHeight = MAX(110.0, secondRowY - 64.0);
+    _globalTimePicker = [[UIDatePicker alloc] initWithFrame:CGRectMake(0, 58, width, pickerHeight)];
     _globalTimePicker.datePickerMode = UIDatePickerModeTime;
     _globalTimePicker.minuteInterval = 1;
     if (@available(iOS 13.0, *)) {
@@ -1368,12 +1394,27 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     if (@available(iOS 13.4, *)) {
         _globalTimePicker.preferredDatePickerStyle = UIDatePickerStyleWheels;
     }
-    NSInteger hour = startTime ? _globalStartHour : _globalStopHour;
-    NSInteger minute = startTime ? _globalStartMinute : _globalStopMinute;
-    _globalTimePicker.date = [self dateTodayWithHour:hour minute:minute];
+    NSDate *defaultDate = [self defaultGlobalTimePickerDateForStart:startTime];
+    NSDateComponents *defaultComponents = [NSCalendar.currentCalendar components:NSCalendarUnitHour | NSCalendarUnitMinute | NSCalendarUnitSecond fromDate:defaultDate];
+    _globalTimePicker.date = defaultDate;
     [card addSubview:_globalTimePicker];
 
-    CGFloat buttonY = cardHeight - 60.0;
+    UILabel *secondLabel = [[UILabel alloc] initWithFrame:CGRectMake(22, secondRowY, width - 140.0, 42.0)];
+    secondLabel.text = @"秒";
+    secondLabel.textColor = [UIColor colorWithWhite:1 alpha:0.70];
+    secondLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
+    [card addSubview:secondLabel];
+
+    _globalTimeSecondField = [self configTextFieldWithPlaceholder:@"00"];
+    _globalTimeSecondField.keyboardType = UIKeyboardTypeNumberPad;
+    _globalTimeSecondField.font = [UIFont monospacedDigitSystemFontOfSize:22 weight:UIFontWeightBold];
+    _globalTimeSecondField.textAlignment = NSTextAlignmentCenter;
+    _globalTimeSecondField.leftView = nil;
+    _globalTimeSecondField.leftViewMode = UITextFieldViewModeNever;
+    _globalTimeSecondField.text = [NSString stringWithFormat:@"%02ld", (long)defaultComponents.second];
+    _globalTimeSecondField.frame = CGRectMake(width - 104.0, secondRowY, 82.0, 42.0);
+    [card addSubview:_globalTimeSecondField];
+
     CGFloat buttonWidth = width / 3.0;
     NSArray<NSString *> *titles = @[@"关闭", @"取消", @"确定"];
     NSArray<NSString *> *selectors = @[@"disableGlobalPickedTime", @"cancelGlobalTimePicker", @"confirmGlobalTimePicker"];
@@ -1414,14 +1455,17 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 - (void)confirmGlobalTimePicker {
     NSDate *selectedDate = _globalTimePicker.date ? _globalTimePicker.date : [NSDate date];
     NSDateComponents *components = [NSCalendar.currentCalendar components:NSCalendarUnitHour | NSCalendarUnitMinute fromDate:selectedDate];
+    NSInteger second = [self globalTimeSecondFromField];
     if (_globalTimePickerEditingStartTime) {
         _globalStartEnabled = YES;
         _globalStartHour = components.hour;
         _globalStartMinute = components.minute;
+        _globalStartSecond = second;
     } else {
         _globalStopEnabled = YES;
         _globalStopHour = components.hour;
         _globalStopMinute = components.minute;
+        _globalStopSecond = second;
     }
     [self hideGlobalTimePicker];
     [self refreshGlobalSettingsControls];
