@@ -21,8 +21,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 };
 
 typedef NS_ENUM(NSInteger, AnClickOCRMode) {
-    AnClickOCRModeFast = 0,
-    AnClickOCRModeAccurate = 1,
+    AnClickOCRModeAppleVision = 0,
+    AnClickOCRModeRapidOCR = 1,
+    AnClickOCRModePaddleOCR = 2,
 };
 
 static const NSUInteger AnClickMacroMaxTrajectoryPoints = 2400;
@@ -93,8 +94,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     UIButton *_swipeRecordButton;
     UIButton *_macroRecordButton;
     UIButton *_macroPlayButton;
-    UIButton *_ocrFastButton;
-    UIButton *_ocrAccurateButton;
+    UIButton *_ocrAppleButton;
+    UIButton *_ocrRapidButton;
+    UIButton *_ocrPaddleButton;
     UIButton *_cancelEditButton;
     UIButton *_globalSettingsButton;
     NSArray<UIButton *> *_modeButtons;
@@ -420,7 +422,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _taskReordering = NO;
     _imageUsesMatchPoint = YES;
     _imageActionMode = AnClickActionModeTap;
-    _ocrMode = AnClickOCRModeFast;
+    _ocrMode = AnClickOCRModeAppleVision;
     _matchThreshold = 0.80;
     _actionDelay = 0;
     _actionRepeatCount = 1;
@@ -599,15 +601,20 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _macroPlayButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 272, buttonWidth, 32);
     [_panelView addSubview:_macroPlayButton];
 
-    _ocrFastButton = [self panelButtonWithTitle:@"快速" action:@selector(selectOCRMode:)];
-    _ocrFastButton.tag = AnClickOCRModeFast;
-    _ocrFastButton.frame = CGRectMake(gap, 310, buttonWidth, 32);
-    [_panelView addSubview:_ocrFastButton];
+    _ocrAppleButton = [self panelButtonWithTitle:@"苹果" action:@selector(selectOCRMode:)];
+    _ocrAppleButton.tag = AnClickOCRModeAppleVision;
+    _ocrAppleButton.frame = CGRectMake(gap, 310, buttonWidth, 32);
+    [_panelView addSubview:_ocrAppleButton];
 
-    _ocrAccurateButton = [self panelButtonWithTitle:@"精准" action:@selector(selectOCRMode:)];
-    _ocrAccurateButton.tag = AnClickOCRModeAccurate;
-    _ocrAccurateButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 310, buttonWidth, 32);
-    [_panelView addSubview:_ocrAccurateButton];
+    _ocrRapidButton = [self panelButtonWithTitle:@"Rapid" action:@selector(selectOCRMode:)];
+    _ocrRapidButton.tag = AnClickOCRModeRapidOCR;
+    _ocrRapidButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 310, buttonWidth, 32);
+    [_panelView addSubview:_ocrRapidButton];
+
+    _ocrPaddleButton = [self panelButtonWithTitle:@"Paddle" action:@selector(selectOCRMode:)];
+    _ocrPaddleButton.tag = AnClickOCRModePaddleOCR;
+    _ocrPaddleButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 310, buttonWidth, 32);
+    [_panelView addSubview:_ocrPaddleButton];
 
     _editorBackButton = [self panelButtonWithTitle:@"返回" action:@selector(showTaskHome)];
     _editorBackButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 120, buttonWidth, 34);
@@ -921,8 +928,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _swipeRecordButton.hidden = YES;
     _macroRecordButton.hidden = YES;
     _macroPlayButton.hidden = YES;
-    _ocrFastButton.hidden = YES;
-    _ocrAccurateButton.hidden = YES;
+    _ocrAppleButton.hidden = YES;
+    _ocrRapidButton.hidden = YES;
+    _ocrPaddleButton.hidden = YES;
     _descriptionField.hidden = !visible;
     _thresholdField.hidden = YES;
     _delayField.hidden = YES;
@@ -1031,7 +1039,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 }
 
 - (CGFloat)editorConfigTopY {
-    return _modeButtons.count > 6 ? 228.0 : 206.0;
+    return 206.0;
 }
 
 - (void)layoutEditorScaffold {
@@ -1042,11 +1050,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     CGFloat width = _panelView.bounds.size.width;
     CGFloat height = _panelView.bounds.size.height;
     CGFloat side = 18.0;
-    CGFloat modeGap = 6.0;
-    CGFloat modeTopY = 64.0;
-    CGFloat modeButtonHeight = _modeButtons.count > 6 ? 30.0 : 34.0;
-    NSUInteger modeColumns = _modeButtons.count > 6 ? 4 : MAX((NSUInteger)1, _modeButtons.count);
-    NSUInteger modeRows = (_modeButtons.count + modeColumns - 1) / modeColumns;
+    CGFloat modeGap = 5.0;
+    CGFloat modeWidth = floor((width - side * 2.0 - modeGap * (_modeButtons.count - 1)) / MAX((NSUInteger)1, _modeButtons.count));
 
     [_editorBackButton setTitle:@"‹" forState:UIControlStateNormal];
     _editorBackButton.titleLabel.font = [UIFont systemFontOfSize:34 weight:UIFontWeightBold];
@@ -1091,29 +1096,16 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     for (NSUInteger i = 0; i < _modeButtons.count; i++) {
         UIButton *button = _modeButtons[i];
-        NSUInteger row = i / modeColumns;
-        NSUInteger column = i % modeColumns;
-        NSUInteger rowStart = row * modeColumns;
-        NSUInteger itemsInRow = MIN(modeColumns, _modeButtons.count - rowStart);
-        CGFloat rowWidth = width - side * 2.0;
-        CGFloat buttonWidth = floor((rowWidth - modeGap * (itemsInRow - 1)) / itemsInRow);
-        CGFloat usedWidth = buttonWidth * itemsInRow + modeGap * (itemsInRow - 1);
-        CGFloat rowX = side + floor((rowWidth - usedWidth) * 0.5);
-        button.frame = CGRectMake(rowX + (buttonWidth + modeGap) * column,
-                                  modeTopY + (modeButtonHeight + 5.0) * row,
-                                  buttonWidth,
-                                  modeButtonHeight);
-        button.titleLabel.font = [UIFont systemFontOfSize:_modeButtons.count > 6 ? 15 : 16 weight:UIFontWeightBold];
+        button.frame = CGRectMake(side + (modeWidth + modeGap) * i, 64, modeWidth, 34);
+        button.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
     }
 
-    CGFloat modeRowGapCount = modeRows > 0 ? (CGFloat)(modeRows - 1) : 0.0;
-    CGFloat modeBottomY = modeTopY + modeRows * modeButtonHeight + modeRowGapCount * 5.0;
-    _statusLabel.frame = CGRectMake(16, modeBottomY + 6.0, width - 32, 22);
+    _statusLabel.frame = CGRectMake(16, 102, width - 32, 22);
     _statusLabel.textColor = UIColor.whiteColor;
     _statusLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
 
-    _descriptionCaptionLabel.frame = CGRectMake(side, CGRectGetMaxY(_statusLabel.frame) + 6.0, width - side * 2.0, 20);
-    _descriptionField.frame = CGRectMake(side, CGRectGetMaxY(_descriptionCaptionLabel.frame) + 2.0, width - side * 2.0, 40);
+    _descriptionCaptionLabel.frame = CGRectMake(side, 130, width - side * 2.0, 20);
+    _descriptionField.frame = CGRectMake(side, 152, width - side * 2.0, 40);
 
     CGFloat bottomButtonY = height - 52.0;
     CGFloat bottomButtonWidth = floor((width - side * 2.0 - 12.0) / 2.0);
@@ -2009,7 +2001,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _currentTemplatePath = nil;
     _imageUsesMatchPoint = YES;
     _imageActionMode = AnClickActionModeTap;
-    _ocrMode = AnClickOCRModeFast;
+    _ocrMode = AnClickOCRModeAppleVision;
     _ocrTargetText = nil;
     _recordedMacroEvents = nil;
     _matchThreshold = 0.80;
@@ -2163,6 +2155,23 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     return mode == AnClickActionModeTap ||
         mode == AnClickActionModeDoubleTap ||
         mode == AnClickActionModeLongPress;
+}
+
+- (AnClickOCRMode)normalizedOCRMode:(NSInteger)mode {
+    if (mode == AnClickOCRModeRapidOCR) {
+        return AnClickOCRModeRapidOCR;
+    }
+    if (mode == AnClickOCRModePaddleOCR) {
+        return AnClickOCRModePaddleOCR;
+    }
+    return AnClickOCRModeAppleVision;
+}
+
+- (AnClickOCRMode)ocrModeForTask:(NSDictionary *)task {
+    if (![task[@"ocrBackendVersion"] respondsToSelector:@selector(integerValue)]) {
+        return AnClickOCRModeAppleVision;
+    }
+    return [self normalizedOCRMode:[task[@"ocrMode"] integerValue]];
 }
 
 - (AnClickActionMode)modeForTask:(NSDictionary *)task {
@@ -2423,8 +2432,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _swipeRecordButton.hidden = YES;
     _macroRecordButton.hidden = YES;
     _macroPlayButton.hidden = YES;
-    _ocrFastButton.hidden = YES;
-    _ocrAccurateButton.hidden = YES;
+    _ocrAppleButton.hidden = YES;
+    _ocrRapidButton.hidden = YES;
+    _ocrPaddleButton.hidden = YES;
     _delayField.hidden = YES;
     _repeatField.hidden = YES;
     _thresholdField.hidden = YES;
@@ -2663,11 +2673,13 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         _secondaryConfigLabel.text = @"识别模式";
         _secondaryConfigLabel.hidden = NO;
         _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 72.0, contentWidth, 20);
-        [_ocrFastButton setTitle:@"快速 本地" forState:UIControlStateNormal];
-        [_ocrAccurateButton setTitle:@"精准 本地" forState:UIControlStateNormal];
-        [self layoutButtons:@[_ocrFastButton, _ocrAccurateButton] x:side y:configTopY + 94.0 width:contentWidth height:36 gap:10.0];
-        [self styleSegmentButton:_ocrFastButton selected:_ocrMode == AnClickOCRModeFast];
-        [self styleSegmentButton:_ocrAccurateButton selected:_ocrMode == AnClickOCRModeAccurate];
+        [_ocrAppleButton setTitle:@"苹果" forState:UIControlStateNormal];
+        [_ocrRapidButton setTitle:@"Rapid" forState:UIControlStateNormal];
+        [_ocrPaddleButton setTitle:@"Paddle" forState:UIControlStateNormal];
+        [self layoutButtons:@[_ocrAppleButton, _ocrRapidButton, _ocrPaddleButton] x:side y:configTopY + 94.0 width:contentWidth height:36 gap:8.0];
+        [self styleSegmentButton:_ocrAppleButton selected:_ocrMode == AnClickOCRModeAppleVision];
+        [self styleSegmentButton:_ocrRapidButton selected:_ocrMode == AnClickOCRModeRapidOCR];
+        [self styleSegmentButton:_ocrPaddleButton selected:_ocrMode == AnClickOCRModePaddleOCR];
 
         _tertiaryConfigLabel.text = @"成功后动作类型";
         _tertiaryConfigLabel.hidden = NO;
@@ -2675,11 +2687,12 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         [_recordSwipeButton setTitle:@"点击" forState:UIControlStateNormal];
         [_previewSwipeButton setTitle:@"双击" forState:UIControlStateNormal];
         [_clearActionButton setTitle:@"长按" forState:UIControlStateNormal];
-        [self layoutButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton] x:side y:configTopY + 162.0 width:contentWidth height:34 gap:8.0];
+        CGFloat actionButtonY = configTopY + 162.0;
+        [self layoutButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton] x:side y:actionButtonY width:contentWidth height:34 gap:8.0];
         [self styleSegmentButton:_recordSwipeButton selected:_imageActionMode == AnClickActionModeTap];
         [self styleSegmentButton:_previewSwipeButton selected:_imageActionMode == AnClickActionModeDoubleTap];
         [self styleSegmentButton:_clearActionButton selected:_imageActionMode == AnClickActionModeLongPress];
-        [self layoutDoubleTimingFieldsAtY:configTopY + 192.0];
+        [self layoutDoubleTimingFieldsAtY:actionButtonY + 44.0];
     } else if (_actionMode == AnClickActionModeMacro) {
         _saveTaskButton.enabled = YES;
         _saveTaskButton.alpha = 1.0;
@@ -2836,7 +2849,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 }
 
 - (void)selectOCRMode:(UIButton *)sender {
-    _ocrMode = sender.tag == AnClickOCRModeAccurate ? AnClickOCRModeAccurate : AnClickOCRModeFast;
+    _ocrMode = [self normalizedOCRMode:sender.tag];
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
     [self autosaveSelectedTaskIfPossible];
@@ -3782,6 +3795,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             return nil;
         }
         task[@"ocrMode"] = @(_ocrMode);
+        task[@"ocrBackendVersion"] = @1;
         task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
         return task;
     }
@@ -3835,7 +3849,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         subtitle = events.count > 0 ? [NSString stringWithFormat:@"已录 %lu 步", (unsigned long)events.count] : @"未录制";
     } else if (desc.length == 0 && mode == AnClickActionModeOCR) {
         NSString *text = [self trimmedActionDescription:task[@"ocrText"]];
-        NSInteger ocrMode = [task[@"ocrMode"] integerValue];
+        AnClickOCRMode ocrMode = [self ocrModeForTask:task];
         subtitle = text.length > 0
             ? [NSString stringWithFormat:@"%@ · %@", [AnClickOCR backendNameForMode:ocrMode], text]
             : @"未设置文字";
@@ -4068,7 +4082,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         _recordedMacroEvents = [events isKindOfClass:NSArray.class] ? [events copy] : nil;
     } else if (mode == AnClickActionModeOCR) {
         _ocrTargetText = [self trimmedActionDescription:task[@"ocrText"]];
-        _ocrMode = [task[@"ocrMode"] integerValue] == AnClickOCRModeAccurate ? AnClickOCRModeAccurate : AnClickOCRModeFast;
+        _ocrMode = [self ocrModeForTask:task];
         _imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
     } else if ([self isSelectableActionMode:mode] && mode != AnClickActionModeSwipe && mode != AnClickActionModeImage) {
         NSValue *pointValue = task[@"point"];
@@ -4446,7 +4460,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         return;
     }
 
-    NSInteger ocrMode = [task[@"ocrMode"] integerValue] == AnClickOCRModeAccurate ? AnClickOCRModeAccurate : AnClickOCRModeFast;
+    AnClickOCRMode ocrMode = [self ocrModeForTask:task];
     AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
     _templateSearchInProgress = YES;
     __weak typeof(self) weakSelf = self;
@@ -4480,7 +4494,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             CGPoint actionPoint = pointValue.CGPointValue;
             [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
             strongSelf->_statusLabel.text = [NSString stringWithFormat:@"文字%@ %@ %.0f,%.0f",
-                                             usedFallback ? @"快速补识" : [AnClickOCR backendNameForMode:ocrMode],
+                                             usedFallback ? @"苹果补识" : [AnClickOCR backendNameForMode:ocrMode],
                                              text,
                                              actionPoint.x,
                                              actionPoint.y];

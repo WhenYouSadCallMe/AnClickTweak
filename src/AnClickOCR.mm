@@ -15,7 +15,23 @@
 @implementation AnClickOCR
 
 + (NSString *)backendNameForMode:(NSInteger)mode {
-    return mode == 1 ? @"精准" : @"快速";
+    if (mode == 1) {
+        return @"RapidOCR";
+    }
+    if (mode == 2) {
+        return @"PaddleOCR";
+    }
+    return @"苹果Vision";
+}
+
++ (NSDictionary *)missingBackendResultForMode:(NSInteger)mode {
+    if (mode == 1) {
+        return @{@"error": @"RapidOCR库未打包 vendor/rapidocr-ios"};
+    }
+    if (mode == 2) {
+        return @{@"error": @"PaddleOCR库未打包 vendor/paddleocr-ios"};
+    }
+    return @{@"error": @"文字识别库未打包"};
 }
 
 + (NSString *)normalizedText:(NSString *)text {
@@ -144,28 +160,15 @@
         return @{@"error": @"截图失败"};
     }
 
-    if (mode == 1) {
-        return [self matchNormalizedText:target
-                                 inImage:image
-                                   level:VNRequestTextRecognitionLevelAccurate
-                      languageCorrection:YES
-                                fallback:NO];
-    }
-
-    NSDictionary *fastMatch = [self matchNormalizedText:target
-                                                inImage:image
-                                                  level:VNRequestTextRecognitionLevelFast
-                                     languageCorrection:NO
-                                               fallback:NO];
-    if (![fastMatch[@"error"] isKindOfClass:NSString.class]) {
-        return fastMatch;
+    if (mode == 1 || mode == 2) {
+        return [self missingBackendResultForMode:mode];
     }
 
     return [self matchNormalizedText:target
                              inImage:image
                                level:VNRequestTextRecognitionLevelAccurate
                   languageCorrection:YES
-                            fallback:YES];
+                            fallback:NO];
 }
 
 @end
