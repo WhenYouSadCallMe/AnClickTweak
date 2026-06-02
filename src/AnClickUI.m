@@ -4460,8 +4460,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     if (_actionMode == AnClickActionModeSwipe && _pickingSwipeEndPoint && _hasManualSwipeAnchor) {
         [self showPointPickSwipeStartMarker];
     }
-    [self updatePointPickCursor];
     _pointPickWindow.hidden = NO;
+    [self updatePointPickCursor];
     _statusLabel.text = _pickingSwipeEndPoint ? @"滑动取终点" : @"拖动取点";
 }
 
@@ -4520,11 +4520,49 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     CGFloat margin = 8.0;
     CGFloat toolbarHeight = 48.0;
+    UIEdgeInsets safeInsets = UIEdgeInsetsZero;
+    if (@available(iOS 11.0, *)) {
+        safeInsets = _pointPickOverlay.safeAreaInsets;
+        if (_pointPickWindow) {
+            UIEdgeInsets windowInsets = _pointPickWindow.safeAreaInsets;
+            if (safeInsets.top <= 0.0) {
+                safeInsets.top = windowInsets.top;
+            }
+            if (safeInsets.bottom <= 0.0) {
+                safeInsets.bottom = windowInsets.bottom;
+            }
+        }
+        if (safeInsets.top <= 0.0 || safeInsets.bottom <= 0.0) {
+            UIWindow *hostWindow = [self hostWindow];
+            if (hostWindow) {
+                UIEdgeInsets hostInsets = hostWindow.safeAreaInsets;
+                if (safeInsets.top <= 0.0) {
+                    safeInsets.top = hostInsets.top;
+                }
+                if (safeInsets.bottom <= 0.0) {
+                    safeInsets.bottom = hostInsets.bottom;
+                }
+            }
+        }
+    }
+    CGSize screenSize = UIScreen.mainScreen.bounds.size;
+    CGFloat shortSide = MIN(screenSize.width, screenSize.height);
+    CGFloat longSide = MAX(screenSize.width, screenSize.height);
+    BOOL likelyNotchedPhone = shortSide <= 430.0 && longSide >= 812.0;
+    if (likelyNotchedPhone && safeInsets.top <= 0.0) {
+        safeInsets.top = 54.0;
+    }
+    if (likelyNotchedPhone && safeInsets.bottom <= 0.0) {
+        safeInsets.bottom = 21.0;
+    }
+    CGFloat topY = MAX(margin, safeInsets.top + margin);
+    CGFloat bottomY = _pointPickOverlay.bounds.size.height - toolbarHeight - MAX(margin, safeInsets.bottom + margin);
+    bottomY = MAX(topY, bottomY);
     CGFloat toolbarWidth = MIN(_pointPickOverlay.bounds.size.width - margin * 2.0, 360.0);
     CGFloat x = (_pointPickOverlay.bounds.size.width - toolbarWidth) * 0.5;
     BOOL cursorNearBottom = _hasPendingPointPickPoint &&
-        _pendingPointPickPoint.y > _pointPickOverlay.bounds.size.height - toolbarHeight - 28.0;
-    CGFloat y = cursorNearBottom ? margin : _pointPickOverlay.bounds.size.height - toolbarHeight - margin;
+        _pendingPointPickPoint.y > bottomY - 20.0;
+    CGFloat y = cursorNearBottom ? topY : bottomY;
     _pointPickToolbar.frame = CGRectMake(x, y, toolbarWidth, toolbarHeight);
 
     CGFloat buttonWidth = 64.0;
