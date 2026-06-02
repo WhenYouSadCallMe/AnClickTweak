@@ -3,6 +3,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <opencv2/core.hpp>
 #import <opencv2/imgproc.hpp>
+#include <float.h>
 #include <vector>
 
 @interface AnClickFakeTouch : NSObject
@@ -12,6 +13,7 @@
 @interface AnClickCore : NSObject
 + (UIImage *)captureCurrentWindowImage;
 + (NSDictionary *)findTemplateImageMatch:(UIImage *)templateImage threshold:(double)threshold;
++ (NSDictionary *)findColorMatchWithRed:(NSInteger)red green:(NSInteger)green blue:(NSInteger)blue tolerance:(double)tolerance;
 + (NSValue *)findTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 + (BOOL)findAndTapTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 @end
@@ -173,6 +175,66 @@ static cv::Mat AnClickMatFromUIImage(UIImage *image) {
         @"point": [NSValue valueWithCGPoint:screenPoint],
         @"rect": [NSValue valueWithCGRect:screenRect],
         @"score": @(bestScore),
+    };
+}
+
++ (NSDictionary *)findColorMatchWithRed:(NSInteger)red green:(NSInteger)green blue:(NSInteger)blue tolerance:(double)tolerance {
+    UIWindow *sourceWindow = nil;
+    UIImage *sourceImage = AnClickCaptureActiveWindowImage(&sourceWindow);
+    if (!sourceImage) {
+        return nil;
+    }
+
+    cv::Mat source = AnClickMatFromUIImage(sourceImage);
+    if (source.empty()) {
+        return nil;
+    }
+
+    NSInteger targetRed = MIN(255, MAX(0, red));
+    NSInteger targetGreen = MIN(255, MAX(0, green));
+    NSInteger targetBlue = MIN(255, MAX(0, blue));
+    double maxDistance = MIN(255.0, MAX(0.0, tolerance));
+    double bestDistance = DBL_MAX;
+    cv::Point bestPoint(0, 0);
+
+    for (int y = 0; y < source.rows; y++) {
+        const cv::Vec3b *row = source.ptr<cv::Vec3b>(y);
+        for (int x = 0; x < source.cols; x++) {
+            const cv::Vec3b pixel = row[x];
+            double db = (double)pixel[0] - (double)targetBlue;
+            double dg = (double)pixel[1] - (double)targetGreen;
+            double dr = (double)pixel[2] - (double)targetRed;
+            double distance = sqrt(db * db + dg * dg + dr * dr);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestPoint = cv::Point(x, y);
+                if (bestDistance <= 0.0) {
+                    break;
+                }
+            }
+        }
+        if (bestDistance <= 0.0) {
+            break;
+        }
+    }
+
+    if (bestDistance > maxDistance) {
+        return nil;
+    }
+
+    CGFloat scale = UIScreen.mainScreen.scale;
+    CGPoint windowPoint = CGPointMake((CGFloat)bestPoint.x / scale, (CGFloat)bestPoint.y / scale);
+    CGPoint screenPoint = sourceWindow ? [sourceWindow convertPoint:windowPoint toWindow:nil] : windowPoint;
+    CGFloat markerSize = 12.0;
+    CGRect screenRect = CGRectMake(screenPoint.x - markerSize * 0.5,
+                                   screenPoint.y - markerSize * 0.5,
+                                   markerSize,
+                                   markerSize);
+    return @{
+        @"point": [NSValue valueWithCGPoint:screenPoint],
+        @"rect": [NSValue valueWithCGRect:screenRect],
+        @"distance": @(bestDistance),
+        @"score": @(MAX(0.0, 1.0 - bestDistance / MAX(1.0, maxDistance))),
     };
 }
 

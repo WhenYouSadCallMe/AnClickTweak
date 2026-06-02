@@ -17,7 +17,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     AnClickActionModeImage = 8,
     AnClickActionModeMacro = 9,
     AnClickActionModeOCR = 10,
-    AnClickActionModeCount = 11,
+    AnClickActionModeColor = 11,
+    AnClickActionModeCount = 12,
 };
 
 typedef NS_ENUM(NSInteger, AnClickOCRMode) {
@@ -31,6 +32,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 @interface AnClickCore : NSObject
 + (UIImage *)captureCurrentWindowImage;
 + (NSDictionary *)findTemplateImageMatch:(UIImage *)templateImage threshold:(double)threshold;
++ (NSDictionary *)findColorMatchWithRed:(NSInteger)red green:(NSInteger)green blue:(NSInteger)blue tolerance:(double)tolerance;
 + (NSValue *)findTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 + (BOOL)findAndTapTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 @end
@@ -63,7 +65,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 @property (nonatomic, assign, getter=isRecording) BOOL recording;
 @end
 
-@interface AnClickUI : NSObject <UITextFieldDelegate, UIGestureRecognizerDelegate, UIPickerViewDataSource, UIPickerViewDelegate>
+@interface AnClickUI : NSObject <UITextFieldDelegate, UIGestureRecognizerDelegate, UIPickerViewDataSource, UIPickerViewDelegate, UIScrollViewDelegate>
 + (instancetype)shared;
 - (void)show;
 @end
@@ -118,8 +120,17 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     UIView *_pointCursorView;
     UIView *_pointPickToolbar;
     UILabel *_pointCoordinateLabel;
+    UIWindow *_colorPickWindow;
+    UIScrollView *_colorPickScrollView;
+    UIImageView *_colorPickImageView;
+    UIView *_colorPickCursorView;
+    UIView *_colorPickToolbar;
+    UILabel *_colorPickInfoLabel;
+    UIView *_colorPickSwatchView;
     UIImage *_captureSnapshot;
+    UIImage *_colorPickImage;
     UIImageView *_previewView;
+    UIView *_colorPreviewView;
     UIView *_tapMarkerView;
     UIView *_recognitionBoxView;
     UIView *_operationTraceView;
@@ -183,7 +194,17 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     NSInteger _globalStopMinute;
     NSInteger _globalStopSecond;
     NSInteger _currentGlobalRunCycle;
+    NSInteger _targetColorRed;
+    NSInteger _targetColorGreen;
+    NSInteger _targetColorBlue;
+    NSInteger _pendingColorRed;
+    NSInteger _pendingColorGreen;
+    NSInteger _pendingColorBlue;
+    BOOL _hasTargetColor;
     float _lastObservedSystemVolume;
+    CGPoint _pendingColorPickPoint;
+    BOOL _hasPendingColorPickPoint;
+    double _colorTolerance;
     NSTimer *_globalStartTimer;
     NSTimer *_globalStopTimer;
     double _matchThreshold;
@@ -418,6 +439,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _imageUsesMatchPoint = YES;
     _imageActionMode = AnClickActionModeTap;
     _ocrMode = AnClickOCRModeAppleVision;
+    _colorTolerance = 18.0;
     _matchThreshold = 0.80;
     _actionDelay = 0;
     _actionRepeatCount = 1;
@@ -489,7 +511,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     CGFloat gap = 12.0;
     CGFloat modeWidth = floor((panelWidth - gap * 4.0) / 3.0);
-    NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"滑动", @"识图", @"文字", @"录制"];
+    NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"滑动", @"识图", @"文字", @"识色", @"录制"];
     NSArray<NSNumber *> *modeTags = @[
         @(AnClickActionModeTap),
         @(AnClickActionModeDoubleTap),
@@ -497,6 +519,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         @(AnClickActionModeSwipe),
         @(AnClickActionModeImage),
         @(AnClickActionModeOCR),
+        @(AnClickActionModeColor),
         @(AnClickActionModeMacro),
     ];
     NSMutableArray<UIButton *> *modeButtons = [NSMutableArray array];
@@ -695,6 +718,13 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _previewView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
     _previewView.hidden = YES;
     [_panelView addSubview:_previewView];
+
+    _colorPreviewView = [[UIView alloc] initWithFrame:CGRectZero];
+    _colorPreviewView.hidden = YES;
+    _colorPreviewView.layer.cornerRadius = 6;
+    _colorPreviewView.layer.borderWidth = 1;
+    _colorPreviewView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.24].CGColor;
+    [_panelView addSubview:_colorPreviewView];
     [self refreshTemplatePreview];
     [self refreshTaskList];
     [self setTaskEditorVisible:NO];
@@ -914,6 +944,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _repeatField.hidden = YES;
     _ocrTargetField.hidden = YES;
     _previewView.hidden = YES;
+    _colorPreviewView.hidden = YES;
 
     _addTaskButton.hidden = visible;
     _deleteTaskButton.hidden = visible;
@@ -1996,6 +2027,11 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _imageActionMode = AnClickActionModeTap;
     _ocrMode = AnClickOCRModeAppleVision;
     _ocrTargetText = nil;
+    _hasTargetColor = NO;
+    _targetColorRed = 0;
+    _targetColorGreen = 0;
+    _targetColorBlue = 0;
+    _colorTolerance = 18.0;
     _recordedMacroEvents = nil;
     _matchThreshold = 0.80;
     _actionDescription = nil;
@@ -2127,7 +2163,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 }
 
 - (NSString *)actionNameForMode:(AnClickActionMode)mode {
-    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动", @"二指", @"缩小", @"放大", @"旋转", @"识图", @"录制", @"文字"];
+    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动", @"二指", @"缩小", @"放大", @"旋转", @"识图", @"录制", @"文字", @"识色"];
     if (mode < AnClickActionModeTap || mode >= AnClickActionModeCount) {
         return @"动作";
     }
@@ -2141,7 +2177,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         mode == AnClickActionModeSwipe ||
         mode == AnClickActionModeImage ||
         mode == AnClickActionModeMacro ||
-        mode == AnClickActionModeOCR;
+        mode == AnClickActionModeOCR ||
+        mode == AnClickActionModeColor;
 }
 
 - (BOOL)isReusablePointActionMode:(AnClickActionMode)mode {
@@ -2307,6 +2344,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 }
 
 - (NSString *)thresholdFieldText {
+    if (_actionMode == AnClickActionModeColor) {
+        return [NSString stringWithFormat:@"%.0f", _colorTolerance];
+    }
     return [NSString stringWithFormat:@"%.2f", _matchThreshold];
 }
 
@@ -2328,6 +2368,14 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
 - (void)syncImageThresholdFromField {
     NSString *thresholdText = [_thresholdField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (_actionMode == AnClickActionModeColor) {
+        if (thresholdText.length > 0) {
+            _colorTolerance = MIN(255.0, MAX(0.0, thresholdText.doubleValue));
+        } else {
+            _colorTolerance = 18.0;
+        }
+        return;
+    }
     if (thresholdText.length > 0) {
         _matchThreshold = MIN(1.0, MAX(0.0, thresholdText.doubleValue));
     } else {
@@ -2416,6 +2464,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _repeatField.hidden = YES;
     _thresholdField.hidden = YES;
     _ocrTargetField.hidden = YES;
+    _colorPreviewView.hidden = YES;
     _saveTaskButton.hidden = YES;
     _editorBackButton.hidden = YES;
     _cancelEditButton.hidden = YES;
@@ -2555,6 +2604,46 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
 }
 
+- (void)layoutColorFieldsAtY:(CGFloat)y {
+    CGFloat side = 18.0;
+    CGFloat width = _panelView.bounds.size.width;
+    CGFloat gap = 8.0;
+    CGFloat fieldWidth = floor((width - side * 2.0 - gap * 2.0) / 3.0);
+    NSArray<UILabel *> *captions = @[_thresholdCaptionLabel, _delayCaptionLabel, _repeatCaptionLabel];
+    NSArray<UITextField *> *fields = @[_thresholdField, _delayField, _repeatField];
+    NSArray<NSString *> *titles = @[@"颜色容差", @"延时秒", @"执行次数"];
+    for (NSUInteger i = 0; i < captions.count; i++) {
+        UILabel *caption = captions[i];
+        UITextField *field = fields[i];
+        CGFloat x = side + (fieldWidth + gap) * i;
+        caption.text = titles[i];
+        caption.hidden = NO;
+        caption.frame = CGRectMake(x, y, fieldWidth, 20);
+        field.hidden = NO;
+        field.frame = CGRectMake(x, y + 22.0, fieldWidth, 38);
+    }
+}
+
+- (NSString *)targetColorSummary {
+    if (!_hasTargetColor) {
+        return @"截图放大取色";
+    }
+    return [NSString stringWithFormat:@"#%02lX%02lX%02lX  重新取色",
+            (long)_targetColorRed,
+            (long)_targetColorGreen,
+            (long)_targetColorBlue];
+}
+
+- (UIColor *)targetUIColor {
+    if (!_hasTargetColor) {
+        return [UIColor colorWithWhite:1 alpha:0.10];
+    }
+    return [UIColor colorWithRed:_targetColorRed / 255.0
+                           green:_targetColorGreen / 255.0
+                            blue:_targetColorBlue / 255.0
+                           alpha:1.0];
+}
+
 - (void)refreshEditorConfigControls {
     if (!_taskEditorVisible) {
         return;
@@ -2659,6 +2748,39 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         [self styleSegmentButton:_previewSwipeButton selected:_imageActionMode == AnClickActionModeDoubleTap];
         [self styleSegmentButton:_clearActionButton selected:_imageActionMode == AnClickActionModeLongPress];
         [self layoutDoubleTimingFieldsAtY:actionButtonY + 44.0];
+    } else if (_actionMode == AnClickActionModeColor) {
+        _saveTaskButton.enabled = YES;
+        _saveTaskButton.alpha = 1.0;
+        CGFloat side = 18.0;
+        CGFloat width = _panelView.bounds.size.width;
+        CGFloat contentWidth = width - side * 2.0;
+        _primaryConfigLabel.text = @"目标颜色";
+        _primaryConfigLabel.hidden = NO;
+        _primaryConfigLabel.frame = CGRectMake(side, configTopY, contentWidth, 20);
+
+        CGFloat swatchSize = 40.0;
+        _colorPreviewView.hidden = NO;
+        _colorPreviewView.frame = CGRectMake(side, configTopY + 22.0, swatchSize, swatchSize);
+        _colorPreviewView.backgroundColor = [self targetUIColor];
+
+        [_pickPointButton setTitle:[self targetColorSummary] forState:UIControlStateNormal];
+        [self styleNormalButton:_pickPointButton];
+        _pickPointButton.hidden = NO;
+        _pickPointButton.frame = CGRectMake(side + swatchSize + 10.0, configTopY + 22.0, contentWidth - swatchSize - 10.0, 40);
+        [self updateButtonShadowPath:_pickPointButton];
+
+        _secondaryConfigLabel.text = @"成功后动作类型";
+        _secondaryConfigLabel.hidden = NO;
+        _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 72.0, contentWidth, 20);
+        [_recordSwipeButton setTitle:@"点击" forState:UIControlStateNormal];
+        [_previewSwipeButton setTitle:@"双击" forState:UIControlStateNormal];
+        [_clearActionButton setTitle:@"长按" forState:UIControlStateNormal];
+        CGFloat actionButtonY = configTopY + 94.0;
+        [self layoutButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton] x:side y:actionButtonY width:contentWidth height:34 gap:8.0];
+        [self styleSegmentButton:_recordSwipeButton selected:_imageActionMode == AnClickActionModeTap];
+        [self styleSegmentButton:_previewSwipeButton selected:_imageActionMode == AnClickActionModeDoubleTap];
+        [self styleSegmentButton:_clearActionButton selected:_imageActionMode == AnClickActionModeLongPress];
+        [self layoutColorFieldsAtY:actionButtonY + 44.0];
     } else if (_actionMode == AnClickActionModeMacro) {
         _saveTaskButton.enabled = YES;
         _saveTaskButton.alpha = 1.0;
@@ -2746,6 +2868,17 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         _statusLabel.text = [NSString stringWithFormat:@"文字 %@ %@ 后%@",
                              [AnClickOCR backendNameForMode:_ocrMode],
                              targetState,
+                             [self actionNameForMode:_imageActionMode]];
+        return;
+    }
+
+    if (_actionMode == AnClickActionModeColor) {
+        NSString *targetState = _hasTargetColor
+            ? [NSString stringWithFormat:@"#%02lX%02lX%02lX", (long)_targetColorRed, (long)_targetColorGreen, (long)_targetColorBlue]
+            : @"先取色";
+        _statusLabel.text = [NSString stringWithFormat:@"识色 %@ 容差%.0f 后%@",
+                             targetState,
+                             _colorTolerance,
                              [self actionNameForMode:_imageActionMode]];
         return;
     }
@@ -3759,6 +3892,21 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         return task;
     }
 
+    if (_actionMode == AnClickActionModeColor) {
+        if (!_hasTargetColor) {
+            if (requireComplete) {
+                _statusLabel.text = @"先取目标颜色";
+            }
+            return nil;
+        }
+        task[@"colorRed"] = @(_targetColorRed);
+        task[@"colorGreen"] = @(_targetColorGreen);
+        task[@"colorBlue"] = @(_targetColorBlue);
+        task[@"colorTolerance"] = @(_colorTolerance);
+        task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
+        return task;
+    }
+
     if (_actionMode == AnClickActionModeSwipe) {
         NSArray<NSValue *> *path = [self manualSwipePath];
         if (path.count >= 2) {
@@ -3812,6 +3960,17 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         subtitle = text.length > 0
             ? [NSString stringWithFormat:@"%@ · %@", [AnClickOCR backendNameForMode:ocrMode], text]
             : @"未设置文字";
+    } else if (desc.length == 0 && mode == AnClickActionModeColor) {
+        if ([task[@"colorRed"] respondsToSelector:@selector(integerValue)] &&
+            [task[@"colorGreen"] respondsToSelector:@selector(integerValue)] &&
+            [task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
+            subtitle = [NSString stringWithFormat:@"#%02lX%02lX%02lX",
+                        (long)[task[@"colorRed"] integerValue],
+                        (long)[task[@"colorGreen"] integerValue],
+                        (long)[task[@"colorBlue"] integerValue]];
+        } else {
+            subtitle = @"未取色";
+        }
     }
     return [NSString stringWithFormat:@"任务 %lu - %@\n%@", (unsigned long)index + 1, name, subtitle];
 }
@@ -4042,6 +4201,18 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     } else if (mode == AnClickActionModeOCR) {
         _ocrTargetText = [self trimmedActionDescription:task[@"ocrText"]];
         _ocrMode = [self ocrModeForTask:task];
+        _imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+    } else if (mode == AnClickActionModeColor) {
+        if ([task[@"colorRed"] respondsToSelector:@selector(integerValue)] &&
+            [task[@"colorGreen"] respondsToSelector:@selector(integerValue)] &&
+            [task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
+            _targetColorRed = MIN(255, MAX(0, [task[@"colorRed"] integerValue]));
+            _targetColorGreen = MIN(255, MAX(0, [task[@"colorGreen"] integerValue]));
+            _targetColorBlue = MIN(255, MAX(0, [task[@"colorBlue"] integerValue]));
+            _hasTargetColor = YES;
+        }
+        NSNumber *toleranceNumber = task[@"colorTolerance"];
+        _colorTolerance = toleranceNumber ? MIN(255.0, MAX(0.0, toleranceNumber.doubleValue)) : 18.0;
         _imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
     } else if ([self isSelectableActionMode:mode] && mode != AnClickActionModeSwipe && mode != AnClickActionModeImage) {
         NSValue *pointValue = task[@"point"];
@@ -4306,6 +4477,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     if (mode == AnClickActionModeOCR) {
         return 1.65;
     }
+    if (mode == AnClickActionModeColor) {
+        return 1.20;
+    }
     if (mode == AnClickActionModeMacro) {
         return [self durationForRecordedEvents:_recordedMacroEvents];
     }
@@ -4461,6 +4635,63 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     });
 }
 
+- (void)performColorTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow {
+    [self performColorTask:task inWindow:hostWindow runGeneration:0];
+}
+
+- (void)performColorTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow runGeneration:(NSUInteger)runGeneration {
+    if (![task[@"colorRed"] respondsToSelector:@selector(integerValue)] ||
+        ![task[@"colorGreen"] respondsToSelector:@selector(integerValue)] ||
+        ![task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
+        _statusLabel.text = @"识色未取色";
+        return;
+    }
+
+    NSInteger red = MIN(255, MAX(0, [task[@"colorRed"] integerValue]));
+    NSInteger green = MIN(255, MAX(0, [task[@"colorGreen"] integerValue]));
+    NSInteger blue = MIN(255, MAX(0, [task[@"colorBlue"] integerValue]));
+    double tolerance = [task[@"colorTolerance"] respondsToSelector:@selector(doubleValue)]
+        ? MIN(255.0, MAX(0.0, [task[@"colorTolerance"] doubleValue]))
+        : 18.0;
+    AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+    _templateSearchInProgress = YES;
+    __weak typeof(self) weakSelf = self;
+    dispatch_async([self templateSearchQueue], ^{
+        NSDictionary *match = [AnClickCore findColorMatchWithRed:red green:green blue:blue tolerance:tolerance];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            strongSelf->_templateSearchInProgress = NO;
+            if (runGeneration != 0 && (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration)) {
+                return;
+            }
+            if (!match) {
+                strongSelf->_statusLabel.text = @"颜色未找到";
+                return;
+            }
+            NSValue *pointValue = match[@"point"];
+            NSValue *rectValue = match[@"rect"];
+            NSNumber *scoreNumber = match[@"score"];
+            if (!pointValue || !rectValue) {
+                strongSelf->_statusLabel.text = @"识色异常";
+                return;
+            }
+            UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
+            [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
+            CGPoint actionPoint = pointValue.CGPointValue;
+            [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
+            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 #%02lX%02lX%02lX %.0f,%.0f",
+                                             (long)red,
+                                             (long)green,
+                                             (long)blue,
+                                             actionPoint.x,
+                                             actionPoint.y];
+        });
+    });
+}
+
 - (BOOL)taskIsComplete:(NSDictionary *)task {
     AnClickActionMode mode = [self modeForTask:task];
     if (mode == AnClickActionModeNone) {
@@ -4492,6 +4723,15 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         NSString *targetText = [self trimmedActionDescription:task[@"ocrText"]];
         if (targetText.length == 0) {
             _statusLabel.text = @"任务文字未填写";
+            return NO;
+        }
+        return YES;
+    }
+    if (mode == AnClickActionModeColor) {
+        if (![task[@"colorRed"] respondsToSelector:@selector(integerValue)] ||
+            ![task[@"colorGreen"] respondsToSelector:@selector(integerValue)] ||
+            ![task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
+            _statusLabel.text = @"任务未取色";
             return NO;
         }
         return YES;
@@ -4532,6 +4772,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     } else if (mode == AnClickActionModeOCR) {
         AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
         duration = 0.95 + [self durationForTaskMode:actionMode];
+    } else if (mode == AnClickActionModeColor) {
+        AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+        duration = 0.75 + [self durationForTaskMode:actionMode];
     } else if (mode == AnClickActionModeMacro) {
         NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
         duration = [self durationForRecordedEvents:events];
@@ -4558,6 +4801,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
                 [strongSelf performImageTask:task inWindow:currentHostWindow runGeneration:runGeneration];
             } else if (mode == AnClickActionModeOCR) {
                 [strongSelf performOCRTask:task inWindow:currentHostWindow runGeneration:runGeneration];
+            } else if (mode == AnClickActionModeColor) {
+                [strongSelf performColorTask:task inWindow:currentHostWindow runGeneration:runGeneration];
             } else if (mode == AnClickActionModeMacro) {
                 NSArray<NSDictionary *> *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
                 NSArray<NSValue *> *trajectory = [strongSelf trajectoryPointsForRecordedEvents:events];
@@ -4674,9 +4919,295 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     });
 }
 
+- (BOOL)sampleColorAtImagePoint:(CGPoint)point image:(UIImage *)image red:(NSInteger *)red green:(NSInteger *)green blue:(NSInteger *)blue {
+    CGImageRef imageRef = image.CGImage;
+    if (!imageRef) {
+        return NO;
+    }
+
+    size_t width = CGImageGetWidth(imageRef);
+    size_t height = CGImageGetHeight(imageRef);
+    CGFloat scale = image.scale > 0 ? image.scale : UIScreen.mainScreen.scale;
+    NSInteger pixelX = MIN(MAX((NSInteger)floor(point.x * scale), 0), (NSInteger)width - 1);
+    NSInteger pixelY = MIN(MAX((NSInteger)floor(point.y * scale), 0), (NSInteger)height - 1);
+    size_t bytesPerRow = width * 4;
+    NSMutableData *data = [NSMutableData dataWithLength:height * bytesPerRow];
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    CGContextRef context = CGBitmapContextCreate(data.mutableBytes,
+                                                 width,
+                                                 height,
+                                                 8,
+                                                 bytesPerRow,
+                                                 colorSpace,
+                                                 kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    if (!context) {
+        CGColorSpaceRelease(colorSpace);
+        return NO;
+    }
+
+    CGContextDrawImage(context, CGRectMake(0, 0, width, height), imageRef);
+    CGContextRelease(context);
+    CGColorSpaceRelease(colorSpace);
+
+    unsigned char *bytes = (unsigned char *)data.mutableBytes;
+    size_t index = (size_t)pixelY * bytesPerRow + (size_t)pixelX * 4;
+    if (red) {
+        *red = bytes[index];
+    }
+    if (green) {
+        *green = bytes[index + 1];
+    }
+    if (blue) {
+        *blue = bytes[index + 2];
+    }
+    return YES;
+}
+
+- (void)beginColorPicking {
+    UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        _statusLabel.text = @"无窗口";
+        return;
+    }
+
+    [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+        UIImage *image = [AnClickCore captureCurrentWindowImage];
+        if (!image.CGImage) {
+            strongSelf->_statusLabel.text = @"截图失败";
+            [strongSelf restorePanelAfterExternalTap];
+            return;
+        }
+        [strongSelf showColorPickOverlayWithImage:image hostWindow:hostWindow];
+    });
+}
+
+- (void)showColorPickOverlayWithImage:(UIImage *)image hostWindow:(UIWindow *)hostWindow {
+    [_colorPickWindow removeFromSuperview];
+    _colorPickWindow.hidden = YES;
+    _colorPickImage = image;
+    _hasPendingColorPickPoint = NO;
+
+    _colorPickWindow = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    if (@available(iOS 13.0, *)) {
+        _colorPickWindow.windowScene = hostWindow.windowScene ?: [self activeWindowScene];
+    }
+    _colorPickWindow.windowLevel = UIWindowLevelAlert + 2100;
+    _colorPickWindow.backgroundColor = UIColor.blackColor;
+    _colorPickWindow.rootViewController = [[UIViewController alloc] init];
+
+    UIView *root = _colorPickWindow.rootViewController.view;
+    root.backgroundColor = UIColor.blackColor;
+
+    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:root.bounds];
+    scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    scrollView.delegate = self;
+    scrollView.backgroundColor = UIColor.blackColor;
+    scrollView.minimumZoomScale = 1.0;
+    scrollView.maximumZoomScale = 8.0;
+    scrollView.showsHorizontalScrollIndicator = NO;
+    scrollView.showsVerticalScrollIndicator = NO;
+    [root addSubview:scrollView];
+    _colorPickScrollView = scrollView;
+
+    UIImageView *imageView = [[UIImageView alloc] initWithImage:image];
+    imageView.frame = CGRectMake(0, 0, image.size.width, image.size.height);
+    imageView.userInteractionEnabled = YES;
+    [scrollView addSubview:imageView];
+    _colorPickImageView = imageView;
+    scrollView.contentSize = imageView.bounds.size;
+
+    CGFloat minZoom = MIN(root.bounds.size.width / MAX(1.0, image.size.width),
+                          root.bounds.size.height / MAX(1.0, image.size.height));
+    minZoom = MIN(MAX(minZoom, 0.25), 1.0);
+    scrollView.minimumZoomScale = minZoom;
+    scrollView.zoomScale = minZoom;
+    [self centerColorPickImageContent];
+
+    UIView *cursor = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 28, 28)];
+    cursor.backgroundColor = UIColor.clearColor;
+    cursor.layer.cornerRadius = 14;
+    cursor.layer.borderWidth = 1.5;
+    cursor.layer.borderColor = UIColor.systemYellowColor.CGColor;
+    cursor.hidden = YES;
+    cursor.userInteractionEnabled = NO;
+    [imageView addSubview:cursor];
+    _colorPickCursorView = cursor;
+
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleColorPickTap:)];
+    [imageView addGestureRecognizer:tap];
+
+    UIView *toolbar = [[UIView alloc] initWithFrame:CGRectZero];
+    toolbar.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.88];
+    toolbar.layer.cornerRadius = 8;
+    toolbar.layer.borderWidth = 1;
+    toolbar.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
+    toolbar.clipsToBounds = YES;
+    [root addSubview:toolbar];
+    _colorPickToolbar = toolbar;
+
+    _colorPickSwatchView = [[UIView alloc] initWithFrame:CGRectZero];
+    _colorPickSwatchView.layer.cornerRadius = 5;
+    _colorPickSwatchView.layer.borderWidth = 1;
+    _colorPickSwatchView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.28].CGColor;
+    [toolbar addSubview:_colorPickSwatchView];
+
+    _colorPickInfoLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    _colorPickInfoLabel.textColor = UIColor.whiteColor;
+    _colorPickInfoLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightSemibold];
+    _colorPickInfoLabel.adjustsFontSizeToFitWidth = YES;
+    _colorPickInfoLabel.minimumScaleFactor = 0.6;
+    _colorPickInfoLabel.text = @"放大截图后点选颜色";
+    [toolbar addSubview:_colorPickInfoLabel];
+
+    UIButton *confirmButton = [self pointPickButtonWithTitle:@"确定" action:@selector(confirmColorPicking)];
+    confirmButton.tag = 4101;
+    [toolbar addSubview:confirmButton];
+    UIButton *cancelButton = [self pointPickButtonWithTitle:@"取消" action:@selector(cancelColorPicking)];
+    cancelButton.tag = 4102;
+    [toolbar addSubview:cancelButton];
+
+    [self layoutColorPickToolbar];
+    _colorPickWindow.hidden = NO;
+    _statusLabel.text = @"截图取色";
+}
+
+- (void)layoutColorPickToolbar {
+    if (!_colorPickToolbar || !_colorPickWindow) {
+        return;
+    }
+
+    UIView *root = _colorPickWindow.rootViewController.view;
+    UIEdgeInsets safeInsets = UIEdgeInsetsZero;
+    if (@available(iOS 11.0, *)) {
+        safeInsets = root.safeAreaInsets;
+    }
+    CGFloat margin = 8.0;
+    CGFloat toolbarHeight = 52.0;
+    CGFloat toolbarWidth = MIN(root.bounds.size.width - margin * 2.0, 390.0);
+    _colorPickToolbar.frame = CGRectMake((root.bounds.size.width - toolbarWidth) * 0.5,
+                                         root.bounds.size.height - safeInsets.bottom - toolbarHeight - margin,
+                                         toolbarWidth,
+                                         toolbarHeight);
+
+    CGFloat swatchSize = 34.0;
+    _colorPickSwatchView.frame = CGRectMake(10.0, (toolbarHeight - swatchSize) * 0.5, swatchSize, swatchSize);
+    CGFloat buttonWidth = 62.0;
+    CGFloat buttonHeight = 34.0;
+    CGFloat buttonY = (toolbarHeight - buttonHeight) * 0.5;
+    UIButton *cancelButton = (UIButton *)[_colorPickToolbar viewWithTag:4102];
+    UIButton *confirmButton = (UIButton *)[_colorPickToolbar viewWithTag:4101];
+    cancelButton.frame = CGRectMake(toolbarWidth - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
+    confirmButton.frame = CGRectMake(CGRectGetMinX(cancelButton.frame) - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
+    _colorPickInfoLabel.frame = CGRectMake(CGRectGetMaxX(_colorPickSwatchView.frame) + 8.0,
+                                           0,
+                                           CGRectGetMinX(confirmButton.frame) - CGRectGetMaxX(_colorPickSwatchView.frame) - 16.0,
+                                           toolbarHeight);
+}
+
+- (void)centerColorPickImageContent {
+    if (!_colorPickScrollView || !_colorPickImageView) {
+        return;
+    }
+    CGSize boundsSize = _colorPickScrollView.bounds.size;
+    CGRect frame = _colorPickImageView.frame;
+    frame.origin.x = frame.size.width < boundsSize.width ? (boundsSize.width - frame.size.width) * 0.5 : 0;
+    frame.origin.y = frame.size.height < boundsSize.height ? (boundsSize.height - frame.size.height) * 0.5 : 0;
+    _colorPickImageView.frame = frame;
+}
+
+- (UIView *)viewForZoomingInScrollView:(UIScrollView *)scrollView {
+    if (scrollView == _colorPickScrollView) {
+        return _colorPickImageView;
+    }
+    return nil;
+}
+
+- (void)scrollViewDidZoom:(UIScrollView *)scrollView {
+    if (scrollView == _colorPickScrollView) {
+        [self centerColorPickImageContent];
+    }
+}
+
+- (void)handleColorPickTap:(UITapGestureRecognizer *)recognizer {
+    if (recognizer.state != UIGestureRecognizerStateEnded || !_colorPickImage) {
+        return;
+    }
+    CGPoint point = [recognizer locationInView:_colorPickImageView];
+    point.x = MIN(MAX(point.x, 0.0), _colorPickImage.size.width);
+    point.y = MIN(MAX(point.y, 0.0), _colorPickImage.size.height);
+
+    NSInteger red = 0;
+    NSInteger green = 0;
+    NSInteger blue = 0;
+    if (![self sampleColorAtImagePoint:point image:_colorPickImage red:&red green:&green blue:&blue]) {
+        _colorPickInfoLabel.text = @"取色失败";
+        return;
+    }
+
+    _pendingColorPickPoint = point;
+    _pendingColorRed = red;
+    _pendingColorGreen = green;
+    _pendingColorBlue = blue;
+    _hasPendingColorPickPoint = YES;
+    _colorPickCursorView.center = point;
+    _colorPickCursorView.hidden = NO;
+    _colorPickSwatchView.backgroundColor = [UIColor colorWithRed:red / 255.0 green:green / 255.0 blue:blue / 255.0 alpha:1.0];
+    _colorPickInfoLabel.text = [NSString stringWithFormat:@"X %.0f  Y %.0f  #%02lX%02lX%02lX",
+                                point.x,
+                                point.y,
+                                (long)red,
+                                (long)green,
+                                (long)blue];
+}
+
+- (void)finishColorPickingOverlay {
+    _colorPickWindow.hidden = YES;
+    _colorPickWindow = nil;
+    _colorPickScrollView = nil;
+    _colorPickImageView = nil;
+    _colorPickCursorView = nil;
+    _colorPickToolbar = nil;
+    _colorPickInfoLabel = nil;
+    _colorPickSwatchView = nil;
+    _colorPickImage = nil;
+    _hasPendingColorPickPoint = NO;
+    [self restorePanelAfterExternalTap];
+}
+
+- (void)confirmColorPicking {
+    if (!_hasPendingColorPickPoint) {
+        _colorPickInfoLabel.text = @"先点选颜色";
+        return;
+    }
+    _targetColorRed = _pendingColorRed;
+    _targetColorGreen = _pendingColorGreen;
+    _targetColorBlue = _pendingColorBlue;
+    _hasTargetColor = YES;
+    [self finishColorPickingOverlay];
+    [self refreshEditorConfigControls];
+    [self updateStatusForCurrentConfig];
+    [self autosaveSelectedTaskIfPossible];
+}
+
+- (void)cancelColorPicking {
+    [self finishColorPickingOverlay];
+    _statusLabel.text = @"取消取色";
+}
+
 - (void)beginPointPicking {
     if (_actionMode == AnClickActionModeNone) {
         _statusLabel.text = @"先选择动作";
+        return;
+    }
+
+    if (_actionMode == AnClickActionModeColor) {
+        [self beginColorPicking];
         return;
     }
 
@@ -5127,6 +5658,43 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             [strongSelf showOperationTraceForMode:imageActionMode atPoint:point inWindow:hostWindow duration:previewDuration];
             strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览识图%@ %.0f,%.0f", [strongSelf actionNameForMode:imageActionMode], point.x, point.y];
             [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
+        });
+        return;
+    }
+
+    if (_actionMode == AnClickActionModeColor) {
+        if (!_hasTargetColor) {
+            _statusLabel.text = @"先取目标颜色";
+            return;
+        }
+        NSInteger red = _targetColorRed;
+        NSInteger green = _targetColorGreen;
+        NSInteger blue = _targetColorBlue;
+        double tolerance = _colorTolerance;
+        NSTimeInterval previewDuration = 1.2;
+        [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+        __weak typeof(self) weakSelf = self;
+        dispatch_async([self templateSearchQueue], ^{
+            NSDictionary *match = [AnClickCore findColorMatchWithRed:red green:green blue:blue tolerance:tolerance];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) {
+                    return;
+                }
+                if (!match) {
+                    strongSelf->_statusLabel.text = @"颜色未找到";
+                    [strongSelf restorePanelAfterExternalTap];
+                    return;
+                }
+                NSValue *rectValue = match[@"rect"];
+                NSValue *pointValue = match[@"point"];
+                if (rectValue) {
+                    [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:[match[@"score"] doubleValue] inWindow:hostWindow duration:previewDuration];
+                }
+                CGPoint point = pointValue ? pointValue.CGPointValue : CGPointZero;
+                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览识色 %.0f,%.0f", point.x, point.y];
+                [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
+            });
         });
         return;
     }
