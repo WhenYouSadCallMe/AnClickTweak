@@ -1039,7 +1039,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 }
 
 - (CGFloat)editorConfigTopY {
-    return 206.0;
+    return _modeButtons.count > 6 ? 228.0 : 206.0;
 }
 
 - (void)layoutEditorScaffold {
@@ -1050,8 +1050,11 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     CGFloat width = _panelView.bounds.size.width;
     CGFloat height = _panelView.bounds.size.height;
     CGFloat side = 18.0;
-    CGFloat modeGap = 5.0;
-    CGFloat modeWidth = floor((width - side * 2.0 - modeGap * (_modeButtons.count - 1)) / MAX((NSUInteger)1, _modeButtons.count));
+    CGFloat modeGap = 6.0;
+    CGFloat modeTopY = 64.0;
+    CGFloat modeButtonHeight = _modeButtons.count > 6 ? 30.0 : 34.0;
+    NSUInteger modeColumns = _modeButtons.count > 6 ? 4 : MAX((NSUInteger)1, _modeButtons.count);
+    NSUInteger modeRows = (_modeButtons.count + modeColumns - 1) / modeColumns;
 
     [_editorBackButton setTitle:@"‹" forState:UIControlStateNormal];
     _editorBackButton.titleLabel.font = [UIFont systemFontOfSize:34 weight:UIFontWeightBold];
@@ -1096,16 +1099,29 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     for (NSUInteger i = 0; i < _modeButtons.count; i++) {
         UIButton *button = _modeButtons[i];
-        button.frame = CGRectMake(side + (modeWidth + modeGap) * i, 64, modeWidth, 34);
+        NSUInteger row = i / modeColumns;
+        NSUInteger column = i % modeColumns;
+        NSUInteger rowStart = row * modeColumns;
+        NSUInteger itemsInRow = MIN(modeColumns, _modeButtons.count - rowStart);
+        CGFloat rowWidth = width - side * 2.0;
+        CGFloat buttonWidth = floor((rowWidth - modeGap * (itemsInRow - 1)) / itemsInRow);
+        CGFloat usedWidth = buttonWidth * itemsInRow + modeGap * (itemsInRow - 1);
+        CGFloat rowX = side + floor((rowWidth - usedWidth) * 0.5);
+        button.frame = CGRectMake(rowX + (buttonWidth + modeGap) * column,
+                                  modeTopY + (modeButtonHeight + 5.0) * row,
+                                  buttonWidth,
+                                  modeButtonHeight);
         button.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
     }
 
-    _statusLabel.frame = CGRectMake(16, 102, width - 32, 22);
+    CGFloat modeRowGapCount = modeRows > 0 ? (CGFloat)(modeRows - 1) : 0.0;
+    CGFloat modeBottomY = modeTopY + modeRows * modeButtonHeight + modeRowGapCount * 5.0;
+    _statusLabel.frame = CGRectMake(16, modeBottomY + 6.0, width - 32, 22);
     _statusLabel.textColor = UIColor.whiteColor;
     _statusLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
 
-    _descriptionCaptionLabel.frame = CGRectMake(side, 130, width - side * 2.0, 20);
-    _descriptionField.frame = CGRectMake(side, 152, width - side * 2.0, 40);
+    _descriptionCaptionLabel.frame = CGRectMake(side, CGRectGetMaxY(_statusLabel.frame) + 6.0, width - side * 2.0, 20);
+    _descriptionField.frame = CGRectMake(side, CGRectGetMaxY(_descriptionCaptionLabel.frame) + 2.0, width - side * 2.0, 40);
 
     CGFloat bottomButtonY = height - 52.0;
     CGFloat bottomButtonWidth = floor((width - side * 2.0 - 12.0) / 2.0);

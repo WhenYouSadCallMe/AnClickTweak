@@ -6,6 +6,10 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = AnClick
 OPENCV_HEADERS = $(THEOS_PROJECT_DIR)/opencv-ios-headers
 OPENCV_LIB = $(THEOS_PROJECT_DIR)/opencv-ios-lib/libopencv_merged.a
+RAPIDOCR_HEADERS = $(THEOS_PROJECT_DIR)/vendor/rapidocr-ios/include
+PADDLEOCR_HEADERS = $(THEOS_PROJECT_DIR)/vendor/paddleocr-ios/include
+RAPIDOCR_LIBS = $(wildcard $(THEOS_PROJECT_DIR)/vendor/rapidocr-ios/lib/*.a)
+PADDLEOCR_LIBS = $(wildcard $(THEOS_PROJECT_DIR)/vendor/paddleocr-ios/lib/*.a)
 
 AnClick_FILES = \
 	src/AnClickCore.mm \
@@ -15,12 +19,12 @@ AnClick_FILES = \
 	src/AnClickUI.m \
 	vendor/HammerTouch.m
 
-AnClick_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
-AnClick_OBJCFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
-AnClick_CCFLAGS = -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
-AnClick_OBJCCFLAGS = -fobjc-arc -std=c++17 -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
-AnClick_CXXFLAGS = -std=c++17 -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS)
-AnClick_LDFLAGS = $(OPENCV_LIB) -lc++ -lz
+AnClick_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS) -I$(RAPIDOCR_HEADERS) -I$(PADDLEOCR_HEADERS)
+AnClick_OBJCFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS) -I$(RAPIDOCR_HEADERS) -I$(PADDLEOCR_HEADERS)
+AnClick_CCFLAGS = -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS) -I$(RAPIDOCR_HEADERS) -I$(PADDLEOCR_HEADERS)
+AnClick_OBJCCFLAGS = -fobjc-arc -std=c++17 -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS) -I$(RAPIDOCR_HEADERS) -I$(PADDLEOCR_HEADERS)
+AnClick_CXXFLAGS = -std=c++17 -I$(THEOS_PROJECT_DIR)/include -I$(OPENCV_HEADERS) -I$(RAPIDOCR_HEADERS) -I$(PADDLEOCR_HEADERS)
+AnClick_LDFLAGS = $(OPENCV_LIB) $(RAPIDOCR_LIBS) $(PADDLEOCR_LIBS) -lc++ -lz
 AnClick_FRAMEWORKS = UIKit Foundation QuartzCore CoreGraphics Accelerate Vision ImageIO AVFoundation
 AnClick_PRIVATE_FRAMEWORKS = IOKit
 
