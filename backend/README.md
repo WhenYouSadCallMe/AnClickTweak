@@ -10,6 +10,22 @@ cd backend
 go run .
 ```
 
+## 编译 Windows exe
+
+双击或命令行运行：
+
+```powershell
+backend\build_exe.bat
+```
+
+会生成：
+
+```text
+backend\dist\anclick-backend.exe
+```
+
+双击 `anclick-backend.exe` 会启动后端，并自动打开网页控制台。
+
 Linux 服务器同样执行：
 
 ```bash
