@@ -5073,11 +5073,15 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     scrollView.zoomScale = minZoom;
     [self centerColorPickImageContent];
 
-    UIView *cursor = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 28, 28)];
-    cursor.backgroundColor = UIColor.clearColor;
-    cursor.layer.cornerRadius = 14;
-    cursor.layer.borderWidth = 1.5;
-    cursor.layer.borderColor = UIColor.systemYellowColor.CGColor;
+    UIView *cursor = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 9, 9)];
+    cursor.backgroundColor = UIColor.systemYellowColor;
+    cursor.layer.cornerRadius = 4.5;
+    cursor.layer.borderWidth = 1.0;
+    cursor.layer.borderColor = UIColor.blackColor.CGColor;
+    cursor.layer.shadowColor = UIColor.blackColor.CGColor;
+    cursor.layer.shadowOpacity = 0.55;
+    cursor.layer.shadowRadius = 1.0;
+    cursor.layer.shadowOffset = CGSizeZero;
     cursor.hidden = YES;
     cursor.userInteractionEnabled = NO;
     [imageView addSubview:cursor];
@@ -5175,7 +5179,25 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 - (void)scrollViewDidZoom:(UIScrollView *)scrollView {
     if (scrollView == _colorPickScrollView) {
         [self centerColorPickImageContent];
+        if (_hasPendingColorPickPoint) {
+            [self updateColorPickCursorAtImagePoint:_pendingColorPickPoint];
+        }
     }
+}
+
+- (void)updateColorPickCursorAtImagePoint:(CGPoint)point {
+    if (!_colorPickCursorView) {
+        return;
+    }
+
+    CGFloat zoomScale = MAX(0.01, _colorPickScrollView.zoomScale);
+    CGFloat cursorSize = 9.0 / zoomScale;
+    _colorPickCursorView.bounds = CGRectMake(0, 0, cursorSize, cursorSize);
+    _colorPickCursorView.center = point;
+    _colorPickCursorView.layer.cornerRadius = cursorSize * 0.5;
+    _colorPickCursorView.layer.borderWidth = 1.0 / zoomScale;
+    _colorPickCursorView.layer.shadowRadius = 1.0 / zoomScale;
+    _colorPickCursorView.hidden = NO;
 }
 
 - (void)handleColorPickTap:(UITapGestureRecognizer *)recognizer {
@@ -5199,8 +5221,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _pendingColorGreen = green;
     _pendingColorBlue = blue;
     _hasPendingColorPickPoint = YES;
-    _colorPickCursorView.center = point;
-    _colorPickCursorView.hidden = NO;
+    [self updateColorPickCursorAtImagePoint:point];
     _colorPickSwatchView.backgroundColor = [UIColor colorWithRed:red / 255.0 green:green / 255.0 blue:blue / 255.0 alpha:1.0];
     _colorPickInfoLabel.text = [NSString stringWithFormat:@"X %.0f  Y %.0f  #%02lX%02lX%02lX",
                                 point.x,
