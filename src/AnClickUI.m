@@ -81,6 +81,7 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     UIButton *_macroRecordButton;
     UIButton *_macroPlayButton;
     UIButton *_cancelEditButton;
+    UIButton *_globalSettingsButton;
     NSArray<UIButton *> *_modeButtons;
     UIScrollView *_taskListView;
     UILabel *_statusLabel;
@@ -111,6 +112,14 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     UIView *_trajectoryView;
     CAShapeLayer *_trajectoryLayer;
     UIView *_functionMenuView;
+    UIView *_globalSettingsView;
+    UIScrollView *_globalSettingsScrollView;
+    UITextField *_globalDelayField;
+    UITextField *_globalRepeatField;
+    UIButton *_globalStartTimeButton;
+    UIButton *_globalStopTimeButton;
+    UIView *_globalTimePickerView;
+    UIDatePicker *_globalTimePicker;
     UIScrollView *_configListView;
     NSMutableArray<NSValue *> *_recordedSwipePoints;
     NSMutableArray<NSValue *> *_liveSwipePoints;
@@ -140,7 +149,21 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     BOOL _taskEditorVisible;
     BOOL _imageUsesMatchPoint;
     BOOL _returnToEditorAfterRecording;
+    BOOL _globalStartEnabled;
+    BOOL _globalStopEnabled;
+    BOOL _globalTimePickerEditingStartTime;
+    BOOL _taskRunActive;
     NSUInteger _panelRestoreGeneration;
+    NSUInteger _taskRunGeneration;
+    NSInteger _globalDelayMilliseconds;
+    NSInteger _globalRunRepeatCount;
+    NSInteger _globalStartHour;
+    NSInteger _globalStartMinute;
+    NSInteger _globalStopHour;
+    NSInteger _globalStopMinute;
+    NSInteger _currentGlobalRunCycle;
+    NSTimer *_globalStartTimer;
+    NSTimer *_globalStopTimer;
     double _matchThreshold;
     NSTimeInterval _actionDelay;
     NSInteger _actionRepeatCount;
@@ -163,6 +186,7 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self->_panelWindow) {
             [self attachPanelWindowToActiveSceneIfNeeded];
+            [self scheduleGlobalTimers];
             self->_panelWindow.hidden = NO;
             [self refreshCollapsedButtonTitle];
             return;
@@ -216,6 +240,17 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     _matchThreshold = 0.80;
     _actionDelay = 0;
     _actionRepeatCount = 1;
+    _globalDelayMilliseconds = 0;
+    _globalRunRepeatCount = 1;
+    _globalStartEnabled = NO;
+    _globalStopEnabled = NO;
+    _globalStartHour = 8;
+    _globalStartMinute = 0;
+    _globalStopHour = 23;
+    _globalStopMinute = 0;
+    _currentGlobalRunCycle = 0;
+    _taskRunActive = NO;
+    [self loadGlobalSettings];
     if (!_recordedSwipePoints) {
         _recordedSwipePoints = [NSMutableArray array];
     }
@@ -346,6 +381,10 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     _homeCloseButton.frame = CGRectMake(panelWidth - 50, 8, 38, 38);
     [_panelView addSubview:_homeCloseButton];
 
+    _globalSettingsButton = [self panelButtonWithTitle:@"⚙" action:@selector(showGlobalSettings)];
+    _globalSettingsButton.frame = CGRectMake(10, 8, 34, 34);
+    [_panelView addSubview:_globalSettingsButton];
+
     _saveTaskButton = [self panelButtonWithTitle:@"保存" action:@selector(saveSelectedTaskFromCurrentConfig)];
     _saveTaskButton.frame = CGRectMake(gap, 120, buttonWidth, 34);
     [_panelView addSubview:_saveTaskButton];
@@ -454,6 +493,7 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     [self refreshTemplatePreview];
     [self refreshTaskList];
     [self setTaskEditorVisible:NO];
+    [self scheduleGlobalTimers];
 
     _panelWindow.hidden = NO;
     [self collapsePanel];
@@ -613,6 +653,12 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         _collapsedButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.34 blue:0.30 alpha:0.90].CGColor;
         return;
     }
+    if (_taskRunActive) {
+        [_collapsedButton setTitle:@"停" forState:UIControlStateNormal];
+        _collapsedButton.backgroundColor = [UIColor colorWithRed:0.84 green:0.12 blue:0.10 alpha:0.94];
+        _collapsedButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.34 blue:0.30 alpha:0.90].CGColor;
+        return;
+    }
     _collapsedButton.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.075 alpha:0.92];
     _collapsedButton.layer.borderColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:0.82].CGColor;
     [_collapsedButton setTitle:[NSString stringWithFormat:@"＋%lu", (unsigned long)_taskItems.count] forState:UIControlStateNormal];
@@ -665,8 +711,12 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     _deleteTaskButton.hidden = visible;
     _runTasksButton.hidden = visible;
     _homeCloseButton.hidden = visible;
+    _globalSettingsButton.hidden = visible;
     _collapseButton.hidden = NO;
     _taskListView.hidden = visible;
+    if (visible) {
+        [self hideGlobalSettings];
+    }
     if (visible) {
         [self layoutEditorScaffold];
         [self refreshEditorConfigControls];
@@ -691,13 +741,13 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     [self setCenteredIconForButton:_addTaskButton systemName:@"plus" fallbackTitle:@"+" fontSize:27];
     [self setCenteredIconForButton:_deleteTaskButton systemName:@"minus" fallbackTitle:@"-" fontSize:27];
     [self setCenteredIconForButton:_collapseButton systemName:@"gearshape.fill" fallbackTitle:@"⚙" fontSize:24];
-    [self setCenteredIconForButton:_runTasksButton systemName:@"play.fill" fallbackTitle:@"▶" fontSize:24];
+    [self setCenteredIconForButton:_runTasksButton systemName:_taskRunActive ? @"stop.fill" : @"play.fill" fallbackTitle:_taskRunActive ? @"■" : @"▶" fontSize:24];
     NSArray<UIButton *> *toolbarButtons = @[_addTaskButton, _deleteTaskButton, _collapseButton, _runTasksButton];
     NSArray<UIColor *> *colors = @[
         [UIColor colorWithRed:0.02 green:0.50 blue:0.95 alpha:0.95],
         [UIColor colorWithRed:0.88 green:0.12 blue:0.10 alpha:0.95],
         [UIColor colorWithRed:0.68 green:0.24 blue:0.86 alpha:0.95],
-        [UIColor colorWithRed:0.12 green:0.74 blue:0.30 alpha:0.95],
+        _taskRunActive ? [UIColor colorWithRed:0.84 green:0.12 blue:0.10 alpha:0.95] : [UIColor colorWithRed:0.12 green:0.74 blue:0.30 alpha:0.95],
     ];
     for (NSUInteger i = 0; i < toolbarButtons.count; i++) {
         UIButton *button = toolbarButtons[i];
@@ -725,13 +775,27 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     _homeCloseButton.tintColor = [UIColor colorWithWhite:1 alpha:0.92];
     [self updateButtonShadowPath:_homeCloseButton];
 
-    _statusLabel.frame = CGRectMake(10, 10, width - closeSize - 34.0, 24);
+    [self setCenteredIconForButton:_globalSettingsButton systemName:@"gearshape.fill" fallbackTitle:@"⚙" fontSize:17];
+    _globalSettingsButton.frame = CGRectMake(10.0, 6.0, closeSize, closeSize);
+    _globalSettingsButton.layer.cornerRadius = closeSize * 0.5;
+    _globalSettingsButton.layer.borderWidth = 0;
+    _globalSettingsButton.layer.shadowOpacity = 0;
+    _globalSettingsButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+    _globalSettingsButton.tintColor = [UIColor colorWithWhite:1 alpha:0.92];
+    [_globalSettingsButton setTitleColor:[UIColor colorWithWhite:1 alpha:0.92] forState:UIControlStateNormal];
+    [self updateButtonShadowPath:_globalSettingsButton];
+
+    _statusLabel.frame = CGRectMake(50, 10, width - closeSize - 84.0, 24);
     _statusLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
     _taskListView.frame = CGRectMake(10, 46, width - 20, MAX(80.0, buttonY - 54.0));
-    if (_functionMenuView) {
+    if (_globalSettingsView) {
+        _globalSettingsView.frame = _panelView.bounds;
+        [_panelView bringSubviewToFront:_globalSettingsView];
+    } else if (_functionMenuView) {
         _functionMenuView.frame = _panelView.bounds;
         [_panelView bringSubviewToFront:_functionMenuView];
     } else {
+        [_panelView bringSubviewToFront:_globalSettingsButton];
         [_panelView bringSubviewToFront:_homeCloseButton];
     }
 }
@@ -803,6 +867,7 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 
 - (void)showTaskHome {
     [self hideFunctionMenu];
+    [self hideGlobalSettings];
     [self setTaskEditorVisible:NO];
     [self refreshTaskList];
     _statusLabel.text = _taskItems.count == 0 ? @"暂无任务" : @"任务列表";
@@ -873,6 +938,410 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     return result;
 }
 
+- (NSString *)savedGlobalSettingsPath {
+    NSURL *documentsURL = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
+    return [[documentsURL path] stringByAppendingPathComponent:@"anclick_global_settings.archive"];
+}
+
+- (NSDictionary *)currentGlobalSettingsDictionary {
+    return @{
+        @"delayMilliseconds": @(_globalDelayMilliseconds),
+        @"runRepeatCount": @(_globalRunRepeatCount),
+        @"startEnabled": @(_globalStartEnabled),
+        @"stopEnabled": @(_globalStopEnabled),
+        @"startHour": @(_globalStartHour),
+        @"startMinute": @(_globalStartMinute),
+        @"stopHour": @(_globalStopHour),
+        @"stopMinute": @(_globalStopMinute),
+    };
+}
+
+- (void)applyGlobalSettingsDictionary:(NSDictionary *)settings {
+    if (![settings isKindOfClass:NSDictionary.class]) {
+        return;
+    }
+
+    _globalDelayMilliseconds = MIN(3600000, MAX(0, [settings[@"delayMilliseconds"] integerValue]));
+    _globalRunRepeatCount = MIN(9999, MAX(0, [settings[@"runRepeatCount"] integerValue]));
+    _globalStartEnabled = [settings[@"startEnabled"] boolValue];
+    _globalStopEnabled = [settings[@"stopEnabled"] boolValue];
+    _globalStartHour = MIN(23, MAX(0, [settings[@"startHour"] integerValue]));
+    _globalStartMinute = MIN(59, MAX(0, [settings[@"startMinute"] integerValue]));
+    _globalStopHour = MIN(23, MAX(0, [settings[@"stopHour"] integerValue]));
+    _globalStopMinute = MIN(59, MAX(0, [settings[@"stopMinute"] integerValue]));
+}
+
+- (void)loadGlobalSettings {
+    NSString *path = [self savedGlobalSettingsPath];
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (data.length == 0) {
+        return;
+    }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    id object = [NSKeyedUnarchiver unarchiveObjectWithData:data];
+#pragma clang diagnostic pop
+    if (![object isKindOfClass:NSDictionary.class]) {
+        return;
+    }
+
+    [self applyGlobalSettingsDictionary:(NSDictionary *)object];
+}
+
+- (BOOL)writeGlobalSettings {
+    NSDictionary *settings = [self currentGlobalSettingsDictionary];
+    NSError *error = nil;
+    NSData *data = [NSKeyedArchiver archivedDataWithRootObject:settings requiringSecureCoding:NO error:&error];
+    if (!data || error) {
+        return NO;
+    }
+    return [data writeToFile:[self savedGlobalSettingsPath] atomically:YES];
+}
+
+- (void)persistGlobalSettings {
+    [self writeGlobalSettings];
+    [self scheduleGlobalTimers];
+}
+
+- (NSDate *)dateTodayWithHour:(NSInteger)hour minute:(NSInteger)minute {
+    NSCalendar *calendar = NSCalendar.currentCalendar;
+    NSDateComponents *components = [calendar components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:[NSDate date]];
+    components.hour = hour;
+    components.minute = minute;
+    components.second = 0;
+    NSDate *date = [calendar dateFromComponents:components];
+    return date ? date : [NSDate date];
+}
+
+- (NSDate *)nextFireDateForHour:(NSInteger)hour minute:(NSInteger)minute {
+    NSDate *date = [self dateTodayWithHour:hour minute:minute];
+    if ([date timeIntervalSinceNow] <= 0.5) {
+        date = [date dateByAddingTimeInterval:24.0 * 60.0 * 60.0];
+    }
+    return date;
+}
+
+- (void)scheduleGlobalTimers {
+    [_globalStartTimer invalidate];
+    [_globalStopTimer invalidate];
+    _globalStartTimer = nil;
+    _globalStopTimer = nil;
+
+    if (_globalStartEnabled) {
+        NSDate *startDate = [self nextFireDateForHour:_globalStartHour minute:_globalStartMinute];
+        _globalStartTimer = [[NSTimer alloc] initWithFireDate:startDate interval:0 target:self selector:@selector(handleGlobalStartTimer:) userInfo:nil repeats:NO];
+        [NSRunLoop.mainRunLoop addTimer:_globalStartTimer forMode:NSRunLoopCommonModes];
+    }
+    if (_globalStopEnabled) {
+        NSDate *stopDate = [self nextFireDateForHour:_globalStopHour minute:_globalStopMinute];
+        _globalStopTimer = [[NSTimer alloc] initWithFireDate:stopDate interval:0 target:self selector:@selector(handleGlobalStopTimer:) userInfo:nil repeats:NO];
+        [NSRunLoop.mainRunLoop addTimer:_globalStopTimer forMode:NSRunLoopCommonModes];
+    }
+}
+
+- (void)handleGlobalStartTimer:(__unused NSTimer *)timer {
+    _globalStartTimer = nil;
+    [self scheduleGlobalTimers];
+    if (!_taskRunActive) {
+        [self startTaskListRunScheduled:YES];
+    }
+}
+
+- (void)handleGlobalStopTimer:(__unused NSTimer *)timer {
+    _globalStopTimer = nil;
+    [self scheduleGlobalTimers];
+    if (_taskRunActive) {
+        [self stopTaskRunWithStatus:@"定时停止"];
+    }
+}
+
+- (NSString *)globalDelayFieldText {
+    return _globalDelayMilliseconds > 0 ? [NSString stringWithFormat:@"%ld", (long)_globalDelayMilliseconds] : @"";
+}
+
+- (NSString *)globalRepeatFieldText {
+    return _globalRunRepeatCount > 0 ? [NSString stringWithFormat:@"%ld", (long)_globalRunRepeatCount] : @"";
+}
+
+- (NSString *)globalTimeTitleEnabled:(BOOL)enabled hour:(NSInteger)hour minute:(NSInteger)minute {
+    return enabled ? [NSString stringWithFormat:@"%02ld:%02ld", (long)hour, (long)minute] : @"关闭";
+}
+
+- (UITextField *)globalSettingsTextFieldWithPlaceholder:(NSString *)placeholder {
+    UITextField *field = [self configTextFieldWithPlaceholder:placeholder];
+    field.keyboardType = UIKeyboardTypeNumberPad;
+    field.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
+    field.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 22, 1)];
+    field.leftViewMode = UITextFieldViewModeAlways;
+    field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:placeholder
+                                                                   attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.72]}];
+    [field addTarget:self action:@selector(globalSettingsFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+    [field addTarget:self action:@selector(globalSettingsFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+    return field;
+}
+
+- (UIButton *)globalSettingsValueButtonWithAction:(SEL)action {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+    button.titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
+    button.titleLabel.adjustsFontSizeToFitWidth = YES;
+    button.titleLabel.minimumScaleFactor = 0.72;
+    button.titleEdgeInsets = UIEdgeInsetsMake(0, 22, 0, 22);
+    button.backgroundColor = [UIColor colorWithRed:0.25 green:0.25 blue:0.24 alpha:0.92];
+    button.layer.cornerRadius = 8;
+    button.layer.borderWidth = 1;
+    button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.08].CGColor;
+    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return button;
+}
+
+- (void)refreshGlobalSettingsControls {
+    if (_globalDelayField && !_globalDelayField.isFirstResponder) {
+        _globalDelayField.text = [self globalDelayFieldText];
+    }
+    if (_globalRepeatField && !_globalRepeatField.isFirstResponder) {
+        _globalRepeatField.text = [self globalRepeatFieldText];
+    }
+    [_globalStartTimeButton setTitle:[self globalTimeTitleEnabled:_globalStartEnabled hour:_globalStartHour minute:_globalStartMinute] forState:UIControlStateNormal];
+    [_globalStopTimeButton setTitle:[self globalTimeTitleEnabled:_globalStopEnabled hour:_globalStopHour minute:_globalStopMinute] forState:UIControlStateNormal];
+    _globalStartTimeButton.alpha = _globalStartEnabled ? 1.0 : 0.78;
+    _globalStopTimeButton.alpha = _globalStopEnabled ? 1.0 : 0.78;
+}
+
+- (void)syncGlobalSettingsFromFields {
+    if (_globalDelayField) {
+        NSString *delayText = [_globalDelayField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        _globalDelayMilliseconds = delayText.length > 0 ? MIN(3600000, MAX(0, delayText.integerValue)) : 0;
+    }
+    if (_globalRepeatField) {
+        NSString *repeatText = [_globalRepeatField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        _globalRunRepeatCount = repeatText.length > 0 ? MIN(9999, MAX(0, repeatText.integerValue)) : 0;
+    }
+}
+
+- (void)refreshGlobalSettingsFieldsIfNeeded {
+    if (_globalDelayField && !_globalDelayField.isFirstResponder) {
+        _globalDelayField.text = [self globalDelayFieldText];
+    }
+    if (_globalRepeatField && !_globalRepeatField.isFirstResponder) {
+        _globalRepeatField.text = [self globalRepeatFieldText];
+    }
+}
+
+- (void)globalSettingsFieldChanged:(__unused UITextField *)textField {
+    [self syncGlobalSettingsFromFields];
+    [self persistGlobalSettings];
+}
+
+- (void)globalSettingsFieldEditingDidEnd:(__unused UITextField *)textField {
+    [self syncGlobalSettingsFromFields];
+    [self refreshGlobalSettingsFieldsIfNeeded];
+    [self persistGlobalSettings];
+}
+
+- (void)hideGlobalTimePicker {
+    [_globalTimePickerView removeFromSuperview];
+    _globalTimePickerView = nil;
+    _globalTimePicker = nil;
+}
+
+- (void)hideGlobalSettings {
+    if (_globalDelayField || _globalRepeatField) {
+        [self syncGlobalSettingsFromFields];
+        [self persistGlobalSettings];
+    }
+    [_panelView endEditing:YES];
+    [self hideGlobalTimePicker];
+    [_globalSettingsView removeFromSuperview];
+    _globalSettingsView = nil;
+    _globalSettingsScrollView = nil;
+    _globalDelayField = nil;
+    _globalRepeatField = nil;
+    _globalStartTimeButton = nil;
+    _globalStopTimeButton = nil;
+}
+
+- (void)showGlobalSettings {
+    [self dismissKeyboard];
+    [self hideFunctionMenu];
+    [self hideGlobalSettings];
+
+    _globalSettingsView = [[UIView alloc] initWithFrame:_panelView.bounds];
+    _globalSettingsView.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.075 alpha:0.97];
+    _globalSettingsView.layer.cornerRadius = _panelView.layer.cornerRadius;
+    _globalSettingsView.clipsToBounds = YES;
+    [_panelView addSubview:_globalSettingsView];
+
+    CGFloat width = _globalSettingsView.bounds.size.width;
+    CGFloat height = _globalSettingsView.bounds.size.height;
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(18, 14, width - 76, 34)];
+    titleLabel.text = @"设置";
+    titleLabel.textColor = UIColor.whiteColor;
+    titleLabel.font = [UIFont systemFontOfSize:24 weight:UIFontWeightBold];
+    [_globalSettingsView addSubview:titleLabel];
+
+    UIButton *closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    closeButton.frame = CGRectMake(width - 54, 10, 40, 40);
+    closeButton.layer.cornerRadius = 20;
+    closeButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.92];
+    closeButton.titleLabel.font = [UIFont systemFontOfSize:27 weight:UIFontWeightBold];
+    [closeButton setTitle:@"×" forState:UIControlStateNormal];
+    [closeButton setTitleColor:UIColor.blackColor forState:UIControlStateNormal];
+    [closeButton addTarget:self action:@selector(hideGlobalSettings) forControlEvents:UIControlEventTouchUpInside];
+    [_globalSettingsView addSubview:closeButton];
+
+    UIView *divider = [[UIView alloc] initWithFrame:CGRectMake(0, 60, width, 1)];
+    divider.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+    [_globalSettingsView addSubview:divider];
+
+    _globalSettingsScrollView = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 61, width, height - 61)];
+    _globalSettingsScrollView.backgroundColor = UIColor.clearColor;
+    _globalSettingsScrollView.alwaysBounceVertical = YES;
+    [_globalSettingsView addSubview:_globalSettingsScrollView];
+
+    CGFloat side = 18.0;
+    CGFloat y = 18.0;
+    CGFloat contentWidth = width - side * 2.0;
+    NSArray<NSString *> *captions = @[
+        @"整体延时（毫秒，0=无延时）",
+        @"整体执行次数（0=无限循环）",
+        @"定时启动（到时间自动开始）",
+        @"定时停止（到时间自动停止）",
+    ];
+    NSMutableArray<UIView *> *controls = [NSMutableArray array];
+    _globalDelayField = [self globalSettingsTextFieldWithPlaceholder:@"无延时"];
+    _globalRepeatField = [self globalSettingsTextFieldWithPlaceholder:@"无限循环"];
+    _globalStartTimeButton = [self globalSettingsValueButtonWithAction:@selector(showGlobalStartTimePicker)];
+    _globalStopTimeButton = [self globalSettingsValueButtonWithAction:@selector(showGlobalStopTimePicker)];
+    [controls addObjectsFromArray:@[_globalDelayField, _globalRepeatField, _globalStartTimeButton, _globalStopTimeButton]];
+
+    for (NSUInteger i = 0; i < captions.count; i++) {
+        UILabel *caption = [self configCaptionLabelWithText:captions[i]];
+        caption.frame = CGRectMake(side, y, contentWidth, 24);
+        [_globalSettingsScrollView addSubview:caption];
+
+        UIView *control = controls[i];
+        control.frame = CGRectMake(side, y + 34.0, contentWidth, 58.0);
+        [_globalSettingsScrollView addSubview:control];
+        y += 112.0;
+    }
+    _globalSettingsScrollView.contentSize = CGSizeMake(width, y + 12.0);
+    [self refreshGlobalSettingsControls];
+}
+
+- (void)showGlobalStartTimePicker {
+    [self showGlobalTimePickerForStart:YES];
+}
+
+- (void)showGlobalStopTimePicker {
+    [self showGlobalTimePickerForStart:NO];
+}
+
+- (void)showGlobalTimePickerForStart:(BOOL)startTime {
+    if (!_globalSettingsView) {
+        return;
+    }
+    [self dismissKeyboard];
+    [self hideGlobalTimePicker];
+    _globalTimePickerEditingStartTime = startTime;
+
+    UIView *overlay = [[UIView alloc] initWithFrame:_globalSettingsView.bounds];
+    overlay.backgroundColor = [UIColor colorWithWhite:0 alpha:0.42];
+    [_globalSettingsView addSubview:overlay];
+    _globalTimePickerView = overlay;
+
+    CGFloat width = overlay.bounds.size.width;
+    CGFloat height = overlay.bounds.size.height;
+    CGFloat cardHeight = MIN(330.0, height - 48.0);
+    UIView *card = [[UIView alloc] initWithFrame:CGRectMake(0, MAX(40.0, (height - cardHeight) * 0.5), width, cardHeight)];
+    card.backgroundColor = [UIColor colorWithRed:0.06 green:0.06 blue:0.055 alpha:0.98];
+    card.layer.cornerRadius = 22;
+    card.layer.borderWidth = 1;
+    card.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
+    card.clipsToBounds = YES;
+    if (@available(iOS 13.0, *)) {
+        card.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    }
+    [overlay addSubview:card];
+
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 20, width - 32, 34)];
+    titleLabel.text = startTime ? @"设置启动时间" : @"设置停止时间";
+    titleLabel.textColor = UIColor.whiteColor;
+    titleLabel.textAlignment = NSTextAlignmentCenter;
+    titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
+    [card addSubview:titleLabel];
+
+    _globalTimePicker = [[UIDatePicker alloc] initWithFrame:CGRectMake(0, 58, width, cardHeight - 118)];
+    _globalTimePicker.datePickerMode = UIDatePickerModeTime;
+    _globalTimePicker.minuteInterval = 1;
+    if (@available(iOS 13.0, *)) {
+        _globalTimePicker.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    }
+    if (@available(iOS 13.4, *)) {
+        _globalTimePicker.preferredDatePickerStyle = UIDatePickerStyleWheels;
+    }
+    NSInteger hour = startTime ? _globalStartHour : _globalStopHour;
+    NSInteger minute = startTime ? _globalStartMinute : _globalStopMinute;
+    _globalTimePicker.date = [self dateTodayWithHour:hour minute:minute];
+    [card addSubview:_globalTimePicker];
+
+    CGFloat buttonY = cardHeight - 60.0;
+    CGFloat buttonWidth = width / 3.0;
+    NSArray<NSString *> *titles = @[@"关闭", @"取消", @"确定"];
+    NSArray<NSString *> *selectors = @[@"disableGlobalPickedTime", @"cancelGlobalTimePicker", @"confirmGlobalTimePicker"];
+    for (NSUInteger i = 0; i < titles.count; i++) {
+        UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+        button.frame = CGRectMake(buttonWidth * i, buttonY, buttonWidth, 60.0);
+        button.titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
+        [button setTitle:titles[i] forState:UIControlStateNormal];
+        [button setTitleColor:(i == 2 ? UIColor.systemBlueColor : [UIColor colorWithWhite:1 alpha:0.78]) forState:UIControlStateNormal];
+        [button addTarget:self action:NSSelectorFromString(selectors[i]) forControlEvents:UIControlEventTouchUpInside];
+        [card addSubview:button];
+        if (i > 0) {
+            UIView *line = [[UIView alloc] initWithFrame:CGRectMake(buttonWidth * i, buttonY, 1, 60.0)];
+            line.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12];
+            [card addSubview:line];
+        }
+    }
+    UIView *topLine = [[UIView alloc] initWithFrame:CGRectMake(0, buttonY, width, 1)];
+    topLine.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12];
+    [card addSubview:topLine];
+}
+
+- (void)disableGlobalPickedTime {
+    if (_globalTimePickerEditingStartTime) {
+        _globalStartEnabled = NO;
+    } else {
+        _globalStopEnabled = NO;
+    }
+    [self hideGlobalTimePicker];
+    [self refreshGlobalSettingsControls];
+    [self persistGlobalSettings];
+}
+
+- (void)cancelGlobalTimePicker {
+    [self hideGlobalTimePicker];
+}
+
+- (void)confirmGlobalTimePicker {
+    NSDate *selectedDate = _globalTimePicker.date ? _globalTimePicker.date : [NSDate date];
+    NSDateComponents *components = [NSCalendar.currentCalendar components:NSCalendarUnitHour | NSCalendarUnitMinute fromDate:selectedDate];
+    if (_globalTimePickerEditingStartTime) {
+        _globalStartEnabled = YES;
+        _globalStartHour = components.hour;
+        _globalStartMinute = components.minute;
+    } else {
+        _globalStopEnabled = YES;
+        _globalStopHour = components.hour;
+        _globalStopMinute = components.minute;
+    }
+    [self hideGlobalTimePicker];
+    [self refreshGlobalSettingsControls];
+    [self persistGlobalSettings];
+}
+
 - (void)hideFunctionMenu {
     [_functionMenuView removeFromSuperview];
     _functionMenuView = nil;
@@ -929,6 +1398,7 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 
 - (void)showFunctionMenu {
     [self dismissKeyboard];
+    [self hideGlobalSettings];
     [self hideFunctionMenu];
 
     _functionMenuView = [[UIView alloc] initWithFrame:_panelView.bounds];
@@ -995,6 +1465,7 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         @"name": name,
         @"createdAt": @([NSDate date].timeIntervalSince1970),
         @"tasks": [self copyTaskItemsForSaving],
+        @"globalSettings": [self currentGlobalSettingsDictionary],
     } mutableCopy];
     [configs insertObject:config atIndex:0];
     BOOL saved = [self writeSavedTaskConfigs:configs];
@@ -1078,6 +1549,11 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     NSDictionary *config = configs[(NSUInteger)index];
     NSArray *tasks = [config[@"tasks"] isKindOfClass:NSArray.class] ? config[@"tasks"] : @[];
     _taskItems = [self mutableTasksFromSavedTasks:tasks];
+    NSDictionary *globalSettings = [config[@"globalSettings"] isKindOfClass:NSDictionary.class] ? config[@"globalSettings"] : nil;
+    if (globalSettings) {
+        [self applyGlobalSettingsDictionary:globalSettings];
+        [self persistGlobalSettings];
+    }
     _selectedTaskIndex = -1;
     _revealedDeleteTaskIndex = -1;
     [self resetCurrentActionConfiguration];
@@ -1139,6 +1615,8 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         return;
     }
 
+    [self hideGlobalSettings];
+    [self hideFunctionMenu];
     _panelExpanded = NO;
     _taskEditorVisible = NO;
     CGRect frame = _panelWindow.frame;
@@ -1194,11 +1672,15 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         [self toggleMacroRecording];
         return;
     }
+    if (_taskRunActive) {
+        [self stopTaskRunWithStatus:@"已停止"];
+        return;
+    }
     [self refreshCollapsedButtonTitle];
 }
 
 - (void)handleCollapsedLongPress:(UILongPressGestureRecognizer *)recognizer {
-    if ([AnClickRecorder shared].isRecording) {
+    if ([AnClickRecorder shared].isRecording || _taskRunActive) {
         return;
     }
     if (recognizer.state == UIGestureRecognizerStateBegan) {
@@ -1288,13 +1770,17 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     [self syncActionDescriptionFromField];
     [self syncActionTimingFromFields];
     [self syncImageThresholdFromField];
+    [self syncGlobalSettingsFromFields];
     [_panelView endEditing:YES];
 }
 
 - (void)dismissKeyboard {
     [self dismissConfigKeyboardAndSync];
     [self refreshTimingFieldsIfNeeded];
-    [self updateStatusForCurrentConfig];
+    [self refreshGlobalSettingsFieldsIfNeeded];
+    if (_taskEditorVisible) {
+        [self updateStatusForCurrentConfig];
+    }
 }
 
 - (BOOL)textFieldShouldReturn:(UITextField *)textField {
@@ -1308,10 +1794,17 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         return;
     }
 
-    CGPoint point = [recognizer locationInView:_panelView];
-    NSArray<UITextField *> *fields = @[_descriptionField, _delayField, _repeatField, _thresholdField];
+    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _thresholdField, nil];
+    if (_globalDelayField) {
+        [fields addObject:_globalDelayField];
+    }
+    if (_globalRepeatField) {
+        [fields addObject:_globalRepeatField];
+    }
     for (UITextField *field in fields) {
-        if (!field.hidden && CGRectContainsPoint(field.frame, point)) {
+        UIView *fieldContainer = field.superview ? field.superview : _panelView;
+        CGPoint fieldPoint = [recognizer locationInView:fieldContainer];
+        if (!field.hidden && CGRectContainsPoint(field.frame, fieldPoint)) {
             return;
         }
     }
@@ -2776,8 +3269,8 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     BOOL hasTasks = _taskItems.count > 0;
     _deleteTaskButton.enabled = hasTasks;
     _deleteTaskButton.alpha = hasTasks ? 1.0 : 0.45;
-    _runTasksButton.enabled = hasTasks;
-    _runTasksButton.alpha = hasTasks ? 1.0 : 0.45;
+    _runTasksButton.enabled = hasTasks || _taskRunActive;
+    _runTasksButton.alpha = (hasTasks || _taskRunActive) ? 1.0 : 0.45;
     if (!_taskListView) {
         return;
     }
@@ -3200,6 +3693,10 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 }
 
 - (void)performImageTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow {
+    [self performImageTask:task inWindow:hostWindow runGeneration:0];
+}
+
+- (void)performImageTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow runGeneration:(NSUInteger)runGeneration {
     NSString *templatePath = task[@"templatePath"];
     UIImage *templateImage = (templatePath.length > 0 && [[NSFileManager defaultManager] fileExistsAtPath:templatePath]) ? [UIImage imageWithContentsOfFile:templatePath] : nil;
     if (!templateImage) {
@@ -3217,6 +3714,9 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         NSDictionary *match = [AnClickCore findTemplateImageMatch:templateImage threshold:threshold];
         dispatch_async(dispatch_get_main_queue(), ^{
             self->_templateSearchInProgress = NO;
+            if (runGeneration != 0 && (!self->_taskRunActive || runGeneration != self->_taskRunGeneration)) {
+                return;
+            }
             if (!match) {
                 self->_statusLabel.text = @"识图未找到";
                 return;
@@ -3287,6 +3787,10 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 }
 
 - (NSTimeInterval)performTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow {
+    return [self performTask:task inWindow:hostWindow runGeneration:0];
+}
+
+- (NSTimeInterval)performTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow runGeneration:(NSUInteger)runGeneration {
     if (![self taskIsComplete:task]) {
         return 0;
     }
@@ -3307,13 +3811,16 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
     for (NSInteger i = 0; i < repeatCount; i++) {
         NSTimeInterval fireDelay = delay + interval * i;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(fireDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (runGeneration != 0 && (!self->_taskRunActive || runGeneration != self->_taskRunGeneration)) {
+                return;
+            }
             UIWindow *currentHostWindow = [self hostWindow] ?: hostWindow;
             if (mode == AnClickActionModeSwipe) {
                 NSArray<NSValue *> *path = task[@"path"];
                 [self showTrajectoryForScreenPoints:path inWindow:currentHostWindow duration:0.75];
                 [AnClickFakeTouch playPath:path duration:0.55];
             } else if (mode == AnClickActionModeImage) {
-                [self performImageTask:task inWindow:currentHostWindow];
+                [self performImageTask:task inWindow:currentHostWindow runGeneration:runGeneration];
             } else if (mode == AnClickActionModeMacro) {
                 NSArray<NSDictionary *> *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
                 NSArray<NSValue *> *trajectory = [self trajectoryPointsForRecordedEvents:events];
@@ -3334,8 +3841,16 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 }
 
 - (void)runTaskList {
+    if (_taskRunActive) {
+        [self stopTaskRunWithStatus:@"已停止"];
+        return;
+    }
+    [self startTaskListRunScheduled:NO];
+}
+
+- (void)startTaskListRunScheduled:(BOOL)scheduled {
     if (_taskItems.count == 0) {
-        _statusLabel.text = @"先加任务";
+        _statusLabel.text = scheduled ? @"定时启动无任务" : @"先加任务";
         return;
     }
 
@@ -3345,25 +3860,71 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
         return;
     }
 
+    if ([AnClickRecorder shared].isRecording) {
+        _statusLabel.text = @"录制中无法播放";
+        return;
+    }
+
+    _taskRunActive = YES;
+    _currentGlobalRunCycle = 0;
+    NSUInteger runGeneration = ++_taskRunGeneration;
+    _statusLabel.text = scheduled ? @"定时启动" : @"播放中";
+    [self refreshTaskList];
     [self collapsePanel];
-    [self runTaskAtIndex:0 inWindow:hostWindow];
+    [self runTaskAtIndex:0 inWindow:hostWindow generation:runGeneration];
+}
+
+- (void)stopTaskRunWithStatus:(NSString *)status {
+    if (!_taskRunActive) {
+        return;
+    }
+
+    _taskRunActive = NO;
+    _currentGlobalRunCycle = 0;
+    _taskRunGeneration++;
+    _statusLabel.text = status.length > 0 ? status : @"已停止";
+    [self refreshCollapsedButtonTitle];
+    [self refreshTaskList];
 }
 
 - (void)runTaskAtIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow {
+    [self runTaskAtIndex:index inWindow:hostWindow generation:_taskRunGeneration];
+}
+
+- (void)runTaskAtIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
+    if (!_taskRunActive || runGeneration != _taskRunGeneration) {
+        return;
+    }
+
     if (index >= _taskItems.count) {
+        _currentGlobalRunCycle++;
+        NSInteger repeatLimit = MAX(0, _globalRunRepeatCount);
+        if (repeatLimit == 0 || _currentGlobalRunCycle < repeatLimit) {
+            [self runTaskAtIndex:0 inWindow:hostWindow generation:runGeneration];
+            return;
+        }
+
+        _taskRunActive = NO;
         _statusLabel.text = @"任务完成";
+        [self refreshCollapsedButtonTitle];
+        [self refreshTaskList];
         return;
     }
 
     UIWindow *currentHostWindow = [self hostWindow] ?: hostWindow;
-    NSTimeInterval duration = [self performTask:_taskItems[index] inWindow:currentHostWindow];
+    NSTimeInterval duration = [self performTask:_taskItems[index] inWindow:currentHostWindow runGeneration:runGeneration];
     if (duration <= 0) {
+        _taskRunActive = NO;
         [self expandPanel];
+        [self refreshCollapsedButtonTitle];
         return;
     }
 
+    NSTimeInterval globalDelay = MAX(0.0, _globalDelayMilliseconds / 1000.0);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration + 0.12) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self runTaskAtIndex:index + 1 inWindow:currentHostWindow];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(globalDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self runTaskAtIndex:index + 1 inWindow:currentHostWindow generation:runGeneration];
+        });
     });
 }
 
