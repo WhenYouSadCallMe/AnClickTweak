@@ -529,7 +529,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     CGFloat gap = 12.0;
     CGFloat modeWidth = floor((panelWidth - gap * 4.0) / 3.0);
-    NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"滑动", @"识图", @"文字识别", @"识色", @"网络", @"录制"];
+    NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"滑动", @"识图", @"识字", @"识色", @"网络", @"录制"];
     NSArray<NSNumber *> *modeTags = @[
         @(AnClickActionModeTap),
         @(AnClickActionModeDoubleTap),
@@ -733,22 +733,22 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [_panelView addSubview:_networkURLField];
 
     _networkContainsField = [[UITextField alloc] initWithFrame:CGRectZero];
-    _networkContainsField.placeholder = @"正则 / true / 百度";
+    _networkContainsField.placeholder = @"空=状态真";
     _networkContainsField.keyboardType = UIKeyboardTypeDefault;
     _networkContainsField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     _networkContainsField.autocorrectionType = UITextAutocorrectionTypeNo;
-    [self applyObsidianInputStyleToField:_networkContainsField placeholder:@"正则 / true / 百度" monospaced:NO];
+    [self applyObsidianInputStyleToField:_networkContainsField placeholder:@"空=状态真" monospaced:NO];
     [self configureConfigTextField:_networkContainsField];
     [_networkContainsField addTarget:self action:@selector(networkFieldChanged:) forControlEvents:UIControlEventEditingChanged];
     [_networkContainsField addTarget:self action:@selector(networkFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_networkContainsField];
 
     _networkFalseField = [[UITextField alloc] initWithFrame:CGRectZero];
-    _networkFalseField.placeholder = @"正则 / false";
+    _networkFalseField.placeholder = @"空=状态假";
     _networkFalseField.keyboardType = UIKeyboardTypeDefault;
     _networkFalseField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     _networkFalseField.autocorrectionType = UITextAutocorrectionTypeNo;
-    [self applyObsidianInputStyleToField:_networkFalseField placeholder:@"正则 / false" monospaced:NO];
+    [self applyObsidianInputStyleToField:_networkFalseField placeholder:@"空=状态假" monospaced:NO];
     [self configureConfigTextField:_networkFalseField];
     [_networkFalseField addTarget:self action:@selector(networkFieldChanged:) forControlEvents:UIControlEventEditingChanged];
     [_networkFalseField addTarget:self action:@selector(networkFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
@@ -1670,8 +1670,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         @"定时停止（到时间自动停止）",
         @"播放前网络判断（不满足会持续监控）",
         @"网络判断链接（GET）",
-        @"真值匹配（空=status true）",
-        @"假值匹配（空=status false）",
+        @"运行匹配（空=状态真）",
+        @"等待匹配（空=状态假）",
     ];
     NSMutableArray<UIView *> *controls = [NSMutableArray array];
     _globalDelayField = [self globalSettingsTextFieldWithPlaceholder:@"无延时"];
@@ -1684,12 +1684,12 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _globalNetworkURLField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     _globalNetworkURLField.autocorrectionType = UITextAutocorrectionTypeNo;
     _globalNetworkURLField.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    _globalNetworkContainsField = [self globalSettingsTextFieldWithPlaceholder:@"正则 / 百度 / true"];
+    _globalNetworkContainsField = [self globalSettingsTextFieldWithPlaceholder:@"例：百度 / ^true$"];
     _globalNetworkContainsField.keyboardType = UIKeyboardTypeDefault;
     _globalNetworkContainsField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     _globalNetworkContainsField.autocorrectionType = UITextAutocorrectionTypeNo;
     _globalNetworkContainsField.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    _globalNetworkFalseField = [self globalSettingsTextFieldWithPlaceholder:@"正则 / false"];
+    _globalNetworkFalseField = [self globalSettingsTextFieldWithPlaceholder:@"例：维护 / false"];
     _globalNetworkFalseField.keyboardType = UIKeyboardTypeDefault;
     _globalNetworkFalseField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     _globalNetworkFalseField.autocorrectionType = UITextAutocorrectionTypeNo;
@@ -2310,7 +2310,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 }
 
 - (NSString *)actionNameForMode:(AnClickActionMode)mode {
-    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动", @"二指", @"缩小", @"放大", @"旋转", @"识图", @"录制", @"文字识别", @"识色", @"网络"];
+    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动", @"二指", @"缩小", @"放大", @"旋转", @"识图", @"录制", @"识字", @"识色", @"网络"];
     if (mode < AnClickActionModeTap || mode >= AnClickActionModeCount) {
         return @"动作";
     }
@@ -2933,7 +2933,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         _secondaryConfigLabel.text = @"点击模式";
         _secondaryConfigLabel.hidden = NO;
         _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 72.0, contentWidth, 20);
-        [_playButton setTitle:@"识别文字位置" forState:UIControlStateNormal];
+        [_playButton setTitle:@"识字位置" forState:UIControlStateNormal];
         [_pickPointButton setTitle:_ocrUsesMatchPoint ? @"自定义位置" : [self pointSummaryForMode:AnClickActionModeOCR emptyTitle:@"自定义位置"] forState:UIControlStateNormal];
         CGFloat modeButtonY = configTopY + 94.0;
         [self layoutButtons:@[_playButton, _pickPointButton] x:side y:modeButtonY width:contentWidth height:34 gap:10.0];
@@ -2998,9 +2998,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         _networkURLField.hidden = NO;
         _networkURLField.frame = CGRectMake(side, configTopY + 22.0, contentWidth, 40);
 
-        _secondaryConfigLabel.text = @"真值正则（空=status true）";
+        _secondaryConfigLabel.text = @"运行匹配";
         _secondaryConfigLabel.hidden = NO;
-        _tertiaryConfigLabel.text = @"假值正则（空=status false）";
+        _tertiaryConfigLabel.text = @"等待匹配";
         _tertiaryConfigLabel.hidden = NO;
         CGFloat gap = 10.0;
         CGFloat halfWidth = floor((contentWidth - gap) / 2.0);
@@ -3102,7 +3102,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     if (_actionMode == AnClickActionModeOCR) {
         NSString *targetState = _ocrTargetText.length > 0 ? _ocrTargetText : @"先填文字";
         NSString *pointState = _ocrUsesMatchPoint ? @"识别点" : ([self hasManualPointForMode:AnClickActionModeOCR] ? @"自定义点" : @"先取点击点");
-        _statusLabel.text = [NSString stringWithFormat:@"文字识别 %@ %@ 后%@",
+        _statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ 后%@",
                              targetState,
                              pointState,
                              [self actionNameForMode:_imageActionMode]];
@@ -3125,9 +3125,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         BOOL oneShot = [self networkTaskIsOneShotWithURL:_networkURL trueText:_networkContainsText falseText:_networkFalseText];
         NSString *conditionState = oneShot
             ? @"请求一次"
-            : (_networkContainsText.length > 0 ? [NSString stringWithFormat:@"真 %@", _networkContainsText] : @"status true");
+            : (_networkContainsText.length > 0 ? [NSString stringWithFormat:@"运行 %@", _networkContainsText] : @"状态真");
         if (_networkFalseText.length > 0) {
-            conditionState = [conditionState stringByAppendingFormat:@" 假 %@", _networkFalseText];
+            conditionState = [conditionState stringByAppendingFormat:@" 等待 %@", _networkFalseText];
         }
         _statusLabel.text = [NSString stringWithFormat:@"网络 %@ %@", urlState, conditionState];
         return;
@@ -4242,7 +4242,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     } else if (desc.length == 0 && mode == AnClickActionModeOCR) {
         NSString *text = [self trimmedActionDescription:task[@"ocrText"]];
         subtitle = text.length > 0
-            ? [NSString stringWithFormat:@"文字识别 · %@", text]
+            ? [NSString stringWithFormat:@"识字 · %@", text]
             : @"未设置文字";
     } else if (desc.length == 0 && mode == AnClickActionModeColor) {
         if ([task[@"colorRed"] respondsToSelector:@selector(integerValue)] &&
@@ -4264,14 +4264,14 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         } else if ([self networkTaskIsOneShotWithURL:url trueText:contains falseText:falseText]) {
             subtitle = [NSString stringWithFormat:@"%@ · 请求一次", url];
         } else if (contains.length > 0) {
-            subtitle = [NSString stringWithFormat:@"%@ · 真 %@", url, contains];
+            subtitle = [NSString stringWithFormat:@"%@ · 运行 %@", url, contains];
             if (falseText.length > 0) {
-                subtitle = [subtitle stringByAppendingFormat:@" · 假 %@", falseText];
+                subtitle = [subtitle stringByAppendingFormat:@" · 等待 %@", falseText];
             }
         } else if (falseText.length > 0) {
-            subtitle = [NSString stringWithFormat:@"%@ · status true · 假 %@", url, falseText];
+            subtitle = [NSString stringWithFormat:@"%@ · 状态真 · 等待 %@", url, falseText];
         } else {
-            subtitle = [NSString stringWithFormat:@"%@ · status true/false", url];
+            subtitle = [NSString stringWithFormat:@"%@ · 状态真/假", url];
         }
     }
     return [NSString stringWithFormat:@"任务 %lu - %@\n%@", (unsigned long)index + 1, name, subtitle];
@@ -4982,7 +4982,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
 - (NSString *)networkStatusTextWithMatched:(BOOL)matched requestSucceeded:(BOOL)requestSucceeded statusCode:(NSInteger)statusCode error:(NSError *)error {
     if (matched) {
-        return @"网络条件满足";
+        return @"网络已满足";
     }
     if (error) {
         return @"网络请求失败";
@@ -4990,7 +4990,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     if (!requestSucceeded && statusCode > 0) {
         return [NSString stringWithFormat:@"网络状态%ld", (long)statusCode];
     }
-    return @"网络条件未满足";
+    return @"网络未满足";
 }
 
 - (void)performNetworkRequestTask:(NSDictionary *)task
@@ -5051,7 +5051,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             return;
         }
 
-        self->_statusLabel.text = requestSucceeded ? @"网络等待匹配" : @"网络等待重试";
+        self->_statusLabel.text = requestSucceeded ? @"网络等待中" : @"网络重试中";
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self pollNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration];
         });
@@ -5161,7 +5161,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 - (void)performOCRTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow runGeneration:(NSUInteger)runGeneration {
     NSString *targetText = [self trimmedActionDescription:task[@"ocrText"]];
     if (targetText.length == 0) {
-        _statusLabel.text = @"文字识别未填写";
+        _statusLabel.text = @"识字未填写";
         return;
     }
 
@@ -5170,7 +5170,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
     NSValue *customPointValue = task[@"point"];
     if (!useMatchPoint && !customPointValue) {
-        _statusLabel.text = @"文字识别未取点";
+        _statusLabel.text = @"识字未取点";
         return;
     }
     _templateSearchInProgress = YES;
@@ -5196,14 +5196,14 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             NSNumber *scoreNumber = match[@"score"];
             NSString *text = [match[@"text"] isKindOfClass:NSString.class] ? match[@"text"] : targetText;
             if (!pointValue || !rectValue) {
-                strongSelf->_statusLabel.text = @"文字识别未找到";
+                strongSelf->_statusLabel.text = @"识字未找到";
                 return;
             }
             UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
             [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
             CGPoint actionPoint = useMatchPoint ? pointValue.CGPointValue : customPointValue.CGPointValue;
             [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
-            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"文字识别 %@ %.0f,%.0f",
+            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %.0f,%.0f",
                                              text,
                                              actionPoint.x,
                                              actionPoint.y];
@@ -5298,12 +5298,12 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     if (mode == AnClickActionModeOCR) {
         NSString *targetText = [self trimmedActionDescription:task[@"ocrText"]];
         if (targetText.length == 0) {
-            _statusLabel.text = @"任务文字识别未填写";
+            _statusLabel.text = @"任务识字未填写";
             return NO;
         }
         BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
         if (!useMatchPoint && !task[@"point"]) {
-            _statusLabel.text = @"任务文字识别未取点";
+            _statusLabel.text = @"任务识字未取点";
             return NO;
         }
         return YES;
@@ -6339,7 +6339,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     if (_actionMode == AnClickActionModeOCR) {
         if (_ocrUsesMatchPoint) {
-            _statusLabel.text = _ocrTargetText.length > 0 ? @"文字识别点随识别结果" : @"先填目标文字";
+            _statusLabel.text = _ocrTargetText.length > 0 ? @"识字点随识别结果" : @"先填目标文字";
             return;
         }
         if (![self hasManualPointForMode:AnClickActionModeOCR]) {
@@ -6357,7 +6357,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
                 return;
             }
             [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:previewDuration];
-            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览文字识别%@ %.0f,%.0f", [strongSelf actionNameForMode:actionMode], point.x, point.y];
+            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览识字%@ %.0f,%.0f", [strongSelf actionNameForMode:actionMode], point.x, point.y];
             [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
         });
         return;
