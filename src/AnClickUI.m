@@ -829,7 +829,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     [self setCenteredIconForButton:_addTaskButton systemName:@"plus" fallbackTitle:@"+" fontSize:27];
     [self setCenteredIconForButton:_deleteTaskButton systemName:@"minus" fallbackTitle:@"-" fontSize:27];
-    [self setCenteredIconForButton:_collapseButton systemName:@"gearshape.fill" fallbackTitle:@"⚙" fontSize:24];
+    [self setCenteredIconForButton:_collapseButton systemName:@"square.and.arrow.down.fill" fallbackTitle:@"存" fontSize:22];
     [self setCenteredIconForButton:_runTasksButton systemName:_taskRunActive ? @"stop.fill" : @"play.fill" fallbackTitle:_taskRunActive ? @"■" : @"▶" fontSize:24];
     NSArray<UIButton *> *toolbarButtons = @[_addTaskButton, _deleteTaskButton, _collapseButton, _runTasksButton];
     NSArray<UIColor *> *colors = @[
@@ -2269,6 +2269,22 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [self applyObsidian3DStyleToButton:button selected:NO];
 }
 
+- (void)styleRecordButton:(UIButton *)button active:(BOOL)active {
+    button.layer.cornerRadius = 7;
+    button.layer.borderWidth = 1;
+    button.layer.masksToBounds = NO;
+    button.backgroundColor = active
+        ? [UIColor colorWithRed:0.84 green:0.12 blue:0.10 alpha:0.96]
+        : [UIColor colorWithRed:0.58 green:0.08 blue:0.07 alpha:0.94];
+    button.layer.borderColor = [UIColor colorWithRed:1.0 green:0.30 blue:0.24 alpha:0.92].CGColor;
+    button.layer.shadowColor = [UIColor colorWithRed:0.90 green:0.10 blue:0.08 alpha:1.0].CGColor;
+    button.layer.shadowOffset = CGSizeMake(0, active ? 0 : 2.5);
+    button.layer.shadowRadius = active ? 8.0 : 5.0;
+    button.layer.shadowOpacity = active ? 0.40 : 0.28;
+    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [self updateButtonShadowPath:button];
+}
+
 - (void)layoutButtons:(NSArray<UIButton *> *)buttons x:(CGFloat)x y:(CGFloat)y width:(CGFloat)width height:(CGFloat)height gap:(CGFloat)gap {
     if (buttons.count == 0) {
         return;
@@ -2442,11 +2458,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         [_macroPlayButton setTitle:_recordedMacroEvents.count > 0 ? @"回放录制" : @"暂无录制" forState:UIControlStateNormal];
         _macroPlayButton.enabled = _recordedMacroEvents.count > 0 && !recording;
         _macroPlayButton.alpha = _macroPlayButton.enabled ? 1.0 : 0.45;
-        [self styleNormalButton:_macroRecordButton];
+        [self styleRecordButton:_macroRecordButton active:recording];
         [self styleNormalButton:_macroPlayButton];
-        if (recording) {
-            _macroRecordButton.backgroundColor = [UIColor colorWithRed:0.84 green:0.12 blue:0.10 alpha:0.94];
-        }
         [self layoutButtons:@[_macroRecordButton, _macroPlayButton] x:side y:228 width:contentWidth height:40 gap:10.0];
         [self layoutDoubleTimingFieldsAtY:286];
     } else if (_actionMode == AnClickActionModeSwipe) {
@@ -4790,7 +4803,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         [recorder stopRecording];
         _recordedMacroEvents = [recorder serializedEvents];
         [_macroRecordButton setTitle:@"重新录制" forState:UIControlStateNormal];
-        [self styleNormalButton:_macroRecordButton];
+        [self styleRecordButton:_macroRecordButton active:NO];
         _statusLabel.text = [NSString stringWithFormat:@"已录 %lu步", (unsigned long)_recordedMacroEvents.count];
         [self refreshCollapsedButtonTitle];
         if (_returnToEditorAfterRecording) {
@@ -4808,7 +4821,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _returnToEditorAfterRecording = _taskEditorVisible;
     [recorder startRecording];
     [_macroRecordButton setTitle:@"停止录制" forState:UIControlStateNormal];
-    _macroRecordButton.backgroundColor = [UIColor colorWithRed:0.84 green:0.12 blue:0.10 alpha:0.94];
+    [self styleRecordButton:_macroRecordButton active:YES];
     [self invalidatePendingPanelRestore];
     [self refreshModeButtons];
     [self showCollapsedRecordingButton];
