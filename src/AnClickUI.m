@@ -18,6 +18,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     AnClickActionModeCount = 10,
 };
 
+static const NSUInteger AnClickMacroMaxTrajectoryPoints = 2400;
+static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
+
 @interface AnClickCore : NSObject
 + (UIImage *)captureCurrentWindowImage;
 + (NSDictionary *)findTemplateImageMatch:(UIImage *)templateImage threshold:(double)threshold;
@@ -137,6 +140,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     BOOL _taskEditorVisible;
     BOOL _imageUsesMatchPoint;
     BOOL _returnToEditorAfterRecording;
+    NSUInteger _panelRestoreGeneration;
     double _matchThreshold;
     NSTimeInterval _actionDelay;
     NSInteger _actionRepeatCount;
@@ -710,25 +714,20 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         [self updateButtonShadowPath:button];
     }
 
-    [self setCenteredIconForButton:_homeCloseButton systemName:@"xmark" fallbackTitle:@"×" fontSize:19];
-    _homeCloseButton.imageEdgeInsets = UIEdgeInsetsMake(-2.0, 0, 2.0, 0);
-    _homeCloseButton.titleEdgeInsets = UIEdgeInsetsMake(-2.0, 0, 2.0, 0);
-    _homeCloseButton.frame = CGRectMake(width - 48.0, 8.0, 36.0, 36.0);
-    _homeCloseButton.layer.cornerRadius = 18.0;
-    _homeCloseButton.layer.borderWidth = 1.0;
-    _homeCloseButton.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
-    _homeCloseButton.layer.shadowColor = UIColor.blackColor.CGColor;
-    _homeCloseButton.layer.shadowOffset = CGSizeMake(0, 3);
-    _homeCloseButton.layer.shadowRadius = 5.0;
-    _homeCloseButton.layer.shadowOpacity = 0.28;
-    _homeCloseButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
-    [_homeCloseButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    _homeCloseButton.tintColor = UIColor.whiteColor;
+    CGFloat closeSize = 32.0;
+    [self setCenteredIconForButton:_homeCloseButton systemName:@"xmark" fallbackTitle:@"×" fontSize:17];
+    _homeCloseButton.frame = CGRectMake(width - closeSize - 10.0, 6.0, closeSize, closeSize);
+    _homeCloseButton.layer.cornerRadius = closeSize * 0.5;
+    _homeCloseButton.layer.borderWidth = 0;
+    _homeCloseButton.layer.shadowOpacity = 0;
+    _homeCloseButton.backgroundColor = UIColor.clearColor;
+    [_homeCloseButton setTitleColor:[UIColor colorWithWhite:1 alpha:0.92] forState:UIControlStateNormal];
+    _homeCloseButton.tintColor = [UIColor colorWithWhite:1 alpha:0.92];
     [self updateButtonShadowPath:_homeCloseButton];
 
-    _statusLabel.frame = CGRectMake(10, 10, width - 68, 24);
+    _statusLabel.frame = CGRectMake(10, 10, width - closeSize - 34.0, 24);
     _statusLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    _taskListView.frame = CGRectMake(10, 42, width - 20, MAX(80.0, buttonY - 50.0));
+    _taskListView.frame = CGRectMake(10, 46, width - 20, MAX(80.0, buttonY - 54.0));
     if (_functionMenuView) {
         _functionMenuView.frame = _panelView.bounds;
         [_panelView bringSubviewToFront:_functionMenuView];
@@ -2257,8 +2256,14 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     _previewView.hidden = !_taskEditorVisible || _actionMode != AnClickActionModeImage;
 }
 
+- (NSUInteger)invalidatePendingPanelRestore {
+    _panelRestoreGeneration++;
+    return _panelRestoreGeneration;
+}
+
 - (void)preparePanelForExternalTapWithHostWindow:(UIWindow *)hostWindow {
     [self dismissConfigKeyboardAndSync];
+    [self invalidatePendingPanelRestore];
     if (hostWindow && !hostWindow.isKeyWindow) {
         [hostWindow makeKeyWindow];
     }
@@ -2272,6 +2277,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 - (void)hidePanelForScreenInteractionWithHostWindow:(UIWindow *)hostWindow {
     [self dismissConfigKeyboardAndSync];
+    [self invalidatePendingPanelRestore];
     if (hostWindow && !hostWindow.isKeyWindow) {
         [hostWindow makeKeyWindow];
     }
@@ -2283,7 +2289,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 }
 
 - (void)restorePanelAfterScreenDelay:(NSTimeInterval)delay {
+    NSUInteger restoreGeneration = [self invalidatePendingPanelRestore];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(delay, 0.05) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (restoreGeneration != self->_panelRestoreGeneration || [AnClickRecorder shared].isRecording) {
+            return;
+        }
         [self restorePanelAfterExternalTap];
     });
 }
@@ -2293,6 +2303,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         return;
     }
 
+    [self invalidatePendingPanelRestore];
     [self attachPanelWindowToActiveSceneIfNeeded];
     _panelWindow.windowLevel = UIWindowLevelAlert + 1000;
     _panelWindow.alpha = 1.0;
@@ -2620,6 +2631,9 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         NSInteger type = typeNumber.integerValue;
         if (type == 0 || type == 1 || type == 2) {
             [points addObject:[NSValue valueWithCGPoint:CGPointMake(xNumber.doubleValue, yNumber.doubleValue)]];
+            if (points.count >= AnClickMacroMaxTrajectoryPoints) {
+                break;
+            }
         }
     }
     return points;
@@ -2637,7 +2651,10 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
         }
         NSNumber *timestampNumber = event[@"timestamp"];
         if (timestampNumber) {
-            duration = MAX(duration, timestampNumber.doubleValue);
+            duration = MIN(AnClickMacroMaxPlaybackDuration, MAX(duration, timestampNumber.doubleValue));
+            if (duration >= AnClickMacroMaxPlaybackDuration) {
+                break;
+            }
         }
     }
     return MAX(0.35, duration + 0.20);
@@ -3795,6 +3812,7 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     [recorder startRecording];
     [_macroRecordButton setTitle:@"停止录制" forState:UIControlStateNormal];
     _macroRecordButton.backgroundColor = [UIColor colorWithRed:0.84 green:0.12 blue:0.10 alpha:0.94];
+    [self invalidatePendingPanelRestore];
     [self refreshModeButtons];
     [self showCollapsedRecordingButton];
     _statusLabel.text = @"录制中";

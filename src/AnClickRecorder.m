@@ -42,6 +42,8 @@ typedef NS_ENUM(NSInteger, AnClickRecordEventType) {
 
 static void (*original_sendEvent)(id self, SEL _cmd, UIEvent *event);
 static const NSTimeInterval AnClickRecordKeepAliveInterval = 1.0 / 60.0;
+static const NSTimeInterval AnClickRecordMinMoveInterval = 1.0 / 60.0;
+static const NSUInteger AnClickRecordMaxEvents = 24000;
 
 @implementation AnClickRecorder {
     NSMutableArray<AnClickRecordEvent *> *_events;
@@ -153,6 +155,23 @@ static const NSTimeInterval AnClickRecordKeepAliveInterval = 1.0 / 60.0;
 }
 
 - (void)appendRecordType:(AnClickRecordEventType)type point:(CGPoint)point timestamp:(NSTimeInterval)timestamp {
+    AnClickRecordEvent *lastEvent = _events.lastObject;
+    if (type == AnClickRecordEventTypeMoved &&
+        lastEvent &&
+        lastEvent.type == AnClickRecordEventTypeMoved &&
+        timestamp - lastEvent.timestamp < AnClickRecordMinMoveInterval) {
+        return;
+    }
+
+    if (_events.count >= AnClickRecordMaxEvents) {
+        BOOL terminalEvent = type == AnClickRecordEventTypeEnded || type == AnClickRecordEventTypeCancelled;
+        if (terminalEvent && lastEvent && lastEvent.type == AnClickRecordEventTypeMoved) {
+            [_events removeLastObject];
+        } else {
+            return;
+        }
+    }
+
     AnClickRecordEvent *record = [[AnClickRecordEvent alloc] init];
     record.type = type;
     record.point = point;

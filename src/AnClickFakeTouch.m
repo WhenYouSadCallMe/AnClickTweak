@@ -34,6 +34,11 @@ static dispatch_source_t AnClickHoldTimer = nil;
 static NSUInteger AnClickHoldGeneration = 0;
 static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
 static const NSTimeInterval AnClickTouchUpDelay = 1.0 / 120.0;
+static const NSTimeInterval AnClickRecordedKeepAliveInterval = 1.0 / 30.0;
+static const NSTimeInterval AnClickRecordedMoveMinInterval = 1.0 / 90.0;
+static const NSTimeInterval AnClickRecordedPlaybackMaxDuration = 600.0;
+static const NSUInteger AnClickRecordedPlaybackMaxEvents = 24000;
+static const NSUInteger AnClickRecordedPlaybackMaxScheduledBlocks = 30000;
 
 + (void)tapAtPoint:(CGPoint)point {
     NSInteger touchId = 1;
@@ -377,8 +382,18 @@ static const NSTimeInterval AnClickTouchUpDelay = 1.0 / 120.0;
     NSTimeInterval previousTimestamp = 0;
     CGPoint previousPoint = CGPointZero;
     NSInteger previousType = -1;
+    NSUInteger processedEvents = 0;
+    NSUInteger scheduledBlocks = 0;
+    BOOL hasScheduledMove = NO;
+    NSTimeInterval lastScheduledMoveTimestamp = 0;
+    CGPoint lastScheduledMovePoint = CGPointZero;
 
     for (NSDictionary *event in events) {
+        if (processedEvents >= AnClickRecordedPlaybackMaxEvents) {
+            break;
+        }
+        processedEvents++;
+
         NSNumber *typeNumber = event[@"type"];
         NSNumber *xNumber = event[@"x"];
         NSNumber *yNumber = event[@"y"];
@@ -390,27 +405,56 @@ static const NSTimeInterval AnClickTouchUpDelay = 1.0 / 120.0;
         NSInteger type = typeNumber.integerValue;
         CGPoint point = CGPointMake(xNumber.doubleValue, yNumber.doubleValue);
         NSTimeInterval timestamp = MAX(0, timestampNumber.doubleValue);
+        if (timestamp > AnClickRecordedPlaybackMaxDuration) {
+            break;
+        }
 
-        if (touchIsDown && timestamp > previousTimestamp + AnClickHoldTickInterval) {
-            for (NSTimeInterval tick = previousTimestamp + AnClickHoldTickInterval; tick < timestamp - 0.001; tick += AnClickHoldTickInterval) {
+        if (touchIsDown && timestamp > previousTimestamp + AnClickRecordedKeepAliveInterval) {
+            for (NSTimeInterval tick = previousTimestamp + AnClickRecordedKeepAliveInterval;
+                 tick < timestamp - 0.001 && scheduledBlocks < AnClickRecordedPlaybackMaxScheduledBlocks;
+                 tick += AnClickRecordedKeepAliveInterval) {
                 CGPoint keepAlivePoint = previousPoint;
+                NSInteger keepAliveTouchId = touchId;
+                scheduledBlocks++;
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(tick * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    [self touchMoveAtPoint:keepAlivePoint touchId:touchId];
+                    [self touchMoveAtPoint:keepAlivePoint touchId:keepAliveTouchId];
                 });
             }
         }
 
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (type == 0) {
-                [self touchDownAtPoint:point touchId:touchId];
-            } else if (type == 1) {
-                [self touchMoveAtPoint:point touchId:touchId];
-            } else if (type == 3) {
-                [self finishTouchId:touchId atPoint:point cancelled:YES];
-            } else {
-                [self finishTouchId:touchId atPoint:point cancelled:NO];
+        BOOL shouldScheduleEvent = YES;
+        if (type == 1 && hasScheduledMove) {
+            CGFloat dx = point.x - lastScheduledMovePoint.x;
+            CGFloat dy = point.y - lastScheduledMovePoint.y;
+            shouldScheduleEvent = timestamp - lastScheduledMoveTimestamp >= AnClickRecordedMoveMinInterval ||
+                hypot(dx, dy) >= 0.75;
+        }
+        if (type == 1 && scheduledBlocks >= AnClickRecordedPlaybackMaxScheduledBlocks) {
+            shouldScheduleEvent = NO;
+        }
+
+        if (shouldScheduleEvent) {
+            NSInteger eventType = type;
+            CGPoint eventPoint = point;
+            NSInteger eventTouchId = touchId;
+            scheduledBlocks++;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                if (eventType == 0) {
+                    [self touchDownAtPoint:eventPoint touchId:eventTouchId];
+                } else if (eventType == 1) {
+                    [self touchMoveAtPoint:eventPoint touchId:eventTouchId];
+                } else if (eventType == 3) {
+                    [self finishTouchId:eventTouchId atPoint:eventPoint cancelled:YES];
+                } else {
+                    [self finishTouchId:eventTouchId atPoint:eventPoint cancelled:NO];
+                }
+            });
+            if (type == 1) {
+                hasScheduledMove = YES;
+                lastScheduledMoveTimestamp = timestamp;
+                lastScheduledMovePoint = point;
             }
-        });
+        }
 
         touchIsDown = (type == 0 || type == 1);
         previousTimestamp = timestamp;
@@ -419,9 +463,11 @@ static const NSTimeInterval AnClickTouchUpDelay = 1.0 / 120.0;
     }
 
     if (previousType == 0 || previousType == 1) {
-        NSTimeInterval cancelTimestamp = previousTimestamp + 0.08;
+        NSTimeInterval cancelTimestamp = MIN(previousTimestamp + 0.08, AnClickRecordedPlaybackMaxDuration);
+        NSInteger cancelTouchId = touchId;
+        CGPoint cancelPoint = previousPoint;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(cancelTimestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self finishTouchId:touchId atPoint:previousPoint cancelled:YES];
+            [self finishTouchId:cancelTouchId atPoint:cancelPoint cancelled:YES];
         });
     }
 }
