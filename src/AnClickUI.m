@@ -733,22 +733,22 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [_panelView addSubview:_networkURLField];
 
     _networkContainsField = [[UITextField alloc] initWithFrame:CGRectZero];
-    _networkContainsField.placeholder = @"空=状态真";
+    _networkContainsField.placeholder = @"例：百度 / 成功";
     _networkContainsField.keyboardType = UIKeyboardTypeDefault;
     _networkContainsField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     _networkContainsField.autocorrectionType = UITextAutocorrectionTypeNo;
-    [self applyObsidianInputStyleToField:_networkContainsField placeholder:@"空=状态真" monospaced:NO];
+    [self applyObsidianInputStyleToField:_networkContainsField placeholder:@"例：百度 / 成功" monospaced:NO];
     [self configureConfigTextField:_networkContainsField];
     [_networkContainsField addTarget:self action:@selector(networkFieldChanged:) forControlEvents:UIControlEventEditingChanged];
     [_networkContainsField addTarget:self action:@selector(networkFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_networkContainsField];
 
     _networkFalseField = [[UITextField alloc] initWithFrame:CGRectZero];
-    _networkFalseField.placeholder = @"空=状态假";
+    _networkFalseField.placeholder = @"例：维护 / false";
     _networkFalseField.keyboardType = UIKeyboardTypeDefault;
     _networkFalseField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     _networkFalseField.autocorrectionType = UITextAutocorrectionTypeNo;
-    [self applyObsidianInputStyleToField:_networkFalseField placeholder:@"空=状态假" monospaced:NO];
+    [self applyObsidianInputStyleToField:_networkFalseField placeholder:@"例：维护 / false" monospaced:NO];
     [self configureConfigTextField:_networkFalseField];
     [_networkFalseField addTarget:self action:@selector(networkFieldChanged:) forControlEvents:UIControlEventEditingChanged];
     [_networkFalseField addTarget:self action:@selector(networkFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
@@ -915,8 +915,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 - (CGSize)expandedPanelSizeForEditorVisible:(BOOL)editorVisible {
     CGFloat width = MIN(340.0, UIScreen.mainScreen.bounds.size.width - 10.0);
     CGFloat availableHeight = UIScreen.mainScreen.bounds.size.height - 60.0;
-    CGFloat preferredHeight = MIN(editorVisible ? 620.0 : 420.0, availableHeight);
-    CGFloat minHeight = MIN(editorVisible ? 560.0 : 340.0, availableHeight);
+    CGFloat preferredHeight = MIN(editorVisible ? 700.0 : 420.0, availableHeight);
+    CGFloat minHeight = MIN(editorVisible ? 620.0 : 340.0, availableHeight);
     return CGSizeMake(width, MAX(minHeight, preferredHeight));
 }
 
@@ -1670,8 +1670,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         @"定时停止（到时间自动停止）",
         @"播放前网络判断（不满足会持续监控）",
         @"网络判断链接（GET）",
-        @"运行匹配（空=状态真）",
-        @"等待匹配（空=状态假）",
+        @"返回包含这些就运行（空=状态真）",
+        @"返回包含这些就不运行（空=状态假）",
     ];
     NSMutableArray<UIView *> *controls = [NSMutableArray array];
     _globalDelayField = [self globalSettingsTextFieldWithPlaceholder:@"无延时"];
@@ -2998,25 +2998,35 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         _networkURLField.hidden = NO;
         _networkURLField.frame = CGRectMake(side, configTopY + 22.0, contentWidth, 40);
 
-        _secondaryConfigLabel.text = @"运行匹配";
+        BOOL roomyNetworkLayout = _panelView.bounds.size.height >= 640.0;
+        _secondaryConfigLabel.text = roomyNetworkLayout ? @"返回包含这些就运行（空=状态真）" : @"包含就运行";
         _secondaryConfigLabel.hidden = NO;
-        _tertiaryConfigLabel.text = @"等待匹配";
+        _tertiaryConfigLabel.text = roomyNetworkLayout ? @"返回包含这些就不运行（空=状态假）" : @"包含就不运行";
         _tertiaryConfigLabel.hidden = NO;
-        CGFloat gap = 10.0;
-        CGFloat halfWidth = floor((contentWidth - gap) / 2.0);
-        _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 72.0, halfWidth, 20);
-        _tertiaryConfigLabel.frame = CGRectMake(side + halfWidth + gap, configTopY + 72.0, halfWidth, 20);
         _networkContainsField.hidden = NO;
         _networkFalseField.hidden = NO;
-        _networkContainsField.frame = CGRectMake(side, configTopY + 94.0, halfWidth, 40);
-        _networkFalseField.frame = CGRectMake(side + halfWidth + gap, configTopY + 94.0, halfWidth, 40);
-
         [_previewActionButton setTitle:@"测试请求" forState:UIControlStateNormal];
         [_runManualButton setTitle:@"执行请求" forState:UIControlStateNormal];
         [self styleNormalButton:_previewActionButton];
         [self styleNormalButton:_runManualButton];
-        [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:configTopY + 146.0 width:contentWidth height:36 gap:10.0];
-        [self layoutDoubleTimingFieldsAtY:configTopY + 198.0];
+
+        if (roomyNetworkLayout) {
+            _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 72.0, contentWidth, 20);
+            _networkContainsField.frame = CGRectMake(side, configTopY + 94.0, contentWidth, 40);
+            _tertiaryConfigLabel.frame = CGRectMake(side, configTopY + 144.0, contentWidth, 20);
+            _networkFalseField.frame = CGRectMake(side, configTopY + 166.0, contentWidth, 40);
+            [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:configTopY + 218.0 width:contentWidth height:36 gap:10.0];
+            [self layoutDoubleTimingFieldsAtY:configTopY + 270.0];
+        } else {
+            CGFloat gap = 10.0;
+            CGFloat halfWidth = floor((contentWidth - gap) / 2.0);
+            _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 72.0, halfWidth, 20);
+            _tertiaryConfigLabel.frame = CGRectMake(side + halfWidth + gap, configTopY + 72.0, halfWidth, 20);
+            _networkContainsField.frame = CGRectMake(side, configTopY + 94.0, halfWidth, 40);
+            _networkFalseField.frame = CGRectMake(side + halfWidth + gap, configTopY + 94.0, halfWidth, 40);
+            [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:configTopY + 146.0 width:contentWidth height:36 gap:10.0];
+            [self layoutDoubleTimingFieldsAtY:configTopY + 198.0];
+        }
     } else if (_actionMode == AnClickActionModeMacro) {
         _saveTaskButton.enabled = YES;
         _saveTaskButton.alpha = 1.0;
@@ -3125,9 +3135,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         BOOL oneShot = [self networkTaskIsOneShotWithURL:_networkURL trueText:_networkContainsText falseText:_networkFalseText];
         NSString *conditionState = oneShot
             ? @"请求一次"
-            : (_networkContainsText.length > 0 ? [NSString stringWithFormat:@"运行 %@", _networkContainsText] : @"状态真");
+            : (_networkContainsText.length > 0 ? [NSString stringWithFormat:@"包含%@就运行", _networkContainsText] : @"状态真就运行");
         if (_networkFalseText.length > 0) {
-            conditionState = [conditionState stringByAppendingFormat:@" 等待 %@", _networkFalseText];
+            conditionState = [conditionState stringByAppendingFormat:@" 包含%@就不运行", _networkFalseText];
         }
         _statusLabel.text = [NSString stringWithFormat:@"网络 %@ %@", urlState, conditionState];
         return;
@@ -4264,14 +4274,14 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         } else if ([self networkTaskIsOneShotWithURL:url trueText:contains falseText:falseText]) {
             subtitle = [NSString stringWithFormat:@"%@ · 请求一次", url];
         } else if (contains.length > 0) {
-            subtitle = [NSString stringWithFormat:@"%@ · 运行 %@", url, contains];
+            subtitle = [NSString stringWithFormat:@"%@ · 包含 %@ 就运行", url, contains];
             if (falseText.length > 0) {
-                subtitle = [subtitle stringByAppendingFormat:@" · 等待 %@", falseText];
+                subtitle = [subtitle stringByAppendingFormat:@" · 包含 %@ 就不运行", falseText];
             }
         } else if (falseText.length > 0) {
-            subtitle = [NSString stringWithFormat:@"%@ · 状态真 · 等待 %@", url, falseText];
+            subtitle = [NSString stringWithFormat:@"%@ · 状态真就运行 · 包含 %@ 就不运行", url, falseText];
         } else {
-            subtitle = [NSString stringWithFormat:@"%@ · 状态真/假", url];
+            subtitle = [NSString stringWithFormat:@"%@ · 状态真就运行 / 状态假就不运行", url];
         }
     }
     return [NSString stringWithFormat:@"任务 %lu - %@\n%@", (unsigned long)index + 1, name, subtitle];
@@ -5051,7 +5061,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             return;
         }
 
-        self->_statusLabel.text = requestSucceeded ? @"网络等待中" : @"网络重试中";
+        self->_statusLabel.text = requestSucceeded ? @"网络不运行" : @"网络重试中";
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self pollNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration];
         });
