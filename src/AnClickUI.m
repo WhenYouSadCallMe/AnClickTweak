@@ -216,6 +216,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     float _lastObservedSystemVolume;
     CGPoint _pendingColorPickPoint;
     BOOL _hasPendingColorPickPoint;
+    NSTimeInterval _networkTimeout;
     double _colorTolerance;
     NSTimer *_globalStartTimer;
     NSTimer *_globalStopTimer;
@@ -2180,6 +2181,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _networkContainsText = nil;
     _networkFalseText = nil;
     _networkRequestOnly = NO;
+    _networkTimeout = 8.0;
     _hasTargetColor = NO;
     _targetColorRed = 0;
     _targetColorGreen = 0;
@@ -2510,6 +2512,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 }
 
 - (NSString *)thresholdFieldText {
+    if (_actionMode == AnClickActionModeNetwork) {
+        return [NSString stringWithFormat:@"%.0f", MAX(1.0, _networkTimeout)];
+    }
     if (_actionMode == AnClickActionModeColor) {
         return [NSString stringWithFormat:@"%.0f", _colorTolerance];
     }
@@ -2534,6 +2539,14 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
 - (void)syncImageThresholdFromField {
     NSString *thresholdText = [_thresholdField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (_actionMode == AnClickActionModeNetwork) {
+        if (thresholdText.length > 0) {
+            _networkTimeout = MIN(60.0, MAX(1.0, thresholdText.doubleValue));
+        } else {
+            _networkTimeout = 8.0;
+        }
+        return;
+    }
     if (_actionMode == AnClickActionModeColor) {
         if (thresholdText.length > 0) {
             _colorTolerance = MIN(255.0, MAX(0.0, thresholdText.doubleValue));
@@ -2829,6 +2842,26 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
 }
 
+- (void)layoutNetworkFieldsAtY:(CGFloat)y {
+    CGFloat side = 18.0;
+    CGFloat width = _panelView.bounds.size.width;
+    CGFloat gap = 8.0;
+    CGFloat fieldWidth = floor((width - side * 2.0 - gap * 2.0) / 3.0);
+    NSArray<UILabel *> *captions = @[_thresholdCaptionLabel, _delayCaptionLabel, _repeatCaptionLabel];
+    NSArray<UITextField *> *fields = @[_thresholdField, _delayField, _repeatField];
+    NSArray<NSString *> *titles = @[@"超时秒", @"延时秒", @"执行次数"];
+    for (NSUInteger i = 0; i < captions.count; i++) {
+        UILabel *caption = captions[i];
+        UITextField *field = fields[i];
+        CGFloat x = side + (fieldWidth + gap) * i;
+        caption.text = titles[i];
+        caption.hidden = NO;
+        caption.frame = CGRectMake(x, y, fieldWidth, 20);
+        field.hidden = NO;
+        field.frame = CGRectMake(x, y + 22.0, fieldWidth, 38);
+    }
+}
+
 - (NSString *)targetColorSummary {
     if (!_hasTargetColor) {
         return @"截图放大取色";
@@ -3038,14 +3071,14 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
         if (_networkRequestOnly) {
             [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:configTopY + 124.0 width:contentWidth height:36 gap:10.0];
-            [self layoutDoubleTimingFieldsAtY:configTopY + 176.0];
+            [self layoutNetworkFieldsAtY:configTopY + 176.0];
         } else if (roomyNetworkLayout) {
             _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 118.0, contentWidth, 20);
             _networkContainsField.frame = CGRectMake(side, configTopY + 140.0, contentWidth, 40);
             _tertiaryConfigLabel.frame = CGRectMake(side, configTopY + 190.0, contentWidth, 20);
             _networkFalseField.frame = CGRectMake(side, configTopY + 212.0, contentWidth, 40);
             [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:configTopY + 264.0 width:contentWidth height:36 gap:10.0];
-            [self layoutDoubleTimingFieldsAtY:configTopY + 316.0];
+            [self layoutNetworkFieldsAtY:configTopY + 316.0];
         } else {
             CGFloat gap = 10.0;
             CGFloat halfWidth = floor((contentWidth - gap) / 2.0);
@@ -3054,7 +3087,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             _networkContainsField.frame = CGRectMake(side, configTopY + 140.0, halfWidth, 40);
             _networkFalseField.frame = CGRectMake(side + halfWidth + gap, configTopY + 140.0, halfWidth, 40);
             [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:configTopY + 192.0 width:contentWidth height:36 gap:10.0];
-            [self layoutDoubleTimingFieldsAtY:configTopY + 242.0];
+            [self layoutNetworkFieldsAtY:configTopY + 242.0];
         }
     } else if (_actionMode == AnClickActionModeMacro) {
         _saveTaskButton.enabled = YES;
@@ -4223,6 +4256,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             return nil;
         }
         task[@"networkRequestOnly"] = @(_networkRequestOnly);
+        task[@"networkTimeout"] = @(MAX(1.0, MIN(60.0, _networkTimeout)));
         if (_networkContainsText.length > 0) {
             task[@"networkContains"] = _networkContainsText;
         }
@@ -4314,6 +4348,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         } else {
             subtitle = [NSString stringWithFormat:@"%@ · 状态真就运行 / 状态假就不运行", url];
         }
+        subtitle = [subtitle stringByAppendingFormat:@" · 超时%.0fs", [self networkTimeoutForTask:task]];
     }
     return [NSString stringWithFormat:@"任务 %lu - %@\n%@", (unsigned long)index + 1, name, subtitle];
 }
@@ -4569,6 +4604,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         _networkContainsText = [self trimmedActionDescription:task[@"networkContains"]];
         _networkFalseText = [self trimmedActionDescription:task[@"networkFalse"]];
         _networkRequestOnly = [task[@"networkRequestOnly"] boolValue];
+        _networkTimeout = [task[@"networkTimeout"] respondsToSelector:@selector(doubleValue)]
+            ? MIN(60.0, MAX(1.0, [task[@"networkTimeout"] doubleValue]))
+            : 8.0;
     } else if ([self isSelectableActionMode:mode] && mode != AnClickActionModeSwipe && mode != AnClickActionModeImage) {
         NSValue *pointValue = task[@"point"];
         if (pointValue) {
@@ -4852,6 +4890,14 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     return MAX(1, [task[@"repeat"] integerValue]);
 }
 
+- (NSTimeInterval)networkTimeoutForTask:(NSDictionary *)task {
+    id value = task[@"networkTimeout"];
+    if ([value respondsToSelector:@selector(doubleValue)]) {
+        return MIN(60.0, MAX(1.0, [value doubleValue]));
+    }
+    return 8.0;
+}
+
 - (NSString *)normalizedNetworkURLString:(NSString *)urlText {
     NSString *trimmed = [self trimmedActionDescription:urlText];
     if (trimmed.length == 0) {
@@ -5008,6 +5054,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
                                   trueText:(NSString *)trueText
                                  falseText:(NSString *)falseText
                        defaultExpectedTrue:(BOOL)defaultExpectedTrue
+                                   timeout:(NSTimeInterval)timeout
                                 completion:(void (^)(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error))completion {
     NSString *normalizedURLString = [self normalizedNetworkURLString:urlString];
     NSURL *url = normalizedURLString.length > 0 ? [NSURL URLWithString:normalizedURLString] : nil;
@@ -5021,7 +5068,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         return;
     }
 
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:8.0];
+    NSTimeInterval requestTimeout = MIN(60.0, MAX(1.0, timeout));
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:requestTimeout];
     request.HTTPMethod = @"GET";
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSInteger statusCode = 0;
@@ -5069,7 +5117,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
 - (NSString *)networkStatusTextWithMatched:(BOOL)matched requestSucceeded:(BOOL)requestSucceeded statusCode:(NSInteger)statusCode error:(NSError *)error {
     if (matched) {
-        return @"网络已满足";
+        return @"命中运行";
     }
     if (error) {
         return @"网络请求失败";
@@ -5077,7 +5125,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     if (!requestSucceeded && statusCode > 0) {
         return [NSString stringWithFormat:@"网络状态%ld", (long)statusCode];
     }
-    return @"网络未满足";
+    return @"未命中运行";
 }
 
 - (void)performNetworkRequestTask:(NSDictionary *)task
@@ -5095,7 +5143,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
 
     BOOL oneShot = [self networkTaskIsOneShot:task];
-    [self performNetworkRequestWithURLString:url trueText:contains falseText:falseText defaultExpectedTrue:!oneShot completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
+    NSTimeInterval timeout = [self networkTimeoutForTask:task];
+    [self performNetworkRequestWithURLString:url trueText:contains falseText:falseText defaultExpectedTrue:!oneShot timeout:timeout completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
         if (runGeneration != 0 && (!self->_taskRunActive || runGeneration != self->_taskRunGeneration)) {
             return;
         }
@@ -5520,12 +5569,12 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     NSString *url = _globalNetworkURL;
     NSString *contains = _globalNetworkContainsText;
     NSString *falseText = _globalNetworkFalseText;
-    [self performNetworkRequestWithURLString:url trueText:contains falseText:falseText defaultExpectedTrue:YES completion:^(BOOL matched, BOOL requestSucceeded, __unused NSString *body, NSInteger statusCode, NSError *error) {
+    [self performNetworkRequestWithURLString:url trueText:contains falseText:falseText defaultExpectedTrue:YES timeout:8.0 completion:^(BOOL matched, BOOL requestSucceeded, __unused NSString *body, NSInteger statusCode, NSError *error) {
         if (!self->_taskRunActive || runGeneration != self->_taskRunGeneration) {
             return;
         }
         if (matched) {
-            self->_statusLabel.text = scheduled ? @"定时网络满足" : @"网络满足";
+            self->_statusLabel.text = scheduled ? @"定时命中运行" : @"命中运行";
             [self refreshCollapsedButtonTitle];
             [self runTaskAtIndex:0 inWindow:hostWindow generation:runGeneration];
             return;
