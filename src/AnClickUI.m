@@ -116,6 +116,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     UITextField *_ocrTargetField;
     UITextField *_networkURLField;
     UITextField *_networkContainsField;
+    UITextField *_networkFalseField;
     UIView *_captureOverlay;
     UIView *_selectionView;
     UIView *_pointPickOverlay;
@@ -146,6 +147,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     UITextField *_globalRepeatField;
     UITextField *_globalNetworkURLField;
     UITextField *_globalNetworkContainsField;
+    UITextField *_globalNetworkFalseField;
     UIButton *_globalStartTimeButton;
     UIButton *_globalStopTimeButton;
     UIButton *_globalNetworkGateButton;
@@ -223,8 +225,10 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     NSString *_ocrTargetText;
     NSString *_networkURL;
     NSString *_networkContainsText;
+    NSString *_networkFalseText;
     NSString *_globalNetworkURL;
     NSString *_globalNetworkContainsText;
+    NSString *_globalNetworkFalseText;
     AnClickActionMode _actionMode;
     AnClickActionMode _imageActionMode;
     AnClickOCRMode _ocrMode;
@@ -729,15 +733,26 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [_panelView addSubview:_networkURLField];
 
     _networkContainsField = [[UITextField alloc] initWithFrame:CGRectZero];
-    _networkContainsField.placeholder = @"true / 百度 / 自定义内容";
+    _networkContainsField.placeholder = @"正则 / true / 百度";
     _networkContainsField.keyboardType = UIKeyboardTypeDefault;
     _networkContainsField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     _networkContainsField.autocorrectionType = UITextAutocorrectionTypeNo;
-    [self applyObsidianInputStyleToField:_networkContainsField placeholder:@"true / 百度 / 自定义内容" monospaced:NO];
+    [self applyObsidianInputStyleToField:_networkContainsField placeholder:@"正则 / true / 百度" monospaced:NO];
     [self configureConfigTextField:_networkContainsField];
     [_networkContainsField addTarget:self action:@selector(networkFieldChanged:) forControlEvents:UIControlEventEditingChanged];
     [_networkContainsField addTarget:self action:@selector(networkFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_networkContainsField];
+
+    _networkFalseField = [[UITextField alloc] initWithFrame:CGRectZero];
+    _networkFalseField.placeholder = @"正则 / false";
+    _networkFalseField.keyboardType = UIKeyboardTypeDefault;
+    _networkFalseField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _networkFalseField.autocorrectionType = UITextAutocorrectionTypeNo;
+    [self applyObsidianInputStyleToField:_networkFalseField placeholder:@"正则 / false" monospaced:NO];
+    [self configureConfigTextField:_networkFalseField];
+    [_networkFalseField addTarget:self action:@selector(networkFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+    [_networkFalseField addTarget:self action:@selector(networkFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+    [_panelView addSubview:_networkFalseField];
 
     _taskListView = [[UIScrollView alloc] initWithFrame:CGRectMake(8, 84, panelWidth - 16, panelHeight - 92)];
     _taskListView.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.92];
@@ -982,6 +997,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _ocrTargetField.hidden = YES;
     _networkURLField.hidden = YES;
     _networkContainsField.hidden = YES;
+    _networkFalseField.hidden = YES;
     _previewView.hidden = YES;
     _colorPreviewView.hidden = YES;
 
@@ -1337,6 +1353,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         @"networkGateEnabled": @(_globalNetworkGateEnabled),
         @"networkURL": _globalNetworkURL ?: @"",
         @"networkContains": _globalNetworkContainsText ?: @"",
+        @"networkFalse": _globalNetworkFalseText ?: @"",
     };
 }
 
@@ -1358,8 +1375,10 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _globalNetworkGateEnabled = [settings[@"networkGateEnabled"] boolValue];
     id networkURL = settings[@"networkURL"];
     id networkContains = settings[@"networkContains"];
+    id networkFalse = settings[@"networkFalse"];
     _globalNetworkURL = [networkURL isKindOfClass:NSString.class] ? [self trimmedActionDescription:networkURL] : nil;
     _globalNetworkContainsText = [networkContains isKindOfClass:NSString.class] ? [self trimmedActionDescription:networkContains] : nil;
+    _globalNetworkFalseText = [networkFalse isKindOfClass:NSString.class] ? [self trimmedActionDescription:networkFalse] : nil;
 }
 
 - (void)loadGlobalSettings {
@@ -1515,6 +1534,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     if (_globalNetworkContainsField && !_globalNetworkContainsField.isFirstResponder) {
         _globalNetworkContainsField.text = _globalNetworkContainsText ?: @"";
     }
+    if (_globalNetworkFalseField && !_globalNetworkFalseField.isFirstResponder) {
+        _globalNetworkFalseField.text = _globalNetworkFalseText ?: @"";
+    }
 }
 
 - (void)syncGlobalSettingsFromFields {
@@ -1532,6 +1554,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     if (_globalNetworkContainsField) {
         _globalNetworkContainsText = [self trimmedActionDescription:_globalNetworkContainsField.text];
     }
+    if (_globalNetworkFalseField) {
+        _globalNetworkFalseText = [self trimmedActionDescription:_globalNetworkFalseField.text];
+    }
 }
 
 - (void)refreshGlobalSettingsFieldsIfNeeded {
@@ -1546,6 +1571,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
     if (_globalNetworkContainsField && !_globalNetworkContainsField.isFirstResponder) {
         _globalNetworkContainsField.text = _globalNetworkContainsText ?: @"";
+    }
+    if (_globalNetworkFalseField && !_globalNetworkFalseField.isFirstResponder) {
+        _globalNetworkFalseField.text = _globalNetworkFalseText ?: @"";
     }
 }
 
@@ -1587,6 +1615,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _globalRepeatField = nil;
     _globalNetworkURLField = nil;
     _globalNetworkContainsField = nil;
+    _globalNetworkFalseField = nil;
     _globalStartTimeButton = nil;
     _globalStopTimeButton = nil;
     _globalNetworkGateButton = nil;
@@ -1641,7 +1670,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         @"定时停止（到时间自动停止）",
         @"播放前网络判断（不满足会持续监控）",
         @"网络判断链接（GET）",
-        @"返回包含（空=true）",
+        @"真值匹配（空=status true）",
+        @"假值匹配（空=status false）",
     ];
     NSMutableArray<UIView *> *controls = [NSMutableArray array];
     _globalDelayField = [self globalSettingsTextFieldWithPlaceholder:@"无延时"];
@@ -1654,11 +1684,16 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _globalNetworkURLField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     _globalNetworkURLField.autocorrectionType = UITextAutocorrectionTypeNo;
     _globalNetworkURLField.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    _globalNetworkContainsField = [self globalSettingsTextFieldWithPlaceholder:@"true / 百度 / 自定义内容"];
+    _globalNetworkContainsField = [self globalSettingsTextFieldWithPlaceholder:@"正则 / 百度 / true"];
     _globalNetworkContainsField.keyboardType = UIKeyboardTypeDefault;
     _globalNetworkContainsField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     _globalNetworkContainsField.autocorrectionType = UITextAutocorrectionTypeNo;
     _globalNetworkContainsField.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    _globalNetworkFalseField = [self globalSettingsTextFieldWithPlaceholder:@"正则 / false"];
+    _globalNetworkFalseField.keyboardType = UIKeyboardTypeDefault;
+    _globalNetworkFalseField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _globalNetworkFalseField.autocorrectionType = UITextAutocorrectionTypeNo;
+    _globalNetworkFalseField.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     [controls addObjectsFromArray:@[
         _globalDelayField,
         _globalRepeatField,
@@ -1667,6 +1702,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         _globalNetworkGateButton,
         _globalNetworkURLField,
         _globalNetworkContainsField,
+        _globalNetworkFalseField,
     ]];
 
     for (NSUInteger i = 0; i < captions.count; i++) {
@@ -2135,6 +2171,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _ocrTargetText = nil;
     _networkURL = nil;
     _networkContainsText = nil;
+    _networkFalseText = nil;
     _hasTargetColor = NO;
     _targetColorRed = 0;
     _targetColorGreen = 0;
@@ -2371,7 +2408,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         return;
     }
 
-    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _thresholdField, _ocrTargetField, _networkURLField, _networkContainsField, nil];
+    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _thresholdField, _ocrTargetField, _networkURLField, _networkContainsField, _networkFalseField, nil];
     if (_globalDelayField) {
         [fields addObject:_globalDelayField];
     }
@@ -2383,6 +2420,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
     if (_globalNetworkContainsField) {
         [fields addObject:_globalNetworkContainsField];
+    }
+    if (_globalNetworkFalseField) {
+        [fields addObject:_globalNetworkFalseField];
     }
     for (UITextField *field in fields) {
         UIView *fieldContainer = field.superview ? field.superview : _panelView;
@@ -2515,6 +2555,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     if (_networkContainsField) {
         _networkContainsText = [self trimmedActionDescription:_networkContainsField.text];
     }
+    if (_networkFalseField) {
+        _networkFalseText = [self trimmedActionDescription:_networkFalseField.text];
+    }
 }
 
 - (void)refreshTimingFieldsIfNeeded {
@@ -2605,6 +2648,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _ocrTargetField.hidden = YES;
     _networkURLField.hidden = YES;
     _networkContainsField.hidden = YES;
+    _networkFalseField.hidden = YES;
     _colorPreviewView.hidden = YES;
     _saveTaskButton.hidden = YES;
     _editorBackButton.hidden = YES;
@@ -2811,6 +2855,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     if (!_networkContainsField.isFirstResponder) {
         _networkContainsField.text = _networkContainsText ?: @"";
     }
+    if (!_networkFalseField.isFirstResponder) {
+        _networkFalseField.text = _networkFalseText ?: @"";
+    }
     [self refreshTimingFieldsIfNeeded];
     CGFloat configTopY = [self editorConfigTopY];
 
@@ -2951,11 +2998,18 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         _networkURLField.hidden = NO;
         _networkURLField.frame = CGRectMake(side, configTopY + 22.0, contentWidth, 40);
 
-        _secondaryConfigLabel.text = @"返回包含（空=请求一次）";
+        _secondaryConfigLabel.text = @"真值正则（空=status true）";
         _secondaryConfigLabel.hidden = NO;
-        _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 72.0, contentWidth, 20);
+        _tertiaryConfigLabel.text = @"假值正则（空=status false）";
+        _tertiaryConfigLabel.hidden = NO;
+        CGFloat gap = 10.0;
+        CGFloat halfWidth = floor((contentWidth - gap) / 2.0);
+        _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 72.0, halfWidth, 20);
+        _tertiaryConfigLabel.frame = CGRectMake(side + halfWidth + gap, configTopY + 72.0, halfWidth, 20);
         _networkContainsField.hidden = NO;
-        _networkContainsField.frame = CGRectMake(side, configTopY + 94.0, contentWidth, 40);
+        _networkFalseField.hidden = NO;
+        _networkContainsField.frame = CGRectMake(side, configTopY + 94.0, halfWidth, 40);
+        _networkFalseField.frame = CGRectMake(side + halfWidth + gap, configTopY + 94.0, halfWidth, 40);
 
         [_previewActionButton setTitle:@"测试请求" forState:UIControlStateNormal];
         [_runManualButton setTitle:@"执行请求" forState:UIControlStateNormal];
@@ -3068,7 +3122,13 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     if (_actionMode == AnClickActionModeNetwork) {
         NSString *urlState = _networkURL.length > 0 ? @"有链接" : @"先填链接";
-        NSString *conditionState = _networkContainsText.length > 0 ? [NSString stringWithFormat:@"包含 %@", _networkContainsText] : @"请求一次";
+        BOOL oneShot = [self networkTaskIsOneShotWithURL:_networkURL trueText:_networkContainsText falseText:_networkFalseText];
+        NSString *conditionState = oneShot
+            ? @"请求一次"
+            : (_networkContainsText.length > 0 ? [NSString stringWithFormat:@"真 %@", _networkContainsText] : @"status true");
+        if (_networkFalseText.length > 0) {
+            conditionState = [conditionState stringByAppendingFormat:@" 假 %@", _networkFalseText];
+        }
         _statusLabel.text = [NSString stringWithFormat:@"网络 %@ %@", urlState, conditionState];
         return;
     }
@@ -4126,6 +4186,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         if (_networkContainsText.length > 0) {
             task[@"networkContains"] = _networkContainsText;
         }
+        if (_networkFalseText.length > 0) {
+            task[@"networkFalse"] = _networkFalseText;
+        }
         return task;
     }
 
@@ -4195,12 +4258,20 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     } else if (desc.length == 0 && mode == AnClickActionModeNetwork) {
         NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
         NSString *contains = [self trimmedActionDescription:task[@"networkContains"]];
+        NSString *falseText = [self trimmedActionDescription:task[@"networkFalse"]];
         if (url.length == 0) {
             subtitle = @"未设置链接";
-        } else if (contains.length > 0) {
-            subtitle = [NSString stringWithFormat:@"%@ · 包含 %@", url, contains];
-        } else {
+        } else if ([self networkTaskIsOneShotWithURL:url trueText:contains falseText:falseText]) {
             subtitle = [NSString stringWithFormat:@"%@ · 请求一次", url];
+        } else if (contains.length > 0) {
+            subtitle = [NSString stringWithFormat:@"%@ · 真 %@", url, contains];
+            if (falseText.length > 0) {
+                subtitle = [subtitle stringByAppendingFormat:@" · 假 %@", falseText];
+            }
+        } else if (falseText.length > 0) {
+            subtitle = [NSString stringWithFormat:@"%@ · status true · 假 %@", url, falseText];
+        } else {
+            subtitle = [NSString stringWithFormat:@"%@ · status true/false", url];
         }
     }
     return [NSString stringWithFormat:@"任务 %lu - %@\n%@", (unsigned long)index + 1, name, subtitle];
@@ -4455,6 +4526,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     } else if (mode == AnClickActionModeNetwork) {
         _networkURL = [self trimmedActionDescription:task[@"networkURL"]];
         _networkContainsText = [self trimmedActionDescription:task[@"networkContains"]];
+        _networkFalseText = [self trimmedActionDescription:task[@"networkFalse"]];
     } else if ([self isSelectableActionMode:mode] && mode != AnClickActionModeSwipe && mode != AnClickActionModeImage) {
         NSValue *pointValue = task[@"point"];
         if (pointValue) {
@@ -4763,20 +4835,101 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     return body ?: @"";
 }
 
-- (BOOL)networkBody:(NSString *)body matchesExpectedText:(NSString *)expectedText defaultExpectedTrue:(BOOL)defaultExpectedTrue {
-    NSString *expected = [self trimmedActionDescription:expectedText];
+- (BOOL)networkBody:(NSString *)body matchesRuleText:(NSString *)ruleText {
+    NSString *rule = [self trimmedActionDescription:ruleText];
+    if (rule.length == 0) {
+        return NO;
+    }
+
     NSString *response = body ?: @"";
-    if (expected.length > 0) {
-        return [response rangeOfString:expected options:NSCaseInsensitiveSearch].location != NSNotFound;
+    NSError *error = nil;
+    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:rule
+                                                                           options:NSRegularExpressionCaseInsensitive
+                                                                             error:&error];
+    if (regex && !error) {
+        NSRange range = NSMakeRange(0, response.length);
+        return [regex firstMatchInString:response options:0 range:range] != nil;
+    }
+    return [response rangeOfString:rule options:NSCaseInsensitiveSearch].location != NSNotFound;
+}
+
+- (NSNumber *)networkStatusBooleanFromBody:(NSString *)body {
+    NSData *data = [(body ?: @"") dataUsingEncoding:NSUTF8StringEncoding];
+    if (data.length == 0) {
+        return nil;
+    }
+
+    NSError *error = nil;
+    id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+    if (error || ![object isKindOfClass:NSDictionary.class]) {
+        return nil;
+    }
+
+    id statusValue = ((NSDictionary *)object)[@"status"];
+    if ([statusValue isKindOfClass:NSNumber.class]) {
+        return @([statusValue boolValue]);
+    }
+    if ([statusValue isKindOfClass:NSString.class]) {
+        NSString *statusText = [[self trimmedActionDescription:statusValue] lowercaseString];
+        if ([statusText isEqualToString:@"true"]) {
+            return @(YES);
+        }
+        if ([statusText isEqualToString:@"false"]) {
+            return @(NO);
+        }
+    }
+    return nil;
+}
+
+- (BOOL)networkBodyMatchesDefaultTrue:(NSString *)body {
+    NSNumber *jsonStatus = [self networkStatusBooleanFromBody:body];
+    if (jsonStatus) {
+        return jsonStatus.boolValue;
+    }
+
+    NSString *response = body ?: @"";
+    if ([self networkBody:response matchesRuleText:@"\"status\"\\s*:\\s*true"]) {
+        return YES;
+    }
+    NSString *trimmed = [[response stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+    return [trimmed isEqualToString:@"true"];
+}
+
+- (BOOL)networkBodyMatchesDefaultFalse:(NSString *)body {
+    NSNumber *jsonStatus = [self networkStatusBooleanFromBody:body];
+    if (jsonStatus) {
+        return !jsonStatus.boolValue;
+    }
+
+    NSString *response = body ?: @"";
+    if ([self networkBody:response matchesRuleText:@"\"status\"\\s*:\\s*false"]) {
+        return YES;
+    }
+    NSString *trimmed = [[response stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
+    return [trimmed isEqualToString:@"false"];
+}
+
+- (BOOL)networkBody:(NSString *)body matchesTrueText:(NSString *)trueText falseText:(NSString *)falseText defaultExpectedTrue:(BOOL)defaultExpectedTrue {
+    NSString *trueRule = [self trimmedActionDescription:trueText];
+    NSString *falseRule = [self trimmedActionDescription:falseText];
+    if (falseRule.length > 0 && [self networkBody:body matchesRuleText:falseRule]) {
+        return NO;
+    }
+    if (trueRule.length > 0) {
+        return [self networkBody:body matchesRuleText:trueRule];
     }
     if (defaultExpectedTrue) {
-        return [response rangeOfString:@"true" options:NSCaseInsensitiveSearch].location != NSNotFound;
+        if ([self networkBodyMatchesDefaultFalse:body]) {
+            return NO;
+        }
+        return [self networkBodyMatchesDefaultTrue:body];
     }
     return YES;
 }
 
 - (void)performNetworkRequestWithURLString:(NSString *)urlString
-                              expectedText:(NSString *)expectedText
+                                  trueText:(NSString *)trueText
+                                 falseText:(NSString *)falseText
                        defaultExpectedTrue:(BOOL)defaultExpectedTrue
                                 completion:(void (^)(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error))completion {
     NSString *normalizedURLString = [self normalizedNetworkURLString:urlString];
@@ -4800,7 +4953,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         }
         NSString *body = [self stringFromNetworkData:data];
         BOOL requestSucceeded = !error && (statusCode == 0 || (statusCode >= 200 && statusCode < 400));
-        BOOL matched = requestSucceeded && [self networkBody:body matchesExpectedText:expectedText defaultExpectedTrue:defaultExpectedTrue];
+        BOOL matched = requestSucceeded && [self networkBody:body matchesTrueText:trueText falseText:falseText defaultExpectedTrue:defaultExpectedTrue];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (completion) {
                 completion(matched, requestSucceeded, body, statusCode, error);
@@ -4808,6 +4961,23 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         });
     }];
     [task resume];
+}
+
+- (BOOL)networkURLStringIsControlRequest:(NSString *)urlString {
+    NSString *normalizedURLString = [self normalizedNetworkURLString:urlString];
+    if (normalizedURLString.length == 0) {
+        return NO;
+    }
+
+    NSURL *url = [NSURL URLWithString:normalizedURLString];
+    NSString *path = [[url.path ?: @"" lowercaseString] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return [path hasSuffix:@"/set_false_anclick"] || [path hasSuffix:@"/set_true_anclick"];
+}
+
+- (BOOL)networkTaskIsOneShotWithURL:(NSString *)urlString trueText:(NSString *)trueText falseText:(NSString *)falseText {
+    NSString *trueRule = [self trimmedActionDescription:trueText];
+    NSString *falseRule = [self trimmedActionDescription:falseText];
+    return trueRule.length == 0 && falseRule.length == 0 && [self networkURLStringIsControlRequest:urlString];
 }
 
 - (NSString *)networkStatusTextWithMatched:(BOOL)matched requestSucceeded:(BOOL)requestSucceeded statusCode:(NSInteger)statusCode error:(NSError *)error {
@@ -4828,6 +4998,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
                         completion:(void (^)(BOOL matched, BOOL requestSucceeded))completion {
     NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
     NSString *contains = [self trimmedActionDescription:task[@"networkContains"]];
+    NSString *falseText = [self trimmedActionDescription:task[@"networkFalse"]];
     if (url.length == 0) {
         _statusLabel.text = @"网络未填链接";
         if (completion) {
@@ -4836,11 +5007,11 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         return;
     }
 
-    [self performNetworkRequestWithURLString:url expectedText:contains defaultExpectedTrue:NO completion:^(BOOL matched, BOOL requestSucceeded, __unused NSString *body, NSInteger statusCode, NSError *error) {
+    BOOL oneShot = [self networkTaskIsOneShotWithURL:url trueText:contains falseText:falseText];
+    [self performNetworkRequestWithURLString:url trueText:contains falseText:falseText defaultExpectedTrue:!oneShot completion:^(BOOL matched, BOOL requestSucceeded, __unused NSString *body, NSInteger statusCode, NSError *error) {
         if (runGeneration != 0 && (!self->_taskRunActive || runGeneration != self->_taskRunGeneration)) {
             return;
         }
-        BOOL oneShot = contains.length == 0;
         self->_statusLabel.text = oneShot
             ? (requestSucceeded ? @"网络请求完成" : [self networkStatusTextWithMatched:NO requestSucceeded:requestSucceeded statusCode:statusCode error:error])
             : [self networkStatusTextWithMatched:matched requestSucceeded:requestSucceeded statusCode:statusCode error:error];
@@ -4868,7 +5039,9 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     }
 
     NSString *contains = [self trimmedActionDescription:task[@"networkContains"]];
-    BOOL waitsForCondition = contains.length > 0;
+    NSString *falseText = [self trimmedActionDescription:task[@"networkFalse"]];
+    NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
+    BOOL waitsForCondition = ![self networkTaskIsOneShotWithURL:url trueText:contains falseText:falseText];
     [self performNetworkRequestTask:task runGeneration:runGeneration completion:^(BOOL matched, BOOL requestSucceeded) {
         if (!self->_taskRunActive || runGeneration != self->_taskRunGeneration) {
             return;
@@ -5261,7 +5434,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     NSString *url = _globalNetworkURL;
     NSString *contains = _globalNetworkContainsText;
-    [self performNetworkRequestWithURLString:url expectedText:contains defaultExpectedTrue:contains.length == 0 completion:^(BOOL matched, BOOL requestSucceeded, __unused NSString *body, NSInteger statusCode, NSError *error) {
+    NSString *falseText = _globalNetworkFalseText;
+    [self performNetworkRequestWithURLString:url trueText:contains falseText:falseText defaultExpectedTrue:YES completion:^(BOOL matched, BOOL requestSucceeded, __unused NSString *body, NSInteger statusCode, NSError *error) {
         if (!self->_taskRunActive || runGeneration != self->_taskRunGeneration) {
             return;
         }
