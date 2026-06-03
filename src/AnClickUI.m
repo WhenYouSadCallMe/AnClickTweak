@@ -77,6 +77,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     UIWindow *_toastWindow;
     UIView *_panelView;
     UIView *_toastView;
+    UIView *_hostToastView;
     UIButton *_collapsedButton;
     UIButton *_captureButton;
     UIButton *_playButton;
@@ -105,6 +106,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     UIScrollView *_taskListView;
     UILabel *_statusLabel;
     UILabel *_toastLabel;
+    UILabel *_hostToastLabel;
     UILabel *_toolTitleLabel;
     UILabel *_editorTitleLabel;
     UILabel *_descriptionCaptionLabel;
@@ -1050,17 +1052,33 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     return label;
 }
 
+- (UIWindowScene *)toastWindowScene {
+    if (@available(iOS 13.0, *)) {
+        if (_panelWindow.windowScene) {
+            return _panelWindow.windowScene;
+        }
+        UIWindow *hostWindow = [self hostWindow];
+        if (hostWindow.windowScene) {
+            return hostWindow.windowScene;
+        }
+        return [self activeWindowScene];
+    }
+    return nil;
+}
+
 - (void)ensureToastWindow {
     CGRect bounds = UIScreen.mainScreen.bounds;
     if (!_toastWindow) {
         _toastWindow = [[UIWindow alloc] initWithFrame:bounds];
         if (@available(iOS 13.0, *)) {
-            _toastWindow.windowScene = [self activeWindowScene];
+            _toastWindow.windowScene = [self toastWindowScene];
         }
         _toastWindow.windowLevel = UIWindowLevelAlert + 3000;
         _toastWindow.backgroundColor = UIColor.clearColor;
         _toastWindow.userInteractionEnabled = NO;
         _toastWindow.rootViewController = [[UIViewController alloc] init];
+        _toastWindow.rootViewController.view.userInteractionEnabled = NO;
+        _toastWindow.rootViewController.view.backgroundColor = UIColor.clearColor;
 
         _toastView = [[UIView alloc] initWithFrame:CGRectZero];
         _toastView.backgroundColor = [UIColor colorWithWhite:0 alpha:0.82];
@@ -1087,8 +1105,10 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _toastWindow.frame = bounds;
     _toastWindow.rootViewController.view.frame = bounds;
     if (@available(iOS 13.0, *)) {
-        if (!_toastWindow.windowScene) {
-            _toastWindow.windowScene = [self activeWindowScene];
+        UIWindowScene *scene = [self toastWindowScene];
+        if (scene && _toastWindow.windowScene != scene) {
+            _toastWindow.hidden = YES;
+            _toastWindow.windowScene = scene;
         }
     }
 }
@@ -1120,6 +1140,73 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     _toastView.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:_toastView.bounds cornerRadius:_toastView.layer.cornerRadius].CGPath;
 }
 
+- (void)applyToastStyleToView:(UIView *)view label:(UILabel *)label {
+    view.backgroundColor = [UIColor colorWithWhite:0 alpha:0.84];
+    view.userInteractionEnabled = NO;
+    view.layer.cornerRadius = 10.0;
+    view.layer.borderWidth = 1.0;
+    view.layer.borderColor = [[self themeHighlightColor] colorWithAlphaComponent:0.42].CGColor;
+    view.layer.shadowColor = UIColor.blackColor.CGColor;
+    view.layer.shadowOpacity = 0.45;
+    view.layer.shadowRadius = 12.0;
+    view.layer.shadowOffset = CGSizeMake(0, 6);
+
+    label.textColor = UIColor.whiteColor;
+    label.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
+    label.textAlignment = NSTextAlignmentCenter;
+    label.numberOfLines = 2;
+    label.adjustsFontSizeToFitWidth = YES;
+    label.minimumScaleFactor = 0.72;
+    label.userInteractionEnabled = NO;
+}
+
+- (void)ensureHostToastInWindow:(UIWindow *)hostWindow {
+    if (!hostWindow) {
+        return;
+    }
+
+    if (!_hostToastView) {
+        _hostToastView = [[UIView alloc] initWithFrame:CGRectZero];
+        _hostToastView.alpha = 0.0;
+        _hostToastLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+        [self applyToastStyleToView:_hostToastView label:_hostToastLabel];
+        [_hostToastView addSubview:_hostToastLabel];
+    }
+
+    if (_hostToastView.superview != hostWindow) {
+        [_hostToastView removeFromSuperview];
+        [hostWindow addSubview:_hostToastView];
+    }
+    [hostWindow bringSubviewToFront:_hostToastView];
+}
+
+- (void)layoutHostToastWithMessage:(NSString *)message inWindow:(UIWindow *)hostWindow {
+    if (!_hostToastView || !_hostToastLabel || !hostWindow) {
+        return;
+    }
+
+    CGRect bounds = hostWindow.bounds;
+    CGFloat horizontalMargin = 18.0;
+    CGFloat maxWidth = MIN(bounds.size.width - horizontalMargin * 2.0, 340.0);
+    CGSize fittingSize = [message boundingRectWithSize:CGSizeMake(maxWidth - 28.0, 44.0)
+                                               options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+                                            attributes:@{NSFontAttributeName: _hostToastLabel.font}
+                                               context:nil].size;
+    CGFloat width = MIN(maxWidth, MAX(138.0, ceil(fittingSize.width) + 30.0));
+    CGFloat height = MAX(42.0, ceil(fittingSize.height) + 18.0);
+    CGFloat safeBottom = 0.0;
+    if (@available(iOS 11.0, *)) {
+        safeBottom = hostWindow.safeAreaInsets.bottom;
+    }
+    CGFloat y = bounds.size.height - safeBottom - height - 78.0;
+    if (y < 40.0) {
+        y = MAX(20.0, bounds.size.height - height - 24.0);
+    }
+    _hostToastView.frame = CGRectMake((bounds.size.width - width) * 0.5, y, width, height);
+    _hostToastLabel.frame = CGRectInset(_hostToastView.bounds, 14.0, 7.0);
+    _hostToastView.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:_hostToastView.bounds cornerRadius:_hostToastView.layer.cornerRadius].CGPath;
+}
+
 - (void)showToast:(NSString *)message {
     NSString *text = [self trimmedActionDescription:message];
     if (text.length == 0) {
@@ -1128,15 +1215,32 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
     dispatch_async(dispatch_get_main_queue(), ^{
         [self ensureToastWindow];
-        self->_toastLabel.text = text;
-        [self layoutToastWithMessage:text];
-        self->_toastWindow.hidden = NO;
+        UIWindow *hostWindow = [self hostWindow];
+        if (hostWindow) {
+            [self ensureHostToastInWindow:hostWindow];
+            self->_hostToastLabel.text = text;
+            [self layoutHostToastWithMessage:text inWindow:hostWindow];
+        }
+        if (self->_toastWindow) {
+            self->_toastLabel.text = text;
+            [self layoutToastWithMessage:text];
+            [self->_toastWindow makeKeyAndVisible];
+            if (hostWindow && !hostWindow.hidden) {
+                [hostWindow makeKeyWindow];
+            } else if (self->_panelWindow && !self->_panelWindow.hidden) {
+                [self->_panelWindow makeKeyWindow];
+            }
+        }
         NSUInteger generation = ++self->_toastGeneration;
         [self->_toastView.layer removeAllAnimations];
+        [self->_hostToastView.layer removeAllAnimations];
         self->_toastView.alpha = 1.0;
+        self->_hostToastView.alpha = hostWindow ? 1.0 : 0.0;
         self->_toastView.transform = CGAffineTransformMakeScale(0.98, 0.98);
+        self->_hostToastView.transform = CGAffineTransformMakeScale(0.98, 0.98);
         [UIView animateWithDuration:0.16 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
             self->_toastView.transform = CGAffineTransformIdentity;
+            self->_hostToastView.transform = CGAffineTransformIdentity;
         } completion:nil];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (generation != self->_toastGeneration) {
@@ -1144,6 +1248,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             }
             [UIView animateWithDuration:0.22 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseIn animations:^{
                 self->_toastView.alpha = 0.0;
+                self->_hostToastView.alpha = 0.0;
             } completion:^(BOOL finished) {
                 if (finished && generation == self->_toastGeneration) {
                     self->_toastWindow.hidden = YES;
@@ -5462,6 +5567,11 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         }
         if (!waitsForCondition || matched) {
             [self continueTaskRunAfterIndex:index inWindow:hostWindow generation:runGeneration];
+            return;
+        }
+
+        if (blocked) {
+            [self stopTaskRunWithStatus:@"命中不运行 已停止"];
             return;
         }
 
