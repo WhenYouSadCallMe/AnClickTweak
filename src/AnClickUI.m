@@ -99,6 +99,7 @@ static char AnClickVolumeObservationContext;
     UIButton *_imageActionButton;
     UIButton *_networkRequestModeButton;
     UIButton *_networkMethodButton;
+    UIButton *_networkRetryModeButton;
     UIButton *_previewActionButton;
     UIButton *_swipeRecordButton;
     UIButton *_macroRecordButton;
@@ -201,6 +202,7 @@ static char AnClickVolumeObservationContext;
     BOOL _globalNetworkGateEnabled;
     BOOL _networkRequestOnly;
     BOOL _networkUsesPost;
+    BOOL _networkRetryForever;
     BOOL _globalTimePickerEditingStartTime;
     BOOL _taskRunActive;
     BOOL _volumeShortcutRegistered;
@@ -696,6 +698,7 @@ static char AnClickVolumeObservationContext;
     _globalNetworkGateEnabled = NO;
     _networkRequestOnly = NO;
     _networkUsesPost = NO;
+    _networkRetryForever = YES;
     _networkTimeout = 8.0;
     _globalStartHour = 8;
     _globalStartMinute = 0;
@@ -865,6 +868,10 @@ static char AnClickVolumeObservationContext;
     _networkMethodButton = [self panelButtonWithTitle:@"GET" action:@selector(toggleNetworkMethod)];
     _networkMethodButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 196, buttonWidth, 32);
     [_panelView addSubview:_networkMethodButton];
+
+    _networkRetryModeButton = [self panelButtonWithTitle:@"一直判断" action:@selector(toggleNetworkRetryMode)];
+    _networkRetryModeButton.frame = CGRectMake(gap, 234, buttonWidth, 32);
+    [_panelView addSubview:_networkRetryModeButton];
 
     _previewActionButton = [self panelButtonWithTitle:@"预览" action:@selector(previewCurrentAction)];
     _previewActionButton.frame = CGRectMake(gap, 234, buttonWidth, 32);
@@ -1651,6 +1658,7 @@ static char AnClickVolumeObservationContext;
     _imageActionButton.hidden = YES;
     _networkRequestModeButton.hidden = YES;
     _networkMethodButton.hidden = YES;
+    _networkRetryModeButton.hidden = YES;
     _previewActionButton.hidden = YES;
     _swipeRecordButton.hidden = YES;
     _macroRecordButton.hidden = YES;
@@ -1710,6 +1718,7 @@ static char AnClickVolumeObservationContext;
         _imageActionButton,
         _networkRequestModeButton,
         _networkMethodButton,
+        _networkRetryModeButton,
         _previewActionButton,
         _swipeRecordButton,
         _macroRecordButton,
@@ -2954,6 +2963,7 @@ static char AnClickVolumeObservationContext;
     _networkPostBody = nil;
     _networkRequestOnly = NO;
     _networkUsesPost = NO;
+    _networkRetryForever = YES;
     _networkTimeout = 8.0;
     _hasTargetColor = NO;
     _targetColorRed = 0;
@@ -3417,6 +3427,17 @@ static char AnClickVolumeObservationContext;
     [self updateStatusForCurrentConfig];
 }
 
+- (void)toggleNetworkRetryMode {
+    if (_actionMode != AnClickActionModeNetwork || _networkRequestOnly) {
+        return;
+    }
+    [self syncNetworkFieldsFromEditor];
+    _networkRetryForever = !_networkRetryForever;
+    [self autosaveSelectedTaskIfPossible];
+    [self refreshEditorConfigControls];
+    [self updateStatusForCurrentConfig];
+}
+
 - (void)toggleNetworkMethod {
     if (_actionMode != AnClickActionModeNetwork &&
         !((_actionMode == AnClickActionModeImage ||
@@ -3476,6 +3497,7 @@ static char AnClickVolumeObservationContext;
     _imageActionButton.hidden = YES;
     _networkRequestModeButton.hidden = YES;
     _networkMethodButton.hidden = YES;
+    _networkRetryModeButton.hidden = YES;
     _previewActionButton.hidden = YES;
     _swipeRecordButton.hidden = YES;
     _macroRecordButton.hidden = YES;
@@ -3695,7 +3717,8 @@ static char AnClickVolumeObservationContext;
     CGFloat fieldWidth = floor((width - side * 2.0 - gap * 2.0) / 3.0);
     NSArray<UILabel *> *captions = @[_thresholdCaptionLabel, _delayCaptionLabel, _repeatCaptionLabel];
     NSArray<UITextField *> *fields = @[_thresholdField, _delayField, _repeatField];
-    NSArray<NSString *> *titles = @[@"超时秒", @"延时秒", @"执行次数"];
+    NSString *repeatTitle = (_actionMode == AnClickActionModeNetwork && !_networkRequestOnly) ? @"判断次数" : @"执行次数";
+    NSArray<NSString *> *titles = @[@"超时秒", @"延时秒", repeatTitle];
     for (NSUInteger i = 0; i < captions.count; i++) {
         UILabel *caption = captions[i];
         UITextField *field = fields[i];
@@ -3911,6 +3934,14 @@ static char AnClickVolumeObservationContext;
         _networkRequestModeButton.frame = CGRectMake(side, networkModeY, contentWidth, 36);
         [self updateButtonShadowPath:_networkRequestModeButton];
         CGFloat conditionTopY = networkModeY + 46.0;
+        if (!_networkRequestOnly) {
+            [_networkRetryModeButton setTitle:_networkRetryForever ? @"当前：一直判断" : @"当前：判断次数" forState:UIControlStateNormal];
+            [self styleSegmentButton:_networkRetryModeButton selected:_networkRetryForever];
+            _networkRetryModeButton.hidden = NO;
+            _networkRetryModeButton.frame = CGRectMake(side, conditionTopY, contentWidth, 36);
+            [self updateButtonShadowPath:_networkRetryModeButton];
+            conditionTopY += 46.0;
+        }
 
         _secondaryConfigLabel.text = roomyNetworkLayout ? @"返回包含这些就运行（空=状态真）" : @"包含就运行";
         _secondaryConfigLabel.hidden = _networkRequestOnly;
@@ -4061,6 +4092,9 @@ static char AnClickVolumeObservationContext;
             : (_networkContainsText.length > 0 ? [NSString stringWithFormat:@"包含%@就运行", _networkContainsText] : @"状态真就运行");
         if (_networkFalseText.length > 0) {
             conditionState = [conditionState stringByAppendingFormat:@" 包含%@就不运行", _networkFalseText];
+        }
+        if (!oneShot) {
+            conditionState = [conditionState stringByAppendingFormat:@" %@", _networkRetryForever ? @"一直判断" : [NSString stringWithFormat:@"判断%ld次", (long)MAX(1, _actionRepeatCount)]];
         }
         _statusLabel.text = [NSString stringWithFormat:@"网络 %@ %@ %@", [self normalizedNetworkMethodFromPostFlag:_networkUsesPost], urlState, conditionState];
         return;
@@ -5144,6 +5178,8 @@ static char AnClickVolumeObservationContext;
             return nil;
         }
         task[@"networkRequestOnly"] = @(_networkRequestOnly);
+        task[@"networkRetryForever"] = @(_networkRetryForever);
+        task[@"networkRetryLimit"] = @(MAX(1, _actionRepeatCount));
         task[@"networkTimeout"] = @(MAX(1.0, MIN(60.0, _networkTimeout)));
         if (_networkContainsText.length > 0) {
             task[@"networkContains"] = _networkContainsText;
@@ -5247,6 +5283,12 @@ static char AnClickVolumeObservationContext;
             subtitle = [NSString stringWithFormat:@"%@ · %@ · 状态真就运行 · 包含 %@ 就不运行", url, method, falseText];
         } else {
             subtitle = [NSString stringWithFormat:@"%@ · %@ · 状态真就运行 / 状态假就不运行", url, method];
+        }
+        if (!requestOnly && ![self networkTaskIsOneShotWithURL:url trueText:contains falseText:falseText]) {
+            subtitle = [subtitle stringByAppendingFormat:@" · %@",
+                        [self networkRetryForeverForTask:task]
+                            ? @"一直判断"
+                            : [NSString stringWithFormat:@"判断%ld次", (long)[self networkRetryLimitForTask:task]]];
         }
         subtitle = [subtitle stringByAppendingFormat:@" · 超时%.0fs", [self networkTimeoutForTask:task]];
     }
@@ -5552,6 +5594,8 @@ static char AnClickVolumeObservationContext;
         _networkContainsText = [self trimmedActionDescription:task[@"networkContains"]];
         _networkFalseText = [self trimmedActionDescription:task[@"networkFalse"]];
         _networkRequestOnly = [task[@"networkRequestOnly"] boolValue];
+        _networkRetryForever = [self networkRetryForeverForTask:task];
+        _actionRepeatCount = [self networkRetryLimitForTask:task];
         _networkTimeout = [task[@"networkTimeout"] respondsToSelector:@selector(doubleValue)]
             ? MIN(60.0, MAX(1.0, [task[@"networkTimeout"] doubleValue]))
             : 8.0;
@@ -5854,6 +5898,22 @@ static char AnClickVolumeObservationContext;
         return MIN(60.0, MAX(1.0, [value doubleValue]));
     }
     return 8.0;
+}
+
+- (BOOL)networkRetryForeverForTask:(NSDictionary *)task {
+    id value = task[@"networkRetryForever"];
+    if ([value respondsToSelector:@selector(boolValue)]) {
+        return [value boolValue];
+    }
+    return YES;
+}
+
+- (NSInteger)networkRetryLimitForTask:(NSDictionary *)task {
+    id value = task[@"networkRetryLimit"];
+    if ([value respondsToSelector:@selector(integerValue)]) {
+        return MIN(99, MAX(1, [value integerValue]));
+    }
+    return [self repeatCountForTask:task];
 }
 
 - (NSString *)normalizedNetworkMethodFromPostFlag:(BOOL)usesPost {
@@ -6166,30 +6226,40 @@ static char AnClickVolumeObservationContext;
     });
 }
 
-- (void)pollNetworkTask:(NSDictionary *)task atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
+- (void)pollNetworkTask:(NSDictionary *)task atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration attempt:(NSInteger)attempt {
     if (!_taskRunActive || runGeneration != _taskRunGeneration) {
         return;
     }
 
     BOOL waitsForCondition = ![self networkTaskIsOneShot:task];
+    BOOL retryForever = [self networkRetryForeverForTask:task];
+    NSInteger retryLimit = [self networkRetryLimitForTask:task];
     [self performNetworkRequestTask:task runGeneration:runGeneration completion:^(BOOL matched, BOOL requestSucceeded, BOOL blocked) {
         if (!self->_taskRunActive || runGeneration != self->_taskRunGeneration) {
             return;
         }
-        if (!waitsForCondition || matched) {
+        if (!waitsForCondition) {
             [self continueTaskRunAfterIndex:index inWindow:hostWindow generation:runGeneration];
             return;
         }
 
-        if (blocked) {
-            [self stopTaskRunWithStatus:@"命中不运行 已停止"];
+        if (matched && !blocked) {
+            [self continueTaskRunAfterIndex:index inWindow:hostWindow generation:runGeneration];
             return;
         }
 
-        self->_statusLabel.text = blocked ? @"命中不运行" : (requestSucceeded ? @"网络不运行" : @"网络重试中");
+        NSString *stateText = blocked ? @"命中不运行" : (requestSucceeded ? @"网络不运行" : @"网络重试中");
+        if (!retryForever && attempt >= retryLimit) {
+            [self stopTaskRunWithStatus:[NSString stringWithFormat:@"%@ 达到%ld次", stateText, (long)retryLimit]];
+            return;
+        }
+
+        self->_statusLabel.text = retryForever
+            ? [NSString stringWithFormat:@"%@ 继续判断", stateText]
+            : [NSString stringWithFormat:@"%@ %ld/%ld", stateText, (long)attempt, (long)retryLimit];
         [self showToast:self->_statusLabel.text];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self pollNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration];
+            [self pollNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration attempt:attempt + 1];
         });
     }];
 }
@@ -6199,7 +6269,7 @@ static char AnClickVolumeObservationContext;
     _statusLabel.text = @"网络请求";
     [self showToast:[self toastTextForTask:task index:index]];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self pollNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration];
+        [self pollNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration attempt:1];
     });
 }
 
