@@ -98,6 +98,7 @@ static char AnClickVolumeObservationContext;
     UIButton *_editorBackButton;
     UIButton *_imageActionButton;
     UIButton *_networkRequestModeButton;
+    UIButton *_networkMethodButton;
     UIButton *_previewActionButton;
     UIButton *_swipeRecordButton;
     UIButton *_macroRecordButton;
@@ -127,6 +128,7 @@ static char AnClickVolumeObservationContext;
     UITextField *_networkURLField;
     UITextField *_networkContainsField;
     UITextField *_networkFalseField;
+    UITextField *_networkPostBodyField;
     UIView *_captureOverlay;
     UIView *_selectionView;
     UIView *_pointPickOverlay;
@@ -198,6 +200,7 @@ static char AnClickVolumeObservationContext;
     BOOL _globalStopEnabled;
     BOOL _globalNetworkGateEnabled;
     BOOL _networkRequestOnly;
+    BOOL _networkUsesPost;
     BOOL _globalTimePickerEditingStartTime;
     BOOL _taskRunActive;
     BOOL _volumeShortcutRegistered;
@@ -245,6 +248,7 @@ static char AnClickVolumeObservationContext;
     NSString *_networkURL;
     NSString *_networkContainsText;
     NSString *_networkFalseText;
+    NSString *_networkPostBody;
     NSString *_globalNetworkURL;
     NSString *_globalNetworkContainsText;
     NSString *_globalNetworkFalseText;
@@ -690,6 +694,9 @@ static char AnClickVolumeObservationContext;
     _globalStartEnabled = NO;
     _globalStopEnabled = NO;
     _globalNetworkGateEnabled = NO;
+    _networkRequestOnly = NO;
+    _networkUsesPost = NO;
+    _networkTimeout = 8.0;
     _globalStartHour = 8;
     _globalStartMinute = 0;
     _globalStartSecond = 0;
@@ -846,13 +853,18 @@ static char AnClickVolumeObservationContext;
     _saveTaskButton.frame = CGRectMake(gap, 120, buttonWidth, 34);
     [_panelView addSubview:_saveTaskButton];
 
-    _imageActionButton = [self panelButtonWithTitle:@"动作点击" action:@selector(cycleImageActionMode)];
+    _imageActionButton = [self panelButtonWithTitle:@"网络" action:@selector(selectImageActionMode:)];
+    _imageActionButton.tag = AnClickActionModeNetwork;
     _imageActionButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 196, buttonWidth, 32);
     [_panelView addSubview:_imageActionButton];
 
     _networkRequestModeButton = [self panelButtonWithTitle:@"返回判断" action:@selector(toggleNetworkRequestMode)];
     _networkRequestModeButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 196, buttonWidth, 32);
     [_panelView addSubview:_networkRequestModeButton];
+
+    _networkMethodButton = [self panelButtonWithTitle:@"GET" action:@selector(toggleNetworkMethod)];
+    _networkMethodButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 196, buttonWidth, 32);
+    [_panelView addSubview:_networkMethodButton];
 
     _previewActionButton = [self panelButtonWithTitle:@"预览" action:@selector(previewCurrentAction)];
     _previewActionButton.frame = CGRectMake(gap, 234, buttonWidth, 32);
@@ -993,6 +1005,17 @@ static char AnClickVolumeObservationContext;
     [_networkFalseField addTarget:self action:@selector(networkFieldChanged:) forControlEvents:UIControlEventEditingChanged];
     [_networkFalseField addTarget:self action:@selector(networkFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_networkFalseField];
+
+    _networkPostBodyField = [[UITextField alloc] initWithFrame:CGRectZero];
+    _networkPostBodyField.placeholder = @"POST参数 JSON/表单";
+    _networkPostBodyField.keyboardType = UIKeyboardTypeDefault;
+    _networkPostBodyField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _networkPostBodyField.autocorrectionType = UITextAutocorrectionTypeNo;
+    [self applyObsidianInputStyleToField:_networkPostBodyField placeholder:@"POST参数 JSON/表单" monospaced:NO];
+    [self configureConfigTextField:_networkPostBodyField];
+    [_networkPostBodyField addTarget:self action:@selector(networkFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+    [_networkPostBodyField addTarget:self action:@selector(networkFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+    [_panelView addSubview:_networkPostBodyField];
 
     _taskListView = [[UIScrollView alloc] initWithFrame:CGRectMake(8, 84, panelWidth - 16, panelHeight - 92)];
     _taskListView.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.92];
@@ -1627,6 +1650,7 @@ static char AnClickVolumeObservationContext;
     _cancelEditButton.hidden = !visible;
     _imageActionButton.hidden = YES;
     _networkRequestModeButton.hidden = YES;
+    _networkMethodButton.hidden = YES;
     _previewActionButton.hidden = YES;
     _swipeRecordButton.hidden = YES;
     _macroRecordButton.hidden = YES;
@@ -1639,6 +1663,7 @@ static char AnClickVolumeObservationContext;
     _networkURLField.hidden = YES;
     _networkContainsField.hidden = YES;
     _networkFalseField.hidden = YES;
+    _networkPostBodyField.hidden = YES;
     _previewView.hidden = YES;
     _colorPreviewView.hidden = YES;
     _editorContentScrollView.hidden = !visible;
@@ -1684,6 +1709,7 @@ static char AnClickVolumeObservationContext;
         _testButton,
         _imageActionButton,
         _networkRequestModeButton,
+        _networkMethodButton,
         _previewActionButton,
         _swipeRecordButton,
         _macroRecordButton,
@@ -1695,6 +1721,7 @@ static char AnClickVolumeObservationContext;
         _networkURLField,
         _networkContainsField,
         _networkFalseField,
+        _networkPostBodyField,
         _previewView,
         _colorPreviewView,
     };
@@ -2924,7 +2951,9 @@ static char AnClickVolumeObservationContext;
     _networkURL = nil;
     _networkContainsText = nil;
     _networkFalseText = nil;
+    _networkPostBody = nil;
     _networkRequestOnly = NO;
+    _networkUsesPost = NO;
     _networkTimeout = 8.0;
     _hasTargetColor = NO;
     _targetColorRed = 0;
@@ -3108,6 +3137,7 @@ static char AnClickVolumeObservationContext;
         @(AnClickActionModeTap),
         @(AnClickActionModeDoubleTap),
         @(AnClickActionModeLongPress),
+        @(AnClickActionModeNetwork),
     ];
 }
 
@@ -3162,7 +3192,7 @@ static char AnClickVolumeObservationContext;
         return;
     }
 
-    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _thresholdField, _ocrTargetField, _networkURLField, _networkContainsField, _networkFalseField, nil];
+    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _thresholdField, _ocrTargetField, _networkURLField, _networkContainsField, _networkFalseField, _networkPostBodyField, nil];
     if (_globalDelayField) {
         [fields addObject:_globalDelayField];
     }
@@ -3335,6 +3365,9 @@ static char AnClickVolumeObservationContext;
     if (_networkFalseField) {
         _networkFalseText = [self trimmedActionDescription:_networkFalseField.text];
     }
+    if (_networkPostBodyField) {
+        _networkPostBody = [self trimmedActionDescription:_networkPostBodyField.text];
+    }
 }
 
 - (void)refreshTimingFieldsIfNeeded {
@@ -3384,6 +3417,21 @@ static char AnClickVolumeObservationContext;
     [self updateStatusForCurrentConfig];
 }
 
+- (void)toggleNetworkMethod {
+    if (_actionMode != AnClickActionModeNetwork &&
+        !((_actionMode == AnClickActionModeImage ||
+           _actionMode == AnClickActionModeOCR ||
+           _actionMode == AnClickActionModeColor) &&
+          _imageActionMode == AnClickActionModeNetwork)) {
+        return;
+    }
+    [self syncNetworkFieldsFromEditor];
+    _networkUsesPost = !_networkUsesPost;
+    [self autosaveSelectedTaskIfPossible];
+    [self refreshEditorConfigControls];
+    [self updateStatusForCurrentConfig];
+}
+
 - (void)actionTimingChanged:(__unused UITextField *)textField {
     [self syncActionTimingFromFields];
     [self autosaveSelectedTaskIfPossible];
@@ -3427,6 +3475,7 @@ static char AnClickVolumeObservationContext;
     _testButton.hidden = YES;
     _imageActionButton.hidden = YES;
     _networkRequestModeButton.hidden = YES;
+    _networkMethodButton.hidden = YES;
     _previewActionButton.hidden = YES;
     _swipeRecordButton.hidden = YES;
     _macroRecordButton.hidden = YES;
@@ -3438,6 +3487,7 @@ static char AnClickVolumeObservationContext;
     _networkURLField.hidden = YES;
     _networkContainsField.hidden = YES;
     _networkFalseField.hidden = YES;
+    _networkPostBodyField.hidden = YES;
     _colorPreviewView.hidden = YES;
     _saveTaskButton.hidden = YES;
     _editorBackButton.hidden = YES;
@@ -3507,6 +3557,46 @@ static char AnClickVolumeObservationContext;
         button.frame = CGRectMake(x + (buttonWidth + gap) * i, y, buttonWidth, height);
         [self updateButtonShadowPath:button];
     }
+}
+
+- (void)configureSuccessActionButtons {
+    [_recordSwipeButton setTitle:@"点击" forState:UIControlStateNormal];
+    [_previewSwipeButton setTitle:@"双击" forState:UIControlStateNormal];
+    [_clearActionButton setTitle:@"长按" forState:UIControlStateNormal];
+    [_imageActionButton setTitle:@"网络" forState:UIControlStateNormal];
+}
+
+- (void)layoutSuccessActionButtonsAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
+    [self configureSuccessActionButtons];
+    [self layoutButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton, _imageActionButton]
+                      x:side
+                      y:y
+                  width:width
+                 height:34.0
+                    gap:7.0];
+    [self styleSegmentButton:_recordSwipeButton selected:_imageActionMode == AnClickActionModeTap];
+    [self styleSegmentButton:_previewSwipeButton selected:_imageActionMode == AnClickActionModeDoubleTap];
+    [self styleSegmentButton:_clearActionButton selected:_imageActionMode == AnClickActionModeLongPress];
+    [self styleSegmentButton:_imageActionButton selected:_imageActionMode == AnClickActionModeNetwork];
+}
+
+- (CGFloat)layoutRecognitionNetworkFieldsAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
+    _networkURLField.hidden = NO;
+    _networkURLField.frame = CGRectMake(side, y, width, 40.0);
+
+    [_networkMethodButton setTitle:(_networkUsesPost ? @"POST" : @"GET") forState:UIControlStateNormal];
+    [self styleSegmentButton:_networkMethodButton selected:_networkUsesPost];
+    _networkMethodButton.hidden = NO;
+    _networkMethodButton.frame = CGRectMake(side, y + 46.0, width, 34.0);
+    [self updateButtonShadowPath:_networkMethodButton];
+
+    CGFloat nextY = y + 88.0;
+    if (_networkUsesPost) {
+        _networkPostBodyField.hidden = NO;
+        _networkPostBodyField.frame = CGRectMake(side, nextY, width, 40.0);
+        nextY += 50.0;
+    }
+    return nextY;
 }
 
 - (NSString *)pointSummaryForMode:(AnClickActionMode)mode emptyTitle:(NSString *)emptyTitle {
@@ -3667,6 +3757,9 @@ static char AnClickVolumeObservationContext;
     if (!_networkFalseField.isFirstResponder) {
         _networkFalseField.text = _networkFalseText ?: @"";
     }
+    if (!_networkPostBodyField.isFirstResponder) {
+        _networkPostBodyField.text = _networkPostBody ?: @"";
+    }
     [self refreshTimingFieldsIfNeeded];
     CGFloat configTopY = [self editorConfigTopY];
 
@@ -3716,12 +3809,13 @@ static char AnClickVolumeObservationContext;
         CGFloat actionLabelY = modeButtonY + 40.0;
         _tertiaryConfigLabel.frame = CGRectMake(side, actionLabelY, contentWidth, 20);
         CGFloat actionButtonY = actionLabelY + 22.0;
-        [self layoutButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton] x:side y:actionButtonY width:contentWidth height:34 gap:8.0];
-        [self styleSegmentButton:_recordSwipeButton selected:_imageActionMode == AnClickActionModeTap];
-        [self styleSegmentButton:_previewSwipeButton selected:_imageActionMode == AnClickActionModeDoubleTap];
-        [self styleSegmentButton:_clearActionButton selected:_imageActionMode == AnClickActionModeLongPress];
+        [self layoutSuccessActionButtonsAtY:actionButtonY side:side width:contentWidth];
 
-        [self layoutImageFieldsAtY:actionButtonY + 40.0];
+        CGFloat fieldsY = actionButtonY + 42.0;
+        if (_imageActionMode == AnClickActionModeNetwork) {
+            fieldsY = [self layoutRecognitionNetworkFieldsAtY:fieldsY side:side width:contentWidth];
+        }
+        [self layoutImageFieldsAtY:fieldsY];
     } else if (_actionMode == AnClickActionModeOCR) {
         _saveTaskButton.enabled = YES;
         _saveTaskButton.alpha = 1.0;
@@ -3747,15 +3841,13 @@ static char AnClickVolumeObservationContext;
         _tertiaryConfigLabel.text = @"成功后动作类型";
         _tertiaryConfigLabel.hidden = NO;
         _tertiaryConfigLabel.frame = CGRectMake(side, configTopY + 140.0, contentWidth, 20);
-        [_recordSwipeButton setTitle:@"点击" forState:UIControlStateNormal];
-        [_previewSwipeButton setTitle:@"双击" forState:UIControlStateNormal];
-        [_clearActionButton setTitle:@"长按" forState:UIControlStateNormal];
         CGFloat actionButtonY = configTopY + 162.0;
-        [self layoutButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton] x:side y:actionButtonY width:contentWidth height:34 gap:8.0];
-        [self styleSegmentButton:_recordSwipeButton selected:_imageActionMode == AnClickActionModeTap];
-        [self styleSegmentButton:_previewSwipeButton selected:_imageActionMode == AnClickActionModeDoubleTap];
-        [self styleSegmentButton:_clearActionButton selected:_imageActionMode == AnClickActionModeLongPress];
-        [self layoutDoubleTimingFieldsAtY:actionButtonY + 44.0];
+        [self layoutSuccessActionButtonsAtY:actionButtonY side:side width:contentWidth];
+        CGFloat fieldsY = actionButtonY + 44.0;
+        if (_imageActionMode == AnClickActionModeNetwork) {
+            fieldsY = [self layoutRecognitionNetworkFieldsAtY:fieldsY side:side width:contentWidth];
+        }
+        [self layoutDoubleTimingFieldsAtY:fieldsY];
     } else if (_actionMode == AnClickActionModeColor) {
         _saveTaskButton.enabled = YES;
         _saveTaskButton.alpha = 1.0;
@@ -3780,15 +3872,13 @@ static char AnClickVolumeObservationContext;
         _secondaryConfigLabel.text = @"成功后动作类型";
         _secondaryConfigLabel.hidden = NO;
         _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 72.0, contentWidth, 20);
-        [_recordSwipeButton setTitle:@"点击" forState:UIControlStateNormal];
-        [_previewSwipeButton setTitle:@"双击" forState:UIControlStateNormal];
-        [_clearActionButton setTitle:@"长按" forState:UIControlStateNormal];
         CGFloat actionButtonY = configTopY + 94.0;
-        [self layoutButtons:@[_recordSwipeButton, _previewSwipeButton, _clearActionButton] x:side y:actionButtonY width:contentWidth height:34 gap:8.0];
-        [self styleSegmentButton:_recordSwipeButton selected:_imageActionMode == AnClickActionModeTap];
-        [self styleSegmentButton:_previewSwipeButton selected:_imageActionMode == AnClickActionModeDoubleTap];
-        [self styleSegmentButton:_clearActionButton selected:_imageActionMode == AnClickActionModeLongPress];
-        [self layoutColorFieldsAtY:actionButtonY + 44.0];
+        [self layoutSuccessActionButtonsAtY:actionButtonY side:side width:contentWidth];
+        CGFloat fieldsY = actionButtonY + 44.0;
+        if (_imageActionMode == AnClickActionModeNetwork) {
+            fieldsY = [self layoutRecognitionNetworkFieldsAtY:fieldsY side:side width:contentWidth];
+        }
+        [self layoutColorFieldsAtY:fieldsY];
     } else if (_actionMode == AnClickActionModeNetwork) {
         _saveTaskButton.enabled = YES;
         _saveTaskButton.alpha = 1.0;
@@ -3803,11 +3893,24 @@ static char AnClickVolumeObservationContext;
         _networkURLField.frame = CGRectMake(side, configTopY + 22.0, contentWidth, 40);
 
         BOOL roomyNetworkLayout = _panelView.bounds.size.height >= 640.0;
+        [_networkMethodButton setTitle:(_networkUsesPost ? @"POST" : @"GET") forState:UIControlStateNormal];
+        [self styleSegmentButton:_networkMethodButton selected:_networkUsesPost];
+        _networkMethodButton.hidden = NO;
+        _networkMethodButton.frame = CGRectMake(side, configTopY + 72.0, contentWidth, 36);
+        [self updateButtonShadowPath:_networkMethodButton];
+
+        CGFloat networkModeY = configTopY + 118.0;
+        if (_networkUsesPost) {
+            _networkPostBodyField.hidden = NO;
+            _networkPostBodyField.frame = CGRectMake(side, networkModeY, contentWidth, 40);
+            networkModeY += 50.0;
+        }
         [_networkRequestModeButton setTitle:_networkRequestOnly ? @"当前：仅请求" : @"当前：返回判断" forState:UIControlStateNormal];
         [self styleSegmentButton:_networkRequestModeButton selected:_networkRequestOnly];
         _networkRequestModeButton.hidden = NO;
-        _networkRequestModeButton.frame = CGRectMake(side, configTopY + 72.0, contentWidth, 36);
+        _networkRequestModeButton.frame = CGRectMake(side, networkModeY, contentWidth, 36);
         [self updateButtonShadowPath:_networkRequestModeButton];
+        CGFloat conditionTopY = networkModeY + 46.0;
 
         _secondaryConfigLabel.text = roomyNetworkLayout ? @"返回包含这些就运行（空=状态真）" : @"包含就运行";
         _secondaryConfigLabel.hidden = _networkRequestOnly;
@@ -3821,24 +3924,24 @@ static char AnClickVolumeObservationContext;
         [self styleNormalButton:_runManualButton];
 
         if (_networkRequestOnly) {
-            [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:configTopY + 124.0 width:contentWidth height:36 gap:10.0];
-            [self layoutNetworkFieldsAtY:configTopY + 176.0];
+            [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:conditionTopY width:contentWidth height:36 gap:10.0];
+            [self layoutNetworkFieldsAtY:conditionTopY + 52.0];
         } else if (roomyNetworkLayout) {
-            _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 118.0, contentWidth, 20);
-            _networkContainsField.frame = CGRectMake(side, configTopY + 140.0, contentWidth, 40);
-            _tertiaryConfigLabel.frame = CGRectMake(side, configTopY + 190.0, contentWidth, 20);
-            _networkFalseField.frame = CGRectMake(side, configTopY + 212.0, contentWidth, 40);
-            [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:configTopY + 264.0 width:contentWidth height:36 gap:10.0];
-            [self layoutNetworkFieldsAtY:configTopY + 316.0];
+            _secondaryConfigLabel.frame = CGRectMake(side, conditionTopY, contentWidth, 20);
+            _networkContainsField.frame = CGRectMake(side, conditionTopY + 22.0, contentWidth, 40);
+            _tertiaryConfigLabel.frame = CGRectMake(side, conditionTopY + 72.0, contentWidth, 20);
+            _networkFalseField.frame = CGRectMake(side, conditionTopY + 94.0, contentWidth, 40);
+            [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:conditionTopY + 146.0 width:contentWidth height:36 gap:10.0];
+            [self layoutNetworkFieldsAtY:conditionTopY + 198.0];
         } else {
             CGFloat gap = 10.0;
             CGFloat halfWidth = floor((contentWidth - gap) / 2.0);
-            _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 118.0, halfWidth, 20);
-            _tertiaryConfigLabel.frame = CGRectMake(side + halfWidth + gap, configTopY + 118.0, halfWidth, 20);
-            _networkContainsField.frame = CGRectMake(side, configTopY + 140.0, halfWidth, 40);
-            _networkFalseField.frame = CGRectMake(side + halfWidth + gap, configTopY + 140.0, halfWidth, 40);
-            [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:configTopY + 192.0 width:contentWidth height:36 gap:10.0];
-            [self layoutNetworkFieldsAtY:configTopY + 242.0];
+            _secondaryConfigLabel.frame = CGRectMake(side, conditionTopY, halfWidth, 20);
+            _tertiaryConfigLabel.frame = CGRectMake(side + halfWidth + gap, conditionTopY, halfWidth, 20);
+            _networkContainsField.frame = CGRectMake(side, conditionTopY + 22.0, halfWidth, 40);
+            _networkFalseField.frame = CGRectMake(side + halfWidth + gap, conditionTopY + 22.0, halfWidth, 40);
+            [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:conditionTopY + 74.0 width:contentWidth height:36 gap:10.0];
+            [self layoutNetworkFieldsAtY:conditionTopY + 124.0];
         }
     } else if (_actionMode == AnClickActionModeMacro) {
         _saveTaskButton.enabled = YES;
@@ -3919,7 +4022,9 @@ static char AnClickVolumeObservationContext;
         _statusLabel.text = [NSString stringWithFormat:@"识图 %@ %@ 后%@",
                              templateState,
                              targetState,
-                             [self actionNameForMode:_imageActionMode]];
+                             _imageActionMode == AnClickActionModeNetwork
+                                ? [NSString stringWithFormat:@"%@网络", [self normalizedNetworkMethodFromPostFlag:_networkUsesPost]]
+                                : [self actionNameForMode:_imageActionMode]];
         return;
     }
 
@@ -3929,7 +4034,9 @@ static char AnClickVolumeObservationContext;
         _statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ 后%@",
                              targetState,
                              pointState,
-                             [self actionNameForMode:_imageActionMode]];
+                             _imageActionMode == AnClickActionModeNetwork
+                                ? [NSString stringWithFormat:@"%@网络", [self normalizedNetworkMethodFromPostFlag:_networkUsesPost]]
+                                : [self actionNameForMode:_imageActionMode]];
         return;
     }
 
@@ -3940,7 +4047,9 @@ static char AnClickVolumeObservationContext;
         _statusLabel.text = [NSString stringWithFormat:@"识色 %@ 容差%.0f 后%@",
                              targetState,
                              _colorTolerance,
-                             [self actionNameForMode:_imageActionMode]];
+                             _imageActionMode == AnClickActionModeNetwork
+                                ? [NSString stringWithFormat:@"%@网络", [self normalizedNetworkMethodFromPostFlag:_networkUsesPost]]
+                                : [self actionNameForMode:_imageActionMode]];
         return;
     }
 
@@ -3953,7 +4062,7 @@ static char AnClickVolumeObservationContext;
         if (_networkFalseText.length > 0) {
             conditionState = [conditionState stringByAppendingFormat:@" 包含%@就不运行", _networkFalseText];
         }
-        _statusLabel.text = [NSString stringWithFormat:@"网络 %@ %@", urlState, conditionState];
+        _statusLabel.text = [NSString stringWithFormat:@"网络 %@ %@ %@", [self normalizedNetworkMethodFromPostFlag:_networkUsesPost], urlState, conditionState];
         return;
     }
 
@@ -4916,6 +5025,32 @@ static char AnClickVolumeObservationContext;
     [self refreshCollapsedButtonTitle];
 }
 
+- (BOOL)storeNetworkRequestConfigInTask:(NSMutableDictionary *)task requireComplete:(BOOL)requireComplete {
+    [self syncNetworkFieldsFromEditor];
+    if (_networkURL.length > 0) {
+        if (![self normalizedNetworkURLString:_networkURL]) {
+            _statusLabel.text = @"网络链接无效";
+            return NO;
+        }
+        task[@"networkURL"] = _networkURL;
+    } else if (requireComplete) {
+        _statusLabel.text = @"先填网络链接";
+        return NO;
+    }
+    task[@"networkMethod"] = [self normalizedNetworkMethodFromPostFlag:_networkUsesPost];
+    task[@"networkUsesPost"] = @(_networkUsesPost);
+    if (_networkPostBody.length > 0) {
+        task[@"networkPostBody"] = _networkPostBody;
+    }
+    return YES;
+}
+
+- (void)loadNetworkRequestConfigFromTask:(NSDictionary *)task {
+    _networkURL = [self trimmedActionDescription:task[@"networkURL"]];
+    _networkPostBody = [self trimmedActionDescription:task[@"networkPostBody"]];
+    _networkUsesPost = [[self networkMethodForTask:task] isEqualToString:@"POST"];
+}
+
 - (NSMutableDictionary *)taskDictionaryFromCurrentConfigRequireComplete:(BOOL)requireComplete {
     [self syncActionDescriptionFromField];
     [self syncActionTimingFromFields];
@@ -4946,7 +5081,10 @@ static char AnClickVolumeObservationContext;
         task[@"useMatchPoint"] = @(_imageUsesMatchPoint);
         task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
         task[@"threshold"] = @(_matchThreshold);
-        if (!_imageUsesMatchPoint) {
+        if (_imageActionMode == AnClickActionModeNetwork && ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
+            return nil;
+        }
+        if (!_imageUsesMatchPoint && _imageActionMode != AnClickActionModeNetwork) {
             if ([self hasManualPointForMode:AnClickActionModeImage]) {
                 task[@"point"] = [NSValue valueWithCGPoint:_manualActionPoints[(NSUInteger)AnClickActionModeImage]];
             } else if (requireComplete) {
@@ -4969,7 +5107,10 @@ static char AnClickVolumeObservationContext;
         task[@"ocrBackendVersion"] = @1;
         task[@"useMatchPoint"] = @(_ocrUsesMatchPoint);
         task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
-        if (!_ocrUsesMatchPoint) {
+        if (_imageActionMode == AnClickActionModeNetwork && ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
+            return nil;
+        }
+        if (!_ocrUsesMatchPoint && _imageActionMode != AnClickActionModeNetwork) {
             if ([self hasManualPointForMode:AnClickActionModeOCR]) {
                 task[@"point"] = [NSValue valueWithCGPoint:_manualActionPoints[(NSUInteger)AnClickActionModeOCR]];
             } else if (requireComplete) {
@@ -4992,19 +5133,14 @@ static char AnClickVolumeObservationContext;
         task[@"colorBlue"] = @(_targetColorBlue);
         task[@"colorTolerance"] = @(_colorTolerance);
         task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
+        if (_imageActionMode == AnClickActionModeNetwork && ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
+            return nil;
+        }
         return task;
     }
 
     if (_actionMode == AnClickActionModeNetwork) {
-        [self syncNetworkFieldsFromEditor];
-        if (_networkURL.length > 0) {
-            if (![self normalizedNetworkURLString:_networkURL]) {
-                _statusLabel.text = @"网络链接无效";
-                return nil;
-            }
-            task[@"networkURL"] = _networkURL;
-        } else if (requireComplete) {
-            _statusLabel.text = @"先填网络链接";
+        if (![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
             return nil;
         }
         task[@"networkRequestOnly"] = @(_networkRequestOnly);
@@ -5070,6 +5206,10 @@ static char AnClickVolumeObservationContext;
         subtitle = text.length > 0
             ? [NSString stringWithFormat:@"识字 · %@", text]
             : @"未设置文字";
+        if ([self taskUsesRecognitionNetworkAction:task]) {
+            NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
+            subtitle = [subtitle stringByAppendingFormat:@" · 成功后%@请求%@", [self networkMethodForTask:task], url.length > 0 ? @"" : @"未设置"];
+        }
     } else if (desc.length == 0 && mode == AnClickActionModeColor) {
         if ([task[@"colorRed"] respondsToSelector:@selector(integerValue)] &&
             [task[@"colorGreen"] respondsToSelector:@selector(integerValue)] &&
@@ -5081,24 +5221,32 @@ static char AnClickVolumeObservationContext;
         } else {
             subtitle = @"未取色";
         }
+        if ([self taskUsesRecognitionNetworkAction:task]) {
+            NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
+            subtitle = [subtitle stringByAppendingFormat:@" · 成功后%@请求%@", [self networkMethodForTask:task], url.length > 0 ? @"" : @"未设置"];
+        }
+    } else if (desc.length == 0 && mode == AnClickActionModeImage && [self taskUsesRecognitionNetworkAction:task]) {
+        NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
+        subtitle = [NSString stringWithFormat:@"识图 · 成功后%@请求%@", [self networkMethodForTask:task], url.length > 0 ? @"" : @"未设置"];
     } else if (desc.length == 0 && mode == AnClickActionModeNetwork) {
         NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
         NSString *contains = [self trimmedActionDescription:task[@"networkContains"]];
         NSString *falseText = [self trimmedActionDescription:task[@"networkFalse"]];
+        NSString *method = [self networkMethodForTask:task];
         BOOL requestOnly = [task[@"networkRequestOnly"] boolValue];
         if (url.length == 0) {
             subtitle = @"未设置链接";
         } else if (requestOnly || [self networkTaskIsOneShotWithURL:url trueText:contains falseText:falseText]) {
-            subtitle = [NSString stringWithFormat:@"%@ · 请求一次", url];
+            subtitle = [NSString stringWithFormat:@"%@ · %@ 请求一次", url, method];
         } else if (contains.length > 0) {
-            subtitle = [NSString stringWithFormat:@"%@ · 包含 %@ 就运行", url, contains];
+            subtitle = [NSString stringWithFormat:@"%@ · %@ · 包含 %@ 就运行", url, method, contains];
             if (falseText.length > 0) {
                 subtitle = [subtitle stringByAppendingFormat:@" · 包含 %@ 就不运行", falseText];
             }
         } else if (falseText.length > 0) {
-            subtitle = [NSString stringWithFormat:@"%@ · 状态真就运行 · 包含 %@ 就不运行", url, falseText];
+            subtitle = [NSString stringWithFormat:@"%@ · %@ · 状态真就运行 · 包含 %@ 就不运行", url, method, falseText];
         } else {
-            subtitle = [NSString stringWithFormat:@"%@ · 状态真就运行 / 状态假就不运行", url];
+            subtitle = [NSString stringWithFormat:@"%@ · %@ · 状态真就运行 / 状态假就不运行", url, method];
         }
         subtitle = [subtitle stringByAppendingFormat:@" · 超时%.0fs", [self networkTimeoutForTask:task]];
     }
@@ -5133,7 +5281,7 @@ static char AnClickVolumeObservationContext;
         }
     } else if (detail.length == 0 && mode == AnClickActionModeNetwork) {
         BOOL requestOnly = [self networkTaskIsOneShot:task];
-        detail = requestOnly ? @"仅请求" : @"判断返回";
+        detail = [NSString stringWithFormat:@"%@ %@", [self networkMethodForTask:task], requestOnly ? @"仅请求" : @"判断返回"];
     }
 
     NSString *prefix = [NSString stringWithFormat:@"任务%lu/%lu %@",
@@ -5348,6 +5496,9 @@ static char AnClickVolumeObservationContext;
         NSNumber *useMatchPointNumber = task[@"useMatchPoint"];
         _imageUsesMatchPoint = useMatchPointNumber ? useMatchPointNumber.boolValue : YES;
         _imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+        if (_imageActionMode == AnClickActionModeNetwork) {
+            [self loadNetworkRequestConfigFromTask:task];
+        }
         NSNumber *thresholdNumber = task[@"threshold"];
         _matchThreshold = thresholdNumber ? MIN(1.0, MAX(0.0, thresholdNumber.doubleValue)) : 0.80;
         NSValue *pointValue = task[@"point"];
@@ -5373,6 +5524,9 @@ static char AnClickVolumeObservationContext;
         NSNumber *useMatchPointNumber = task[@"useMatchPoint"];
         _ocrUsesMatchPoint = useMatchPointNumber ? useMatchPointNumber.boolValue : YES;
         _imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+        if (_imageActionMode == AnClickActionModeNetwork) {
+            [self loadNetworkRequestConfigFromTask:task];
+        }
         NSValue *pointValue = task[@"point"];
         if (pointValue) {
             _manualActionPoints[(NSUInteger)AnClickActionModeOCR] = pointValue.CGPointValue;
@@ -5390,8 +5544,11 @@ static char AnClickVolumeObservationContext;
         NSNumber *toleranceNumber = task[@"colorTolerance"];
         _colorTolerance = toleranceNumber ? MIN(255.0, MAX(0.0, toleranceNumber.doubleValue)) : 18.0;
         _imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+        if (_imageActionMode == AnClickActionModeNetwork) {
+            [self loadNetworkRequestConfigFromTask:task];
+        }
     } else if (mode == AnClickActionModeNetwork) {
-        _networkURL = [self trimmedActionDescription:task[@"networkURL"]];
+        [self loadNetworkRequestConfigFromTask:task];
         _networkContainsText = [self trimmedActionDescription:task[@"networkContains"]];
         _networkFalseText = [self trimmedActionDescription:task[@"networkFalse"]];
         _networkRequestOnly = [task[@"networkRequestOnly"] boolValue];
@@ -5699,6 +5856,26 @@ static char AnClickVolumeObservationContext;
     return 8.0;
 }
 
+- (NSString *)normalizedNetworkMethodFromPostFlag:(BOOL)usesPost {
+    return usesPost ? @"POST" : @"GET";
+}
+
+- (NSString *)networkMethodForTask:(NSDictionary *)task {
+    NSString *rawMethod = [task[@"networkMethod"] isKindOfClass:NSString.class] ? task[@"networkMethod"] : nil;
+    NSString *method = [rawMethod uppercaseString];
+    if ([method isEqualToString:@"POST"]) {
+        return @"POST";
+    }
+    if ([method isEqualToString:@"GET"]) {
+        return @"GET";
+    }
+    return [task[@"networkUsesPost"] boolValue] ? @"POST" : @"GET";
+}
+
+- (NSString *)networkPostBodyForTask:(NSDictionary *)task {
+    return [self trimmedActionDescription:task[@"networkPostBody"]];
+}
+
 - (NSString *)normalizedNetworkURLString:(NSString *)urlText {
     NSString *trimmed = [self trimmedActionDescription:urlText];
     if (trimmed.length == 0) {
@@ -5852,6 +6029,8 @@ static char AnClickVolumeObservationContext;
 }
 
 - (void)performNetworkRequestWithURLString:(NSString *)urlString
+                                    method:(NSString *)method
+                                  postBody:(NSString *)postBody
                                   trueText:(NSString *)trueText
                                  falseText:(NSString *)falseText
                        defaultExpectedTrue:(BOOL)defaultExpectedTrue
@@ -5871,7 +6050,18 @@ static char AnClickVolumeObservationContext;
 
     NSTimeInterval requestTimeout = MIN(60.0, MAX(1.0, timeout));
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:requestTimeout];
-    request.HTTPMethod = @"GET";
+    NSString *normalizedMethod = [[self trimmedActionDescription:method] uppercaseString];
+    BOOL usesPost = [normalizedMethod isEqualToString:@"POST"];
+    request.HTTPMethod = usesPost ? @"POST" : @"GET";
+    if (usesPost) {
+        NSString *bodyText = postBody ?: @"";
+        request.HTTPBody = [bodyText dataUsingEncoding:NSUTF8StringEncoding];
+        NSString *trimmedBody = [self trimmedActionDescription:bodyText];
+        NSString *contentType = [trimmedBody hasPrefix:@"{"] || [trimmedBody hasPrefix:@"["]
+            ? @"application/json;charset=utf-8"
+            : @"application/x-www-form-urlencoded;charset=utf-8";
+        [request setValue:contentType forHTTPHeaderField:@"Content-Type"];
+    }
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSInteger statusCode = 0;
         if ([response isKindOfClass:NSHTTPURLResponse.class]) {
@@ -5947,7 +6137,9 @@ static char AnClickVolumeObservationContext;
     BOOL oneShot = [self networkTaskIsOneShot:task];
     NSTimeInterval timeout = [self networkTimeoutForTask:task];
     [self showToast:oneShot ? @"网络仅请求" : @"网络请求中"];
-    [self performNetworkRequestWithURLString:url trueText:contains falseText:falseText defaultExpectedTrue:!oneShot timeout:timeout completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
+    NSString *method = [self networkMethodForTask:task];
+    NSString *postBody = [self networkPostBodyForTask:task];
+    [self performNetworkRequestWithURLString:url method:method postBody:postBody trueText:contains falseText:falseText defaultExpectedTrue:!oneShot timeout:timeout completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
         if (runGeneration != 0 && (!self->_taskRunActive || runGeneration != self->_taskRunGeneration)) {
             return;
         }
@@ -6011,6 +6203,64 @@ static char AnClickVolumeObservationContext;
     });
 }
 
+- (BOOL)taskUsesRecognitionNetworkAction:(NSDictionary *)task {
+    AnClickActionMode mode = [self modeForTask:task];
+    if (mode != AnClickActionModeImage && mode != AnClickActionModeOCR && mode != AnClickActionModeColor) {
+        return NO;
+    }
+    AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+    return actionMode == AnClickActionModeNetwork;
+}
+
+- (void)performRecognitionNetworkTask:(NSDictionary *)task
+                              inWindow:(UIWindow *)hostWindow
+                            generation:(NSUInteger)runGeneration
+                            completion:(void (^)(void))completion {
+    AnClickActionMode mode = [self modeForTask:task];
+    if (mode == AnClickActionModeImage) {
+        [self performImageTask:task inWindow:hostWindow runGeneration:runGeneration completion:completion];
+    } else if (mode == AnClickActionModeOCR) {
+        [self performOCRTask:task inWindow:hostWindow runGeneration:runGeneration completion:completion];
+    } else if (mode == AnClickActionModeColor) {
+        [self performColorTask:task inWindow:hostWindow runGeneration:runGeneration completion:completion];
+    } else if (completion) {
+        completion();
+    }
+}
+
+- (void)runRecognitionNetworkTask:(NSDictionary *)task
+                          atIndex:(NSUInteger)index
+                         inWindow:(UIWindow *)hostWindow
+                       generation:(NSUInteger)runGeneration
+                      repeatIndex:(NSInteger)repeatIndex {
+    if (!_taskRunActive || runGeneration != _taskRunGeneration) {
+        return;
+    }
+
+    NSInteger repeatCount = [self repeatCountForTask:task];
+    if (repeatIndex >= repeatCount) {
+        [self continueTaskRunAfterIndex:index inWindow:hostWindow generation:runGeneration];
+        return;
+    }
+
+    [self performRecognitionNetworkTask:task inWindow:hostWindow generation:runGeneration completion:^{
+        if (!self->_taskRunActive || runGeneration != self->_taskRunGeneration) {
+            return;
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self runRecognitionNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration repeatIndex:repeatIndex + 1];
+        });
+    }];
+}
+
+- (void)runRecognitionNetworkTask:(NSDictionary *)task atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
+    NSTimeInterval delay = [self delayForTask:task];
+    [self showToast:[self toastTextForTask:task index:index]];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self runRecognitionNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration repeatIndex:0];
+    });
+}
+
 - (void)performPointActionMode:(AnClickActionMode)mode atPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow {
     NSTimeInterval duration = [self durationForTaskMode:mode];
     [self showOperationTraceForMode:mode atPoint:point inWindow:hostWindow duration:duration];
@@ -6040,15 +6290,55 @@ static char AnClickVolumeObservationContext;
     }
 }
 
+- (void)performRecognitionNetworkActionForTask:(NSDictionary *)task
+                                 runGeneration:(NSUInteger)runGeneration
+                                    completion:(void (^)(void))completion {
+    NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
+    if (url.length == 0) {
+        _statusLabel.text = @"网络未填链接";
+        [self showToast:@"网络未填链接"];
+        if (completion) {
+            completion();
+        }
+        return;
+    }
+
+    NSMutableDictionary *networkTask = [@{
+        @"networkURL": url,
+        @"networkMethod": [self networkMethodForTask:task],
+        @"networkRequestOnly": @YES,
+        @"networkTimeout": @([self networkTimeoutForTask:task]),
+    } mutableCopy];
+    NSString *postBody = [self networkPostBodyForTask:task];
+    if (postBody.length > 0) {
+        networkTask[@"networkPostBody"] = postBody;
+    }
+    [self performNetworkRequestTask:networkTask runGeneration:runGeneration completion:^(__unused BOOL matched, __unused BOOL requestSucceeded, __unused BOOL blocked) {
+        if (completion) {
+            completion();
+        }
+    }];
+}
+
 - (void)performImageTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow {
-    [self performImageTask:task inWindow:hostWindow runGeneration:0];
+    [self performImageTask:task inWindow:hostWindow runGeneration:0 completion:nil];
 }
 
 - (void)performImageTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow runGeneration:(NSUInteger)runGeneration {
+    [self performImageTask:task inWindow:hostWindow runGeneration:runGeneration completion:nil];
+}
+
+- (void)performImageTask:(NSDictionary *)task
+                inWindow:(UIWindow *)hostWindow
+           runGeneration:(NSUInteger)runGeneration
+              completion:(void (^)(void))completion {
     NSString *templatePath = task[@"templatePath"];
     UIImage *templateImage = (templatePath.length > 0 && [[NSFileManager defaultManager] fileExistsAtPath:templatePath]) ? [UIImage imageWithContentsOfFile:templatePath] : nil;
     if (!templateImage) {
         _statusLabel.text = @"识图无模板";
+        if (completion) {
+            completion();
+        }
         return;
     }
 
@@ -6077,6 +6367,9 @@ static char AnClickVolumeObservationContext;
             if (!match) {
                 strongSelf->_statusLabel.text = @"识图未找到";
                 [strongSelf showToast:@"识图未找到"];
+                if (completion) {
+                    completion();
+                }
                 return;
             }
             NSValue *matchPointValue = match[@"point"];
@@ -6085,11 +6378,21 @@ static char AnClickVolumeObservationContext;
             if (!matchPointValue || !rectValue) {
                 strongSelf->_statusLabel.text = @"识图异常";
                 [strongSelf showToast:@"识图异常"];
+                if (completion) {
+                    completion();
+                }
                 return;
             }
             UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
             CGRect rect = rectValue.CGRectValue;
             [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.2];
+            if (imageActionMode == AnClickActionModeNetwork) {
+                [strongSelf performRecognitionNetworkActionForTask:task runGeneration:runGeneration completion:completion];
+                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f 网络请求",
+                                                 scoreNumber.doubleValue];
+                [strongSelf showToast:strongSelf->_statusLabel.text];
+                return;
+            }
             CGPoint actionPoint = useMatchPoint ? matchPointValue.CGPointValue : customPointValue.CGPointValue;
             [strongSelf performPointActionMode:imageActionMode atPoint:actionPoint inWindow:currentHostWindow];
             strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f %@ %.0f,%.0f",
@@ -6098,18 +6401,31 @@ static char AnClickVolumeObservationContext;
                                              actionPoint.x,
                                              actionPoint.y];
             [strongSelf showToast:strongSelf->_statusLabel.text];
+            if (completion) {
+                completion();
+            }
         });
     });
 }
 
 - (void)performOCRTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow {
-    [self performOCRTask:task inWindow:hostWindow runGeneration:0];
+    [self performOCRTask:task inWindow:hostWindow runGeneration:0 completion:nil];
 }
 
 - (void)performOCRTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow runGeneration:(NSUInteger)runGeneration {
+    [self performOCRTask:task inWindow:hostWindow runGeneration:runGeneration completion:nil];
+}
+
+- (void)performOCRTask:(NSDictionary *)task
+              inWindow:(UIWindow *)hostWindow
+         runGeneration:(NSUInteger)runGeneration
+            completion:(void (^)(void))completion {
     NSString *targetText = [self trimmedActionDescription:task[@"ocrText"]];
     if (targetText.length == 0) {
         _statusLabel.text = @"识字未填写";
+        if (completion) {
+            completion();
+        }
         return;
     }
 
@@ -6117,8 +6433,11 @@ static char AnClickVolumeObservationContext;
     AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
     BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
     NSValue *customPointValue = task[@"point"];
-    if (!useMatchPoint && !customPointValue) {
+    if (actionMode != AnClickActionModeNetwork && !useMatchPoint && !customPointValue) {
         _statusLabel.text = @"识字未取点";
+        if (completion) {
+            completion();
+        }
         return;
     }
     _templateSearchInProgress = YES;
@@ -6138,6 +6457,9 @@ static char AnClickVolumeObservationContext;
             if (error.length > 0) {
                 strongSelf->_statusLabel.text = error;
                 [strongSelf showToast:error];
+                if (completion) {
+                    completion();
+                }
                 return;
             }
             NSValue *pointValue = match[@"point"];
@@ -6147,10 +6469,19 @@ static char AnClickVolumeObservationContext;
             if (!pointValue || !rectValue) {
                 strongSelf->_statusLabel.text = @"识字未找到";
                 [strongSelf showToast:@"识字未找到"];
+                if (completion) {
+                    completion();
+                }
                 return;
             }
             UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
             [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
+            if (actionMode == AnClickActionModeNetwork) {
+                [strongSelf performRecognitionNetworkActionForTask:task runGeneration:runGeneration completion:completion];
+                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ 网络请求", text];
+                [strongSelf showToast:strongSelf->_statusLabel.text];
+                return;
+            }
             CGPoint actionPoint = useMatchPoint ? pointValue.CGPointValue : customPointValue.CGPointValue;
             [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
             strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %.0f,%.0f",
@@ -6158,19 +6489,32 @@ static char AnClickVolumeObservationContext;
                                              actionPoint.x,
                                              actionPoint.y];
             [strongSelf showToast:strongSelf->_statusLabel.text];
+            if (completion) {
+                completion();
+            }
         });
     });
 }
 
 - (void)performColorTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow {
-    [self performColorTask:task inWindow:hostWindow runGeneration:0];
+    [self performColorTask:task inWindow:hostWindow runGeneration:0 completion:nil];
 }
 
 - (void)performColorTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow runGeneration:(NSUInteger)runGeneration {
+    [self performColorTask:task inWindow:hostWindow runGeneration:runGeneration completion:nil];
+}
+
+- (void)performColorTask:(NSDictionary *)task
+                inWindow:(UIWindow *)hostWindow
+           runGeneration:(NSUInteger)runGeneration
+              completion:(void (^)(void))completion {
     if (![task[@"colorRed"] respondsToSelector:@selector(integerValue)] ||
         ![task[@"colorGreen"] respondsToSelector:@selector(integerValue)] ||
         ![task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
         _statusLabel.text = @"识色未取色";
+        if (completion) {
+            completion();
+        }
         return;
     }
 
@@ -6197,6 +6541,9 @@ static char AnClickVolumeObservationContext;
             if (!match) {
                 strongSelf->_statusLabel.text = @"颜色未找到";
                 [strongSelf showToast:@"颜色未找到"];
+                if (completion) {
+                    completion();
+                }
                 return;
             }
             NSValue *pointValue = match[@"point"];
@@ -6205,10 +6552,22 @@ static char AnClickVolumeObservationContext;
             if (!pointValue || !rectValue) {
                 strongSelf->_statusLabel.text = @"识色异常";
                 [strongSelf showToast:@"识色异常"];
+                if (completion) {
+                    completion();
+                }
                 return;
             }
             UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
             [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
+            if (actionMode == AnClickActionModeNetwork) {
+                [strongSelf performRecognitionNetworkActionForTask:task runGeneration:runGeneration completion:completion];
+                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 #%02lX%02lX%02lX 网络请求",
+                                                 (long)red,
+                                                 (long)green,
+                                                 (long)blue];
+                [strongSelf showToast:strongSelf->_statusLabel.text];
+                return;
+            }
             CGPoint actionPoint = pointValue.CGPointValue;
             [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
             strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 #%02lX%02lX%02lX %.0f,%.0f",
@@ -6218,6 +6577,9 @@ static char AnClickVolumeObservationContext;
                                              actionPoint.x,
                                              actionPoint.y];
             [strongSelf showToast:strongSelf->_statusLabel.text];
+            if (completion) {
+                completion();
+            }
         });
     });
 }
@@ -6243,7 +6605,14 @@ static char AnClickVolumeObservationContext;
             return NO;
         }
         BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
-        if (!useMatchPoint && !task[@"point"]) {
+        AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+        if (actionMode == AnClickActionModeNetwork) {
+            NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
+            if (url.length == 0 || ![self normalizedNetworkURLString:url]) {
+                _statusLabel.text = @"任务识图网络未设置";
+                return NO;
+            }
+        } else if (!useMatchPoint && !task[@"point"]) {
             _statusLabel.text = @"任务识图未取点";
             return NO;
         }
@@ -6256,7 +6625,14 @@ static char AnClickVolumeObservationContext;
             return NO;
         }
         BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
-        if (!useMatchPoint && !task[@"point"]) {
+        AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+        if (actionMode == AnClickActionModeNetwork) {
+            NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
+            if (url.length == 0 || ![self normalizedNetworkURLString:url]) {
+                _statusLabel.text = @"任务识字网络未设置";
+                return NO;
+            }
+        } else if (!useMatchPoint && !task[@"point"]) {
             _statusLabel.text = @"任务识字未取点";
             return NO;
         }
@@ -6268,6 +6644,14 @@ static char AnClickVolumeObservationContext;
             ![task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
             _statusLabel.text = @"任务未取色";
             return NO;
+        }
+        AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+        if (actionMode == AnClickActionModeNetwork) {
+            NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
+            if (url.length == 0 || ![self normalizedNetworkURLString:url]) {
+                _statusLabel.text = @"任务识色网络未设置";
+                return NO;
+            }
         }
         return YES;
     }
@@ -6315,13 +6699,13 @@ static char AnClickVolumeObservationContext;
     NSTimeInterval duration = [self durationForTaskMode:mode];
     if (mode == AnClickActionModeImage) {
         AnClickActionMode imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
-        duration = 0.75 + [self durationForTaskMode:imageActionMode];
+        duration = 0.75 + (imageActionMode == AnClickActionModeNetwork ? [self networkTimeoutForTask:task] + 0.25 : [self durationForTaskMode:imageActionMode]);
     } else if (mode == AnClickActionModeOCR) {
         AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
-        duration = 0.95 + [self durationForTaskMode:actionMode];
+        duration = 0.95 + (actionMode == AnClickActionModeNetwork ? [self networkTimeoutForTask:task] + 0.25 : [self durationForTaskMode:actionMode]);
     } else if (mode == AnClickActionModeColor) {
         AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
-        duration = 0.75 + [self durationForTaskMode:actionMode];
+        duration = 0.75 + (actionMode == AnClickActionModeNetwork ? [self networkTimeoutForTask:task] + 0.25 : [self durationForTaskMode:actionMode]);
     } else if (mode == AnClickActionModeNetwork) {
         duration = 0.85;
     } else if (mode == AnClickActionModeMacro) {
@@ -6389,7 +6773,7 @@ static char AnClickVolumeObservationContext;
     NSString *url = _globalNetworkURL;
     NSString *contains = _globalNetworkContainsText;
     NSString *falseText = _globalNetworkFalseText;
-    [self performNetworkRequestWithURLString:url trueText:contains falseText:falseText defaultExpectedTrue:YES timeout:8.0 completion:^(BOOL matched, BOOL requestSucceeded, __unused NSString *body, NSInteger statusCode, NSError *error) {
+    [self performNetworkRequestWithURLString:url method:@"GET" postBody:nil trueText:contains falseText:falseText defaultExpectedTrue:YES timeout:8.0 completion:^(BOOL matched, BOOL requestSucceeded, __unused NSString *body, NSInteger statusCode, NSError *error) {
         if (!self->_taskRunActive || runGeneration != self->_taskRunGeneration) {
             return;
         }
@@ -6507,6 +6891,18 @@ static char AnClickVolumeObservationContext;
             return;
         }
         [self runNetworkTask:_taskItems[index] atIndex:index inWindow:currentHostWindow generation:runGeneration];
+        return;
+    }
+
+    if ([self taskUsesRecognitionNetworkAction:_taskItems[index]]) {
+        if (![self taskIsComplete:_taskItems[index]]) {
+            _taskRunActive = NO;
+            [self expandPanel];
+            [self showToast:_statusLabel.text];
+            [self refreshCollapsedButtonTitle];
+            return;
+        }
+        [self runRecognitionNetworkTask:_taskItems[index] atIndex:index inWindow:currentHostWindow generation:runGeneration];
         return;
     }
 
@@ -7249,6 +7645,11 @@ static char AnClickVolumeObservationContext;
     }
 
     if (_actionMode == AnClickActionModeImage) {
+        if (_imageActionMode == AnClickActionModeNetwork) {
+            [self syncNetworkFieldsFromEditor];
+            _statusLabel.text = _networkURL.length > 0 ? @"识图成功后请求网络" : @"先填网络链接";
+            return;
+        }
         if (_imageUsesMatchPoint) {
             _statusLabel.text = [self currentTemplateExists] ? @"识图点随识别结果" : @"先截图模板";
             return;
@@ -7275,6 +7676,11 @@ static char AnClickVolumeObservationContext;
     }
 
     if (_actionMode == AnClickActionModeOCR) {
+        if (_imageActionMode == AnClickActionModeNetwork) {
+            [self syncNetworkFieldsFromEditor];
+            _statusLabel.text = _networkURL.length > 0 ? @"识字成功后请求网络" : @"先填网络链接";
+            return;
+        }
         if (_ocrUsesMatchPoint) {
             _statusLabel.text = _ocrTargetText.length > 0 ? @"识字点随识别结果" : @"先填目标文字";
             return;
@@ -7311,6 +7717,11 @@ static char AnClickVolumeObservationContext;
     }
 
     if (_actionMode == AnClickActionModeColor) {
+        if (_imageActionMode == AnClickActionModeNetwork) {
+            [self syncNetworkFieldsFromEditor];
+            _statusLabel.text = _networkURL.length > 0 ? @"识色成功后请求网络" : @"先填网络链接";
+            return;
+        }
         if (!_hasTargetColor) {
             _statusLabel.text = @"先取目标颜色";
             return;
