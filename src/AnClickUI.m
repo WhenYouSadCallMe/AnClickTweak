@@ -209,6 +209,7 @@ static char AnClickVolumeObservationContext;
     BOOL _volumeKVORegistered;
     BOOL _hasObservedSystemVolume;
     BOOL _adjustingSystemVolume;
+    BOOL _volumeShortcutRunSuppressToasts;
     NSUInteger _panelRestoreGeneration;
     NSUInteger _taskRunGeneration;
     NSUInteger _toastGeneration;
@@ -216,6 +217,7 @@ static char AnClickVolumeObservationContext;
     CGFloat _taskReorderStartLocationY;
     CFTimeInterval _toastDeferNonVolumeUntil;
     CFTimeInterval _lastVolumeShortcutTime;
+    CFTimeInterval _ignoreVolumeEventsUntil;
     NSInteger _globalDelayMilliseconds;
     NSInteger _globalRunRepeatCount;
     NSInteger _globalStartHour;
@@ -511,6 +513,31 @@ static char AnClickVolumeObservationContext;
         [self refreshCollapsedButtonTitle];
         return;
     }
+    if (_taskItems.count == 0) {
+        _statusLabel.text = @"先加任务";
+        [self showVolumeShortcutToast:@"音量- 先加任务"];
+        [self refreshCollapsedButtonTitle];
+        return;
+    }
+    if (![self hostWindow]) {
+        _statusLabel.text = @"无窗口";
+        [self showVolumeShortcutToast:@"音量- 无窗口"];
+        [self refreshCollapsedButtonTitle];
+        return;
+    }
+    if (_globalNetworkGateEnabled && _globalNetworkURL.length == 0) {
+        _statusLabel.text = @"网络联动未填链接";
+        [self showVolumeShortcutToast:@"音量- 网络未填链接"];
+        [self refreshCollapsedButtonTitle];
+        return;
+    }
+    if (_globalNetworkGateEnabled && ![self normalizedNetworkURLString:_globalNetworkURL]) {
+        _statusLabel.text = @"网络联动链接无效";
+        [self showVolumeShortcutToast:@"音量- 网络链接无效"];
+        [self refreshCollapsedButtonTitle];
+        return;
+    }
+    _volumeShortcutRunSuppressToasts = YES;
     [self showVolumeShortcutToast:@"音量- 播放"];
     [self startTaskListRunScheduled:NO];
 }
@@ -525,9 +552,11 @@ static char AnClickVolumeObservationContext;
     }
     if (_taskRunActive) {
         [self showVolumeShortcutToast:@"音量+ 停止"];
-        [self stopTaskRunWithStatus:@"音量停止"];
+        [self stopTaskRunWithStatus:@"音量停止" showToast:NO];
+        _volumeShortcutRunSuppressToasts = NO;
         return;
     }
+    _volumeShortcutRunSuppressToasts = NO;
     _statusLabel.text = @"未播放";
     [self showVolumeShortcutToast:@"音量+ 未播放"];
     [self refreshCollapsedButtonTitle];
@@ -564,6 +593,13 @@ static char AnClickVolumeObservationContext;
 }
 
 - (void)handleObservedVolume:(float)volume {
+    CFTimeInterval now = CACurrentMediaTime();
+    if (_ignoreVolumeEventsUntil > now) {
+        _lastObservedSystemVolume = volume;
+        _hasObservedSystemVolume = YES;
+        return;
+    }
+
     if (_adjustingSystemVolume) {
         _lastObservedSystemVolume = volume;
         _hasObservedSystemVolume = YES;
@@ -582,11 +618,11 @@ static char AnClickVolumeObservationContext;
         return;
     }
 
-    CFTimeInterval now = CACurrentMediaTime();
     if (_lastVolumeShortcutTime > 0 && now - _lastVolumeShortcutTime < 0.35) {
         return;
     }
     _lastVolumeShortcutTime = now;
+    _ignoreVolumeEventsUntil = now + 0.85;
 
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -710,6 +746,8 @@ static char AnClickVolumeObservationContext;
     _taskRunActive = NO;
     _volumeShortcutRegistered = NO;
     _hasObservedSystemVolume = NO;
+    _volumeShortcutRunSuppressToasts = NO;
+    _ignoreVolumeEventsUntil = 0;
     [self loadGlobalSettings];
     [self registerVolumeShortcutObserver];
     if (!_recordedSwipePoints) {
@@ -1341,6 +1379,9 @@ static char AnClickVolumeObservationContext;
     }
 
     BOOL volumeShortcutToast = [text hasPrefix:@"音量"];
+    if (!volumeShortcutToast && _volumeShortcutRunSuppressToasts) {
+        return;
+    }
     CFTimeInterval now = CACurrentMediaTime();
     NSTimeInterval delay = (!volumeShortcutToast && _toastDeferNonVolumeUntil > now)
         ? (_toastDeferNonVolumeUntil - now)
@@ -6829,9 +6870,11 @@ static char AnClickVolumeObservationContext;
 
 - (void)runTaskList {
     if (_taskRunActive) {
+        _volumeShortcutRunSuppressToasts = NO;
         [self stopTaskRunWithStatus:@"已停止"];
         return;
     }
+    _volumeShortcutRunSuppressToasts = NO;
     [self startTaskListRunScheduled:NO];
 }
 
@@ -6868,6 +6911,7 @@ static char AnClickVolumeObservationContext;
 
 - (void)startTaskListRunScheduled:(BOOL)scheduled {
     if (_taskItems.count == 0) {
+        _volumeShortcutRunSuppressToasts = NO;
         _statusLabel.text = scheduled ? @"定时启动无任务" : @"先加任务";
         [self showToast:_statusLabel.text];
         return;
@@ -6875,23 +6919,27 @@ static char AnClickVolumeObservationContext;
 
     UIWindow *hostWindow = [self hostWindow];
     if (!hostWindow) {
+        _volumeShortcutRunSuppressToasts = NO;
         _statusLabel.text = @"无窗口";
         [self showToast:@"无窗口"];
         return;
     }
 
     if ([AnClickRecorder shared].isRecording) {
+        _volumeShortcutRunSuppressToasts = NO;
         _statusLabel.text = @"录制中无法播放";
         [self showToast:@"录制中无法播放"];
         return;
     }
 
     if (_globalNetworkGateEnabled && _globalNetworkURL.length == 0) {
+        _volumeShortcutRunSuppressToasts = NO;
         _statusLabel.text = @"网络联动未填链接";
         [self showToast:_statusLabel.text];
         return;
     }
     if (_globalNetworkGateEnabled && ![self normalizedNetworkURLString:_globalNetworkURL]) {
+        _volumeShortcutRunSuppressToasts = NO;
         _statusLabel.text = @"网络联动链接无效";
         [self showToast:_statusLabel.text];
         return;
@@ -6912,6 +6960,10 @@ static char AnClickVolumeObservationContext;
 }
 
 - (void)stopTaskRunWithStatus:(NSString *)status {
+    [self stopTaskRunWithStatus:status showToast:YES];
+}
+
+- (void)stopTaskRunWithStatus:(NSString *)status showToast:(BOOL)showToast {
     if (!_taskRunActive) {
         return;
     }
@@ -6920,7 +6972,10 @@ static char AnClickVolumeObservationContext;
     _currentGlobalRunCycle = 0;
     _taskRunGeneration++;
     _statusLabel.text = status.length > 0 ? status : @"已停止";
-    [self showToast:_statusLabel.text];
+    if (showToast) {
+        [self showToast:_statusLabel.text];
+    }
+    _volumeShortcutRunSuppressToasts = NO;
     [self refreshCollapsedButtonTitle];
     [self refreshTaskList];
 }
@@ -6945,6 +7000,7 @@ static char AnClickVolumeObservationContext;
         _taskRunActive = NO;
         _statusLabel.text = @"任务完成";
         [self showToast:@"任务完成"];
+        _volumeShortcutRunSuppressToasts = NO;
         [self refreshCollapsedButtonTitle];
         [self refreshTaskList];
         return;
@@ -6957,6 +7013,7 @@ static char AnClickVolumeObservationContext;
             _taskRunActive = NO;
             [self expandPanel];
             [self showToast:_statusLabel.text];
+            _volumeShortcutRunSuppressToasts = NO;
             [self refreshCollapsedButtonTitle];
             return;
         }
@@ -6969,6 +7026,7 @@ static char AnClickVolumeObservationContext;
             _taskRunActive = NO;
             [self expandPanel];
             [self showToast:_statusLabel.text];
+            _volumeShortcutRunSuppressToasts = NO;
             [self refreshCollapsedButtonTitle];
             return;
         }
@@ -6981,6 +7039,7 @@ static char AnClickVolumeObservationContext;
         _taskRunActive = NO;
         [self expandPanel];
         [self showToast:_statusLabel.text];
+        _volumeShortcutRunSuppressToasts = NO;
         [self refreshCollapsedButtonTitle];
         return;
     }
