@@ -30,6 +30,7 @@ typedef NS_ENUM(NSInteger, AnClickOCRMode) {
 static const NSUInteger AnClickMacroMaxTrajectoryPoints = 2400;
 static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 static const NSInteger AnClickBackdropBlurViewTag = 77001;
+static char AnClickVolumeObservationContext;
 
 @interface AnClickCore : NSObject
 + (UIImage *)captureCurrentWindowImage;
@@ -70,6 +71,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 @interface AnClickUI : NSObject <UITextFieldDelegate, UIGestureRecognizerDelegate, UIPickerViewDataSource, UIPickerViewDelegate, UIScrollViewDelegate>
 + (instancetype)shared;
 - (void)show;
+- (void)handleScreenGeometryChanged;
 @end
 
 @implementation AnClickUI {
@@ -198,6 +200,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     BOOL _globalTimePickerEditingStartTime;
     BOOL _taskRunActive;
     BOOL _volumeShortcutRegistered;
+    BOOL _volumeKVORegistered;
     BOOL _hasObservedSystemVolume;
     BOOL _adjustingSystemVolume;
     NSUInteger _panelRestoreGeneration;
@@ -332,6 +335,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             [strongSelf registerVolumeShortcutObserver];
             [strongSelf scheduleGlobalTimers];
             strongSelf->_panelWindow.hidden = NO;
+            [strongSelf reclampPanelWindowForCurrentScreen];
             [strongSelf refreshCollapsedButtonTitle];
             return;
         }
@@ -342,6 +346,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 - (void)registerVolumeShortcutObserver {
     [self activateVolumeShortcutAudioSession];
     [self installVolumeShortcutControl];
+    [self registerVolumeOutputObserverIfNeeded];
 
     if (_volumeShortcutRegistered) {
         return;
@@ -354,6 +359,18 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
                                              selector:@selector(handleSystemVolumeDidChange:)
                                                  name:@"AVSystemController_SystemVolumeDidChangeNotification"
                                                object:nil];
+}
+
+- (void)registerVolumeOutputObserverIfNeeded {
+    if (_volumeKVORegistered) {
+        return;
+    }
+
+    _volumeKVORegistered = YES;
+    [AVAudioSession.sharedInstance addObserver:self
+                                    forKeyPath:@"outputVolume"
+                                       options:NSKeyValueObservingOptionNew
+                                       context:&AnClickVolumeObservationContext];
 }
 
 - (void)activateVolumeShortcutAudioSession {
@@ -386,13 +403,23 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 }
 
 - (void)installVolumeShortcutControl {
-    UIView *hostView = _panelWindow.rootViewController.view;
+    UIWindow *hostWindow = [self hostWindow];
+    UIView *hostView = hostWindow.rootViewController.view;
+    if (!hostView) {
+        hostView = hostWindow;
+    }
+    if (!hostView) {
+        hostView = _panelWindow.rootViewController.view;
+    }
+    if (!hostView) {
+        hostView = _panelWindow;
+    }
     if (!hostView) {
         return;
     }
 
     if (!_volumeView) {
-        _volumeView = [[MPVolumeView alloc] initWithFrame:CGRectMake(0, 0, 2, 2)];
+        _volumeView = [[MPVolumeView alloc] initWithFrame:CGRectMake(0, 0, 24, 24)];
         _volumeView.alpha = 0.01;
         _volumeView.userInteractionEnabled = NO;
         _volumeView.showsVolumeSlider = YES;
@@ -405,6 +432,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     [_volumeView setNeedsLayout];
     [_volumeView layoutIfNeeded];
     [self refreshVolumeSliderReference];
+    [_volumeSlider removeTarget:self action:@selector(handleVolumeSliderValueChanged:) forControlEvents:UIControlEventValueChanged];
+    [_volumeSlider addTarget:self action:@selector(handleVolumeSliderValueChanged:) forControlEvents:UIControlEventValueChanged];
     float currentVolume = AVAudioSession.sharedInstance.outputVolume;
     _lastObservedSystemVolume = currentVolume;
     _hasObservedSystemVolume = YES;
@@ -420,6 +449,8 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
                 return;
             }
             [strongSelf refreshVolumeSliderReference];
+            [strongSelf->_volumeSlider removeTarget:strongSelf action:@selector(handleVolumeSliderValueChanged:) forControlEvents:UIControlEventValueChanged];
+            [strongSelf->_volumeSlider addTarget:strongSelf action:@selector(handleVolumeSliderValueChanged:) forControlEvents:UIControlEventValueChanged];
             float delayedVolume = AVAudioSession.sharedInstance.outputVolume;
             strongSelf->_lastObservedSystemVolume = delayedVolume;
             strongSelf->_hasObservedSystemVolume = YES;
@@ -428,6 +459,10 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             }
         });
     }
+}
+
+- (void)handleVolumeSliderValueChanged:(UISlider *)slider {
+    [self handleObservedVolume:slider.value];
 }
 
 - (void)resetVolumeShortcutLevelIfNeeded {
@@ -516,7 +551,16 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         return;
     }
 
-    float volume = volumeNumber.floatValue;
+    [self handleObservedVolume:volumeNumber.floatValue];
+}
+
+- (void)handleObservedVolume:(float)volume {
+    if (_adjustingSystemVolume) {
+        _lastObservedSystemVolume = volume;
+        _hasObservedSystemVolume = YES;
+        return;
+    }
+
     if (!_hasObservedSystemVolume) {
         _lastObservedSystemVolume = volume;
         _hasObservedSystemVolume = YES;
@@ -550,6 +594,22 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     });
 }
 
+- (void)observeValueForKeyPath:(NSString *)keyPath
+                      ofObject:(id)object
+                        change:(NSDictionary<NSKeyValueChangeKey, id> *)change
+                       context:(void *)context {
+    if (context == &AnClickVolumeObservationContext) {
+        NSNumber *volumeNumber = [change[NSKeyValueChangeNewKey] isKindOfClass:NSNumber.class]
+            ? change[NSKeyValueChangeNewKey]
+            : nil;
+        if (volumeNumber) {
+            [self handleObservedVolume:volumeNumber.floatValue];
+        }
+        return;
+    }
+    [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
+}
+
 - (UIWindowScene *)activeWindowScene {
     if (@available(iOS 13.0, *)) {
         UIWindowScene *fallback = nil;
@@ -580,6 +640,27 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
             _panelWindow.windowScene = scene;
         }
     }
+}
+
+- (void)handleScreenGeometryChanged {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self attachPanelWindowToActiveSceneIfNeeded];
+        [self installVolumeShortcutControl];
+        [self reclampPanelWindowForCurrentScreen];
+        NSString *toastText = self->_toastLabel.text;
+        [self layoutToastWithMessage:toastText.length > 0 ? toastText : @""];
+        UIWindow *hostWindow = [self hostWindow];
+        if (hostWindow) {
+            NSString *hostToastText = self->_hostToastLabel.text;
+            [self layoutHostToastWithMessage:hostToastText.length > 0 ? hostToastText : @"" inWindow:hostWindow];
+        }
+    });
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.28 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self attachPanelWindowToActiveSceneIfNeeded];
+        [self installVolumeShortcutControl];
+        [self reclampPanelWindowForCurrentScreen];
+    });
 }
 
 - (void)buildPanel {
@@ -1224,12 +1305,7 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
         if (self->_toastWindow) {
             self->_toastLabel.text = text;
             [self layoutToastWithMessage:text];
-            [self->_toastWindow makeKeyAndVisible];
-            if (hostWindow && !hostWindow.hidden) {
-                [hostWindow makeKeyWindow];
-            } else if (self->_panelWindow && !self->_panelWindow.hidden) {
-                [self->_panelWindow makeKeyWindow];
-            }
+            self->_toastWindow.hidden = NO;
         }
         NSUInteger generation = ++self->_toastGeneration;
         [self->_toastView.layer removeAllAnimations];
@@ -1272,16 +1348,84 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
 
 - (CGRect)clampedPanelFrame:(CGRect)frame {
     CGRect bounds = UIScreen.mainScreen.bounds;
-    frame.origin.x = MIN(MAX(frame.origin.x, 4.0), bounds.size.width - frame.size.width - 4.0);
-    frame.origin.y = MIN(MAX(frame.origin.y, 24.0), bounds.size.height - frame.size.height - 4.0);
+    UIEdgeInsets safeInsets = [self panelSafeAreaInsets];
+    CGFloat minX = MAX(4.0, safeInsets.left + 4.0);
+    CGFloat minY = MAX(24.0, safeInsets.top + 4.0);
+    CGFloat maxX = bounds.size.width - frame.size.width - MAX(4.0, safeInsets.right + 4.0);
+    CGFloat maxY = bounds.size.height - frame.size.height - MAX(4.0, safeInsets.bottom + 4.0);
+    frame.origin.x = MIN(MAX(frame.origin.x, minX), MAX(minX, maxX));
+    frame.origin.y = MIN(MAX(frame.origin.y, minY), MAX(minY, maxY));
     return frame;
 }
 
 - (CGRect)clampedFloatingFrame:(CGRect)frame {
     CGRect bounds = UIScreen.mainScreen.bounds;
-    frame.origin.x = MIN(MAX(frame.origin.x, 0.0), bounds.size.width - frame.size.width);
-    frame.origin.y = MIN(MAX(frame.origin.y, 0.0), bounds.size.height - frame.size.height);
+    UIEdgeInsets safeInsets = [self panelSafeAreaInsets];
+    CGFloat minX = MAX(6.0, safeInsets.left + 6.0);
+    CGFloat minY = MAX(6.0, safeInsets.top + 8.0);
+    CGFloat maxX = bounds.size.width - frame.size.width - MAX(6.0, safeInsets.right + 6.0);
+    CGFloat maxY = bounds.size.height - frame.size.height - MAX(6.0, safeInsets.bottom + 8.0);
+    frame.origin.x = MIN(MAX(frame.origin.x, minX), MAX(minX, maxX));
+    frame.origin.y = MIN(MAX(frame.origin.y, minY), MAX(minY, maxY));
     return frame;
+}
+
+- (UIEdgeInsets)panelSafeAreaInsets {
+    UIEdgeInsets insets = UIEdgeInsetsZero;
+    UIWindow *hostWindow = [self hostWindow];
+    if (@available(iOS 11.0, *)) {
+        if (hostWindow) {
+            insets = hostWindow.safeAreaInsets;
+        }
+    }
+    if (UIEdgeInsetsEqualToEdgeInsets(insets, UIEdgeInsetsZero)) {
+        UIWindow *window = _panelWindow;
+        if (@available(iOS 11.0, *)) {
+            if (window) {
+                insets = window.safeAreaInsets;
+            }
+        }
+    }
+    CGFloat statusHeight = 0.0;
+    if (@available(iOS 13.0, *)) {
+        UIWindowScene *scene = hostWindow.windowScene;
+        if (!scene) {
+            scene = _panelWindow.windowScene;
+        }
+        if (!scene) {
+            scene = [self activeWindowScene];
+        }
+        statusHeight = scene.statusBarManager.statusBarFrame.size.height;
+    } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        statusHeight = UIApplication.sharedApplication.statusBarFrame.size.height;
+#pragma clang diagnostic pop
+    }
+    insets.top = MAX(insets.top, statusHeight);
+    if (insets.top > 0.0) {
+        insets.top += 6.0;
+    }
+    return insets;
+}
+
+- (void)reclampPanelWindowForCurrentScreen {
+    if (!_panelWindow) {
+        return;
+    }
+    CGRect frame = _panelWindow.frame;
+    if (_panelExpanded) {
+        frame.size = [self expandedPanelSize];
+        _panelWindow.frame = [self clampedPanelFrame:frame];
+        _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
+        _panelView.frame = _panelWindow.bounds;
+        return;
+    }
+
+    frame.size = CGSizeMake(48.0, 48.0);
+    _panelWindow.frame = [self clampedFloatingFrame:frame];
+    _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
+    _collapsedButton.frame = _panelWindow.bounds;
 }
 
 - (void)refreshCollapsedButtonTitle {
@@ -2798,6 +2942,18 @@ static const NSInteger AnClickBackdropBlurViewTag = 77001;
     frame.origin.y += translation.y;
     _panelWindow.frame = _panelExpanded ? [self clampedPanelFrame:frame] : [self clampedFloatingFrame:frame];
     [recognizer setTranslation:CGPointZero inView:_panelWindow];
+
+    if (recognizer.state == UIGestureRecognizerStateEnded ||
+        recognizer.state == UIGestureRecognizerStateCancelled ||
+        recognizer.state == UIGestureRecognizerStateFailed) {
+        [UIView animateWithDuration:0.16
+                              delay:0
+                            options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
+                         animations:^{
+                             [self reclampPanelWindowForCurrentScreen];
+                         }
+                         completion:nil];
+    }
 }
 
 - (NSString *)templatePath {
@@ -7235,5 +7391,9 @@ __attribute__((constructor)) static void AnClickUIInit(void) {
     });
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
         [[AnClickUI shared] show];
+    }];
+    [UIDevice.currentDevice beginGeneratingDeviceOrientationNotifications];
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIDeviceOrientationDidChangeNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
+        [[AnClickUI shared] handleScreenGeometryChanged];
     }];
 }
