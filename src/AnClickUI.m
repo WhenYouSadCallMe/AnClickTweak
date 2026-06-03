@@ -209,6 +209,7 @@ static char AnClickVolumeObservationContext;
     NSUInteger _toastGeneration;
     CGFloat _taskReorderStartCenterY;
     CGFloat _taskReorderStartLocationY;
+    CFTimeInterval _toastDeferNonVolumeUntil;
     CFTimeInterval _lastVolumeShortcutTime;
     NSInteger _globalDelayMilliseconds;
     NSInteger _globalRunRepeatCount;
@@ -494,34 +495,35 @@ static char AnClickVolumeObservationContext;
 - (void)handleVolumeShortcutPlay {
     if ([AnClickRecorder shared].isRecording) {
         _statusLabel.text = @"录制中无法播放";
-        [self showToast:@"音量- 录制中无法播放"];
+        [self showVolumeShortcutToast:@"音量- 录制中无法播放"];
         [self refreshCollapsedButtonTitle];
         return;
     }
     if (_taskRunActive) {
         _statusLabel.text = @"播放中";
-        [self showToast:@"音量- 播放中"];
+        [self showVolumeShortcutToast:@"音量- 播放中"];
         [self refreshCollapsedButtonTitle];
         return;
     }
-    [self showToast:@"音量- 播放"];
+    [self showVolumeShortcutToast:@"音量- 播放"];
     [self startTaskListRunScheduled:NO];
 }
 
 - (void)handleVolumeShortcutStop {
     if ([AnClickRecorder shared].isRecording) {
+        [self showVolumeShortcutToast:@"音量+ 停止录制"];
         [self toggleMacroRecording];
         _statusLabel.text = @"音量停止录制";
-        [self showToast:@"音量+ 停止录制"];
         [self refreshCollapsedButtonTitle];
         return;
     }
     if (_taskRunActive) {
+        [self showVolumeShortcutToast:@"音量+ 停止"];
         [self stopTaskRunWithStatus:@"音量停止"];
         return;
     }
     _statusLabel.text = @"未播放";
-    [self showToast:@"音量+ 未播放"];
+    [self showVolumeShortcutToast:@"音量+ 未播放"];
     [self refreshCollapsedButtonTitle];
 }
 
@@ -1308,7 +1310,22 @@ static char AnClickVolumeObservationContext;
         return;
     }
 
-    dispatch_async(dispatch_get_main_queue(), ^{
+    BOOL volumeShortcutToast = [text hasPrefix:@"音量"];
+    CFTimeInterval now = CACurrentMediaTime();
+    NSTimeInterval delay = (!volumeShortcutToast && _toastDeferNonVolumeUntil > now)
+        ? (_toastDeferNonVolumeUntil - now)
+        : 0.0;
+    void (^presentToast)(void) = ^{
+        if (!volumeShortcutToast) {
+            CFTimeInterval currentTime = CACurrentMediaTime();
+            if (self->_toastDeferNonVolumeUntil > currentTime) {
+                NSTimeInterval nextDelay = self->_toastDeferNonVolumeUntil - currentTime;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(nextDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    [self showToast:text];
+                });
+                return;
+            }
+        }
         [self ensureToastWindow];
         UIWindow *hostWindow = [self hostWindow];
         if (hostWindow) {
@@ -1345,7 +1362,19 @@ static char AnClickVolumeObservationContext;
                 }
             }];
         });
-    });
+    };
+
+    if (delay > 0.01) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), presentToast);
+    } else {
+        dispatch_async(dispatch_get_main_queue(), presentToast);
+    }
+}
+
+- (void)showVolumeShortcutToast:(NSString *)message {
+    CFTimeInterval holdUntil = CACurrentMediaTime() + 0.55;
+    _toastDeferNonVolumeUntil = MAX(_toastDeferNonVolumeUntil, holdUntil);
+    [self showToast:message];
 }
 
 - (CGSize)expandedPanelSize {
