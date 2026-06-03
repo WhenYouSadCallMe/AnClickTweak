@@ -208,7 +208,6 @@ static char AnClickVolumeObservationContext;
     BOOL _volumeShortcutRegistered;
     BOOL _volumeKVORegistered;
     BOOL _hasObservedSystemVolume;
-    BOOL _adjustingSystemVolume;
     BOOL _volumeShortcutRunSuppressToasts;
     NSUInteger _panelRestoreGeneration;
     NSUInteger _taskRunGeneration;
@@ -447,9 +446,6 @@ static char AnClickVolumeObservationContext;
     float currentVolume = AVAudioSession.sharedInstance.outputVolume;
     _lastObservedSystemVolume = currentVolume;
     _hasObservedSystemVolume = YES;
-    if (_volumeSlider && (currentVolume <= 0.08f || currentVolume >= 0.92f)) {
-        [self resetVolumeShortcutLevelIfNeeded];
-    }
 
     if (!_volumeSlider) {
         __weak typeof(self) weakSelf = self;
@@ -464,40 +460,12 @@ static char AnClickVolumeObservationContext;
             float delayedVolume = AVAudioSession.sharedInstance.outputVolume;
             strongSelf->_lastObservedSystemVolume = delayedVolume;
             strongSelf->_hasObservedSystemVolume = YES;
-            if (strongSelf->_volumeSlider && (delayedVolume <= 0.08f || delayedVolume >= 0.92f)) {
-                [strongSelf resetVolumeShortcutLevelIfNeeded];
-            }
         });
     }
 }
 
 - (void)handleVolumeSliderValueChanged:(UISlider *)slider {
     [self handleObservedVolume:slider.value];
-}
-
-- (void)resetVolumeShortcutLevelIfNeeded {
-    [self refreshVolumeSliderReference];
-    if (!_volumeSlider) {
-        return;
-    }
-
-    _adjustingSystemVolume = YES;
-    float targetVolume = 0.50f;
-    [_volumeSlider setValue:targetVolume animated:NO];
-    [_volumeSlider sendActionsForControlEvents:UIControlEventValueChanged];
-    _lastObservedSystemVolume = targetVolume;
-    _hasObservedSystemVolume = YES;
-
-    __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.28 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) {
-            return;
-        }
-        strongSelf->_adjustingSystemVolume = NO;
-        strongSelf->_lastObservedSystemVolume = AVAudioSession.sharedInstance.outputVolume;
-        strongSelf->_hasObservedSystemVolume = YES;
-    });
 }
 
 - (void)handleVolumeShortcutPlay {
@@ -509,7 +477,6 @@ static char AnClickVolumeObservationContext;
     }
     if (_taskRunActive) {
         _statusLabel.text = @"播放中";
-        [self showVolumeShortcutToast:@"音量- 播放中"];
         [self refreshCollapsedButtonTitle];
         return;
     }
@@ -563,17 +530,6 @@ static char AnClickVolumeObservationContext;
 }
 
 - (void)handleSystemVolumeDidChange:(NSNotification *)notification {
-    if (_adjustingSystemVolume) {
-        NSNumber *resetVolumeNumber = [notification.userInfo[@"AVSystemController_AudioVolumeNotificationParameter"] isKindOfClass:NSNumber.class]
-            ? notification.userInfo[@"AVSystemController_AudioVolumeNotificationParameter"]
-            : nil;
-        if (resetVolumeNumber) {
-            _lastObservedSystemVolume = resetVolumeNumber.floatValue;
-            _hasObservedSystemVolume = YES;
-        }
-        return;
-    }
-
     NSDictionary *userInfo = notification.userInfo;
     NSString *reason = [userInfo[@"AVSystemController_AudioVolumeChangeReasonNotificationParameter"] isKindOfClass:NSString.class]
         ? userInfo[@"AVSystemController_AudioVolumeChangeReasonNotificationParameter"]
@@ -589,18 +545,16 @@ static char AnClickVolumeObservationContext;
         return;
     }
 
-    [self handleObservedVolume:volumeNumber.floatValue];
+    [self handleObservedVolume:volumeNumber.floatValue explicitPress:YES];
 }
 
 - (void)handleObservedVolume:(float)volume {
+    [self handleObservedVolume:volume explicitPress:NO];
+}
+
+- (void)handleObservedVolume:(float)volume explicitPress:(BOOL)explicitPress {
     CFTimeInterval now = CACurrentMediaTime();
     if (_ignoreVolumeEventsUntil > now) {
-        _lastObservedSystemVolume = volume;
-        _hasObservedSystemVolume = YES;
-        return;
-    }
-
-    if (_adjustingSystemVolume) {
         _lastObservedSystemVolume = volume;
         _hasObservedSystemVolume = YES;
         return;
@@ -609,12 +563,24 @@ static char AnClickVolumeObservationContext;
     if (!_hasObservedSystemVolume) {
         _lastObservedSystemVolume = volume;
         _hasObservedSystemVolume = YES;
-        return;
+        if (!explicitPress || (volume > 0.001f && volume < 0.999f)) {
+            return;
+        }
     }
 
     float delta = volume - _lastObservedSystemVolume;
     _lastObservedSystemVolume = volume;
-    if (fabsf(delta) < 0.005f) {
+    NSInteger direction = 0;
+    if (delta < -0.005f) {
+        direction = -1;
+    } else if (delta > 0.005f) {
+        direction = 1;
+    } else if (explicitPress && volume <= 0.001f) {
+        direction = -1;
+    } else if (explicitPress && volume >= 0.999f) {
+        direction = 1;
+    }
+    if (direction == 0) {
         return;
     }
 
@@ -622,7 +588,7 @@ static char AnClickVolumeObservationContext;
         return;
     }
     _lastVolumeShortcutTime = now;
-    _ignoreVolumeEventsUntil = now + 0.85;
+    _ignoreVolumeEventsUntil = now + 0.95;
 
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -630,12 +596,11 @@ static char AnClickVolumeObservationContext;
         if (!strongSelf) {
             return;
         }
-        if (delta < 0.0f) {
+        if (direction < 0) {
             [strongSelf handleVolumeShortcutPlay];
         } else {
             [strongSelf handleVolumeShortcutStop];
         }
-        [strongSelf resetVolumeShortcutLevelIfNeeded];
     });
 }
 
@@ -1387,6 +1352,9 @@ static char AnClickVolumeObservationContext;
         ? (_toastDeferNonVolumeUntil - now)
         : 0.0;
     void (^presentToast)(void) = ^{
+        if (!volumeShortcutToast && self->_volumeShortcutRunSuppressToasts) {
+            return;
+        }
         if (!volumeShortcutToast) {
             CFTimeInterval currentTime = CACurrentMediaTime();
             if (self->_toastDeferNonVolumeUntil > currentTime) {
