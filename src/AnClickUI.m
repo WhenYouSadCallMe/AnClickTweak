@@ -3,6 +3,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <AVFoundation/AVFoundation.h>
 #import <MediaPlayer/MediaPlayer.h>
+#import <objc/runtime.h>
 #import <math.h>
 
 typedef NS_ENUM(NSInteger, AnClickActionMode) {
@@ -27,10 +28,56 @@ typedef NS_ENUM(NSInteger, AnClickOCRMode) {
     AnClickOCRModeAppleVision = 0,
 };
 
+typedef struct __IOHIDEvent *IOHIDEventRef;
+typedef struct __IOHIDServiceClient *IOHIDServiceClientRef;
+typedef struct __IOHIDEventSystemClient *IOHIDEventSystemClientRef;
+typedef uint32_t IOHIDEventType;
+typedef uint32_t IOHIDEventField;
+
+extern IOHIDEventSystemClientRef IOHIDEventSystemClientCreate(CFAllocatorRef allocator);
+extern void IOHIDEventSystemClientScheduleWithRunLoop(IOHIDEventSystemClientRef client, CFRunLoopRef runLoop, CFStringRef runLoopMode);
+extern void IOHIDEventSystemClientRegisterEventCallback(IOHIDEventSystemClientRef client,
+                                                        void (*callback)(void *target, void *refcon, IOHIDServiceClientRef service, IOHIDEventRef event),
+                                                        void *target,
+                                                        void *refcon);
+extern IOHIDEventType IOHIDEventGetType(IOHIDEventRef event);
+extern CFArrayRef IOHIDEventGetChildren(IOHIDEventRef event);
+extern NSInteger IOHIDEventGetIntegerValue(IOHIDEventRef event, IOHIDEventField field);
+
 static const NSUInteger AnClickMacroMaxTrajectoryPoints = 2400;
 static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 static const NSInteger AnClickBackdropBlurViewTag = 77001;
 static char AnClickVolumeObservationContext;
+static const IOHIDEventType AnClickHIDEventTypeKeyboard = 3;
+#define AnClickHIDEventFieldBase(type) ((type) << 16)
+static const IOHIDEventField AnClickHIDEventFieldKeyboardUsagePage = AnClickHIDEventFieldBase(AnClickHIDEventTypeKeyboard);
+static const IOHIDEventField AnClickHIDEventFieldKeyboardUsage = AnClickHIDEventFieldBase(AnClickHIDEventTypeKeyboard) + 1;
+static const IOHIDEventField AnClickHIDEventFieldKeyboardDown = AnClickHIDEventFieldBase(AnClickHIDEventTypeKeyboard) + 2;
+static const NSInteger AnClickHIDUsagePageConsumer = 0x0C;
+static const NSInteger AnClickHIDUsageConsumerVolumeIncrement = 0xE9;
+static const NSInteger AnClickHIDUsageConsumerVolumeDecrement = 0xEA;
+static const NSInteger AnClickSpringBoardVolumeUpButtonType = 102;
+static const NSInteger AnClickSpringBoardVolumeDownButtonType = 103;
+static CFStringRef const AnClickVolumeShortcutDownNotification = CFSTR("com.anclick.volume.down");
+static CFStringRef const AnClickVolumeShortcutUpNotification = CFSTR("com.anclick.volume.up");
+static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
+static void (*AnClickOriginalSpringBoardHandlePhysicalButtonEvent)(id self, SEL _cmd, id event);
+
+@class AnClickUI;
+static void AnClickHardwareButtonEventCallback(void *target, void *refcon, IOHIDServiceClientRef service, IOHIDEventRef event);
+static void AnClickVolumeDarwinNotificationCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo);
+static BOOL AnClickProcessIsSpringBoard(void);
+static NSInteger AnClickVolumeShortcutDirectionFromPressesEvent(id event);
+static NSInteger AnClickVolumeShortcutDirectionFromPhysicalButtonEvent(id event);
+static NSNumber *AnClickNumberValueForObjectKeys(id object, NSArray<NSString *> *keys);
+static void AnClickPostVolumeShortcutDirection(NSInteger direction);
+static void AnClickInstallWindowPressEventHook(void);
+static void AnClickInstallSpringBoardPhysicalButtonHook(void);
+static void AnClickInstallSpringBoardVolumeControlHook(void);
+
+@interface UIEvent (AnClickPressesEvent)
+- (NSSet<UIPress *> *)allPresses;
+@end
 
 @interface AnClickCore : NSObject
 + (UIImage *)captureCurrentWindowImage;
@@ -72,6 +119,9 @@ static char AnClickVolumeObservationContext;
 + (instancetype)shared;
 - (void)show;
 - (void)handleScreenGeometryChanged;
+- (void)handleHardwareButtonHIDEvent:(IOHIDEventRef)event;
+- (void)handleWindowPressesEvent:(UIEvent *)event;
+- (void)handleExternalVolumeShortcutDirection:(NSInteger)direction;
 @end
 
 @implementation AnClickUI {
@@ -207,6 +257,8 @@ static char AnClickVolumeObservationContext;
     BOOL _taskRunActive;
     BOOL _volumeShortcutRegistered;
     BOOL _volumeKVORegistered;
+    BOOL _volumeDarwinObserverRegistered;
+    BOOL _hardwareVolumeButtonObserverRegistered;
     BOOL _hasObservedSystemVolume;
     BOOL _volumeShortcutRunSuppressToasts;
     NSUInteger _panelRestoreGeneration;
@@ -240,6 +292,7 @@ static char AnClickVolumeObservationContext;
     double _colorTolerance;
     NSTimer *_globalStartTimer;
     NSTimer *_globalStopTimer;
+    IOHIDEventSystemClientRef _hardwareVolumeButtonClient;
     MPVolumeView *_volumeView;
     UISlider *_volumeSlider;
     double _matchThreshold;
@@ -356,6 +409,8 @@ static char AnClickVolumeObservationContext;
     [self activateVolumeShortcutAudioSession];
     [self installVolumeShortcutControl];
     [self registerVolumeOutputObserverIfNeeded];
+    [self registerVolumeDarwinObserverIfNeeded];
+    [self registerHardwareVolumeButtonObserverIfNeeded];
 
     if (_volumeShortcutRegistered) {
         return;
@@ -368,6 +423,48 @@ static char AnClickVolumeObservationContext;
                                              selector:@selector(handleSystemVolumeDidChange:)
                                                  name:@"AVSystemController_SystemVolumeDidChangeNotification"
                                                object:nil];
+}
+
+- (void)registerVolumeDarwinObserverIfNeeded {
+    if (_volumeDarwinObserverRegistered) {
+        return;
+    }
+
+    _volumeDarwinObserverRegistered = YES;
+    CFNotificationCenterRef center = CFNotificationCenterGetDarwinNotifyCenter();
+    CFNotificationCenterAddObserver(center,
+                                    (__bridge const void *)self,
+                                    AnClickVolumeDarwinNotificationCallback,
+                                    AnClickVolumeShortcutDownNotification,
+                                    NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
+    CFNotificationCenterAddObserver(center,
+                                    (__bridge const void *)self,
+                                    AnClickVolumeDarwinNotificationCallback,
+                                    AnClickVolumeShortcutUpNotification,
+                                    NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
+}
+
+- (void)registerHardwareVolumeButtonObserverIfNeeded {
+    if (_hardwareVolumeButtonObserverRegistered) {
+        return;
+    }
+
+    _hardwareVolumeButtonObserverRegistered = YES;
+    _hardwareVolumeButtonClient = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
+    if (!_hardwareVolumeButtonClient) {
+        NSLog(@"[AnClick] Hardware volume shortcut HID client unavailable");
+        return;
+    }
+
+    IOHIDEventSystemClientRegisterEventCallback(_hardwareVolumeButtonClient,
+                                                AnClickHardwareButtonEventCallback,
+                                                (__bridge void *)self,
+                                                NULL);
+    IOHIDEventSystemClientScheduleWithRunLoop(_hardwareVolumeButtonClient,
+                                              CFRunLoopGetMain(),
+                                              kCFRunLoopCommonModes);
 }
 
 - (void)registerVolumeOutputObserverIfNeeded {
@@ -548,6 +645,73 @@ static char AnClickVolumeObservationContext;
     [self handleObservedVolume:volumeNumber.floatValue explicitPress:YES];
 }
 
+- (void)handleWindowPressesEvent:(UIEvent *)event {
+    NSInteger direction = AnClickVolumeShortcutDirectionFromPressesEvent(event);
+    if (direction == 0) {
+        return;
+    }
+
+    [self triggerVolumeShortcutDirection:direction];
+}
+
+- (void)handleExternalVolumeShortcutDirection:(NSInteger)direction {
+    if (direction == 0) {
+        return;
+    }
+    if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
+        return;
+    }
+
+    [self triggerVolumeShortcutDirection:direction];
+}
+
+- (void)handleHardwareButtonHIDEvent:(IOHIDEventRef)event {
+    NSInteger direction = [self volumeShortcutDirectionForHIDEvent:event];
+    if (direction == 0) {
+        return;
+    }
+
+    [self triggerVolumeShortcutDirection:direction];
+}
+
+- (NSInteger)volumeShortcutDirectionForHIDEvent:(IOHIDEventRef)event {
+    if (!event) {
+        return 0;
+    }
+
+    IOHIDEventType type = IOHIDEventGetType(event);
+    if (type == AnClickHIDEventTypeKeyboard) {
+        NSInteger usagePage = IOHIDEventGetIntegerValue(event, AnClickHIDEventFieldKeyboardUsagePage);
+        NSInteger usage = IOHIDEventGetIntegerValue(event, AnClickHIDEventFieldKeyboardUsage);
+        NSInteger down = IOHIDEventGetIntegerValue(event, AnClickHIDEventFieldKeyboardDown);
+        if (usagePage != AnClickHIDUsagePageConsumer || down == 0) {
+            return 0;
+        }
+        if (usage == AnClickHIDUsageConsumerVolumeDecrement) {
+            return -1;
+        }
+        if (usage == AnClickHIDUsageConsumerVolumeIncrement) {
+            return 1;
+        }
+        return 0;
+    }
+
+    CFArrayRef children = IOHIDEventGetChildren(event);
+    if (!children) {
+        return 0;
+    }
+
+    CFIndex childCount = CFArrayGetCount(children);
+    for (CFIndex i = 0; i < childCount; i++) {
+        IOHIDEventRef childEvent = (IOHIDEventRef)CFArrayGetValueAtIndex(children, i);
+        NSInteger direction = [self volumeShortcutDirectionForHIDEvent:childEvent];
+        if (direction != 0) {
+            return direction;
+        }
+    }
+    return 0;
+}
+
 - (void)handleObservedVolume:(float)volume {
     [self handleObservedVolume:volume explicitPress:NO];
 }
@@ -584,6 +748,15 @@ static char AnClickVolumeObservationContext;
         return;
     }
 
+    [self triggerVolumeShortcutDirection:direction];
+}
+
+- (void)triggerVolumeShortcutDirection:(NSInteger)direction {
+    if (direction == 0) {
+        return;
+    }
+
+    CFTimeInterval now = CACurrentMediaTime();
     if (_lastVolumeShortcutTime > 0 && now - _lastVolumeShortcutTime < 0.35) {
         return;
     }
@@ -8125,8 +8298,290 @@ static char AnClickVolumeObservationContext;
 
 @end
 
+static void AnClickHardwareButtonEventCallback(void *target, void *refcon, IOHIDServiceClientRef service, IOHIDEventRef event) {
+    (void)refcon;
+    (void)service;
+    AnClickUI *ui = (__bridge AnClickUI *)target;
+    if (!ui) {
+        return;
+    }
+    [ui handleHardwareButtonHIDEvent:event];
+}
+
+static void AnClickVolumeDarwinNotificationCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    (void)center;
+    (void)object;
+    (void)userInfo;
+    NSInteger direction = 0;
+    if (CFStringCompare(name, AnClickVolumeShortcutDownNotification, 0) == kCFCompareEqualTo) {
+        direction = -1;
+    } else if (CFStringCompare(name, AnClickVolumeShortcutUpNotification, 0) == kCFCompareEqualTo) {
+        direction = 1;
+    }
+    if (direction == 0) {
+        return;
+    }
+
+    AnClickUI *ui = (__bridge AnClickUI *)observer;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [ui handleExternalVolumeShortcutDirection:direction];
+    });
+}
+
+static BOOL AnClickProcessIsSpringBoard(void) {
+    NSBundle *bundle = NSBundle.mainBundle;
+    NSString *bundleIdentifier = bundle.bundleIdentifier ?: @"";
+    NSString *processName = NSProcessInfo.processInfo.processName ?: @"";
+    return [bundleIdentifier isEqualToString:@"com.apple.springboard"] ||
+        [processName isEqualToString:@"SpringBoard"];
+}
+
+static NSNumber *AnClickNumberValueForObjectKeys(id object, NSArray<NSString *> *keys) {
+    if (!object) {
+        return nil;
+    }
+    if ([object isKindOfClass:NSNumber.class]) {
+        return object;
+    }
+
+    for (NSString *key in keys) {
+        id value = nil;
+        @try {
+            value = [object valueForKey:key];
+        } @catch (__unused NSException *exception) {
+            value = nil;
+        }
+        if ([value isKindOfClass:NSNumber.class]) {
+            return value;
+        }
+        if ([value respondsToSelector:@selector(integerValue)]) {
+            return @([value integerValue]);
+        }
+    }
+    return nil;
+}
+
+static NSInteger AnClickVolumeShortcutDirectionFromPressesEvent(id event) {
+    if (!event || ![event respondsToSelector:@selector(allPresses)]) {
+        return 0;
+    }
+    if ([event respondsToSelector:@selector(type)] && ((UIEvent *)event).type != UIEventTypePresses) {
+        return 0;
+    }
+
+    NSSet<UIPress *> *presses = [(UIEvent *)event allPresses];
+    for (UIPress *press in presses) {
+        NSNumber *typeNumber = AnClickNumberValueForObjectKeys(press, @[@"_type", @"type", @"_buttonType", @"buttonType"]);
+        NSInteger type = typeNumber.integerValue;
+        if (type == AnClickSpringBoardVolumeDownButtonType) {
+            return -1;
+        }
+        if (type == AnClickSpringBoardVolumeUpButtonType) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static NSInteger AnClickVolumeShortcutDirectionFromPhysicalButtonEvent(id event) {
+    NSNumber *downNumber = AnClickNumberValueForObjectKeys(event, @[@"_down", @"down", @"_isDown", @"isDown", @"pressed"]);
+    if (downNumber && !downNumber.boolValue) {
+        return 0;
+    }
+
+    NSNumber *typeNumber = AnClickNumberValueForObjectKeys(event, @[@"_type", @"type", @"_buttonType", @"buttonType"]);
+    NSInteger type = typeNumber.integerValue;
+    if (type == AnClickSpringBoardVolumeDownButtonType) {
+        return -1;
+    }
+    if (type == AnClickSpringBoardVolumeUpButtonType) {
+        return 1;
+    }
+
+    return AnClickVolumeShortcutDirectionFromPressesEvent(event);
+}
+
+static void AnClickPostVolumeShortcutDirection(NSInteger direction) {
+    if (direction == 0) {
+        return;
+    }
+
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         direction < 0 ? AnClickVolumeShortcutDownNotification : AnClickVolumeShortcutUpNotification,
+                                         NULL,
+                                         NULL,
+                                         true);
+}
+
+static void AnClickInstallWindowPressEventHook(void) {
+    static BOOL installed = NO;
+    if (installed) {
+        return;
+    }
+
+    Class cls = UIWindow.class;
+    SEL selector = @selector(sendEvent:);
+    Method method = class_getInstanceMethod(cls, selector);
+    if (!method) {
+        return;
+    }
+
+    installed = YES;
+    AnClickOriginalWindowSendEvent = (void (*)(id, SEL, UIEvent *))method_getImplementation(method);
+    IMP replacement = imp_implementationWithBlock(^(__unsafe_unretained UIWindow *window, UIEvent *event) {
+        if (!AnClickProcessIsSpringBoard()) {
+            NSInteger direction = AnClickVolumeShortcutDirectionFromPressesEvent(event);
+            if (direction != 0) {
+                [[AnClickUI shared] handleExternalVolumeShortcutDirection:direction];
+            }
+        }
+        if (AnClickOriginalWindowSendEvent) {
+            AnClickOriginalWindowSendEvent(window, selector, event);
+        }
+    });
+    method_setImplementation(method, replacement);
+}
+
+static void AnClickSpringBoardHandlePhysicalButtonEvent(id self, SEL _cmd, id event) {
+    NSInteger direction = AnClickVolumeShortcutDirectionFromPhysicalButtonEvent(event);
+    if (direction != 0) {
+        AnClickPostVolumeShortcutDirection(direction);
+    }
+    if (AnClickOriginalSpringBoardHandlePhysicalButtonEvent) {
+        AnClickOriginalSpringBoardHandlePhysicalButtonEvent(self, _cmd, event);
+    }
+}
+
+static void AnClickHookVolumeControlSelector(Class cls, SEL selector, NSInteger direction) {
+    Method method = class_getInstanceMethod(cls, selector);
+    if (!method) {
+        return;
+    }
+
+    IMP original = method_getImplementation(method);
+    unsigned int argCount = method_getNumberOfArguments(method);
+    IMP replacement = nil;
+    if (argCount == 2) {
+        replacement = imp_implementationWithBlock(^(__unsafe_unretained id object) {
+            AnClickPostVolumeShortcutDirection(direction);
+            ((void (*)(id, SEL))original)(object, selector);
+        });
+    } else if (argCount == 3) {
+        replacement = imp_implementationWithBlock(^(__unsafe_unretained id object, uintptr_t arg1) {
+            AnClickPostVolumeShortcutDirection(direction);
+            ((void (*)(id, SEL, uintptr_t))original)(object, selector, arg1);
+        });
+    } else if (argCount == 4) {
+        replacement = imp_implementationWithBlock(^(__unsafe_unretained id object, uintptr_t arg1, uintptr_t arg2) {
+            AnClickPostVolumeShortcutDirection(direction);
+            ((void (*)(id, SEL, uintptr_t, uintptr_t))original)(object, selector, arg1, arg2);
+        });
+    }
+
+    if (!replacement) {
+        return;
+    }
+
+    method_setImplementation(method, replacement);
+    NSLog(@"[AnClick] Installed volume control shortcut hook %@ %@", NSStringFromClass(cls), NSStringFromSelector(selector));
+}
+
+static void AnClickInstallSpringBoardVolumeControlHook(void) {
+    static BOOL installed = NO;
+    if (installed || !AnClickProcessIsSpringBoard()) {
+        return;
+    }
+
+    NSArray<NSString *> *classNames = @[
+        @"VolumeControl",
+        @"SBVolumeControl",
+        @"SBVolumeHardwareButtonController",
+    ];
+    NSArray<NSString *> *downSelectors = @[
+        @"decreaseVolume",
+        @"decreaseVolume:",
+        @"_decreaseVolume",
+        @"_decreaseVolume:",
+        @"handleVolumeDownButtonDown:",
+    ];
+    NSArray<NSString *> *upSelectors = @[
+        @"increaseVolume",
+        @"increaseVolume:",
+        @"_increaseVolume",
+        @"_increaseVolume:",
+        @"handleVolumeUpButtonDown:",
+    ];
+
+    BOOL hookedAny = NO;
+    for (NSString *className in classNames) {
+        Class cls = NSClassFromString(className);
+        if (!cls) {
+            continue;
+        }
+        for (NSString *selectorName in downSelectors) {
+            SEL selector = NSSelectorFromString(selectorName);
+            Method method = class_getInstanceMethod(cls, selector);
+            if (!method) {
+                continue;
+            }
+            AnClickHookVolumeControlSelector(cls, selector, -1);
+            hookedAny = YES;
+        }
+        for (NSString *selectorName in upSelectors) {
+            SEL selector = NSSelectorFromString(selectorName);
+            Method method = class_getInstanceMethod(cls, selector);
+            if (!method) {
+                continue;
+            }
+            AnClickHookVolumeControlSelector(cls, selector, 1);
+            hookedAny = YES;
+        }
+    }
+
+    installed = hookedAny;
+}
+
+static void AnClickInstallSpringBoardPhysicalButtonHook(void) {
+    static BOOL installed = NO;
+    if (installed || !AnClickProcessIsSpringBoard()) {
+        return;
+    }
+
+    NSArray<NSString *> *classNames = @[@"SpringBoard", @"SBUIController"];
+    NSArray<NSString *> *selectorNames = @[@"_handlePhysicalButtonEvent:", @"handlePhysicalButtonEvent:", @"_handleButtonEvent:"];
+    for (NSString *className in classNames) {
+        Class cls = NSClassFromString(className);
+        if (!cls) {
+            continue;
+        }
+        for (NSString *selectorName in selectorNames) {
+            SEL selector = NSSelectorFromString(selectorName);
+            Method method = class_getInstanceMethod(cls, selector);
+            if (!method) {
+                continue;
+            }
+            installed = YES;
+            AnClickOriginalSpringBoardHandlePhysicalButtonEvent = (void (*)(id, SEL, id))method_getImplementation(method);
+            method_setImplementation(method, (IMP)AnClickSpringBoardHandlePhysicalButtonEvent);
+            NSLog(@"[AnClick] Installed SpringBoard volume shortcut hook %@ %@", className, selectorName);
+            return;
+        }
+    }
+}
+
 __attribute__((constructor)) static void AnClickUIInit(void) {
     NSLog(@"[AnClick] UI constructor loaded");
+    AnClickInstallWindowPressEventHook();
+    if (AnClickProcessIsSpringBoard()) {
+        AnClickInstallSpringBoardPhysicalButtonHook();
+        AnClickInstallSpringBoardVolumeControlHook();
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            AnClickInstallSpringBoardPhysicalButtonHook();
+            AnClickInstallSpringBoardVolumeControlHook();
+        });
+        return;
+    }
+
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [[AnClickUI shared] show];
     });
