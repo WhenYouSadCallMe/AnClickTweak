@@ -106,6 +106,7 @@ static char AnClickVolumeObservationContext;
     UIButton *_globalSettingsButton;
     NSArray<UIButton *> *_modeButtons;
     UIScrollView *_taskListView;
+    UIScrollView *_editorContentScrollView;
     UILabel *_statusLabel;
     UILabel *_toastLabel;
     UILabel *_hostToastLabel;
@@ -647,6 +648,7 @@ static char AnClickVolumeObservationContext;
         [self attachPanelWindowToActiveSceneIfNeeded];
         [self installVolumeShortcutControl];
         [self reclampPanelWindowForCurrentScreen];
+        [self relayoutScreenInteractionOverlays];
         NSString *toastText = self->_toastLabel.text;
         [self layoutToastWithMessage:toastText.length > 0 ? toastText : @""];
         UIWindow *hostWindow = [self hostWindow];
@@ -660,6 +662,7 @@ static char AnClickVolumeObservationContext;
         [self attachPanelWindowToActiveSceneIfNeeded];
         [self installVolumeShortcutControl];
         [self reclampPanelWindowForCurrentScreen];
+        [self relayoutScreenInteractionOverlays];
     });
 }
 
@@ -729,6 +732,7 @@ static char AnClickVolumeObservationContext;
     collapsedLongPress.minimumPressDuration = 0.45;
     [_collapsedButton addGestureRecognizer:collapsedLongPress];
     UIPanGestureRecognizer *collapsedPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelPan:)];
+    collapsedPan.delegate = self;
     [_collapsedButton addGestureRecognizer:collapsedPan];
 
     _panelView = [[UIView alloc] initWithFrame:_panelWindow.bounds];
@@ -743,6 +747,7 @@ static char AnClickVolumeObservationContext;
     [controller.view addSubview:_panelView];
 
     UIPanGestureRecognizer *panelPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelPan:)];
+    panelPan.delegate = self;
     [_panelView addGestureRecognizer:panelPan];
     UITapGestureRecognizer *keyboardDismissTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelTapToDismissKeyboard:)];
     keyboardDismissTap.cancelsTouchesInView = NO;
@@ -889,6 +894,14 @@ static char AnClickVolumeObservationContext;
     _statusLabel.textAlignment = NSTextAlignmentCenter;
     [_panelView addSubview:_statusLabel];
 
+    _editorContentScrollView = [[UIScrollView alloc] initWithFrame:CGRectZero];
+    _editorContentScrollView.backgroundColor = UIColor.clearColor;
+    _editorContentScrollView.alwaysBounceVertical = YES;
+    _editorContentScrollView.showsVerticalScrollIndicator = YES;
+    _editorContentScrollView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
+    _editorContentScrollView.hidden = YES;
+    [_panelView addSubview:_editorContentScrollView];
+
     _editorTitleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     _editorTitleLabel.textColor = UIColor.whiteColor;
     _editorTitleLabel.font = [UIFont systemFontOfSize:19 weight:UIFontWeightBold];
@@ -1002,6 +1015,7 @@ static char AnClickVolumeObservationContext;
     _colorPreviewView.layer.borderWidth = 1;
     _colorPreviewView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.24].CGColor;
     [_panelView addSubview:_colorPreviewView];
+    [self installEditorContentSubviewsInScrollView];
     [self refreshTemplatePreview];
     [self refreshTaskList];
     [self setTaskEditorVisible:NO];
@@ -1339,10 +1353,16 @@ static char AnClickVolumeObservationContext;
 }
 
 - (CGSize)expandedPanelSizeForEditorVisible:(BOOL)editorVisible {
-    CGFloat width = MIN(340.0, UIScreen.mainScreen.bounds.size.width - 10.0);
-    CGFloat availableHeight = UIScreen.mainScreen.bounds.size.height - 60.0;
-    CGFloat preferredHeight = MIN(editorVisible ? 700.0 : 420.0, availableHeight);
-    CGFloat minHeight = MIN(editorVisible ? 620.0 : 340.0, availableHeight);
+    CGSize screenSize = UIScreen.mainScreen.bounds.size;
+    BOOL landscape = screenSize.width > screenSize.height;
+    CGFloat widthLimit = landscape ? (editorVisible ? 430.0 : 380.0) : 340.0;
+    CGFloat width = MIN(widthLimit, screenSize.width - 10.0);
+    CGFloat verticalPadding = landscape ? 52.0 : 60.0;
+    CGFloat availableHeight = screenSize.height - verticalPadding;
+    CGFloat editorPreferredHeight = landscape ? availableHeight : 700.0;
+    CGFloat editorMinHeight = landscape ? 300.0 : 620.0;
+    CGFloat preferredHeight = MIN(editorVisible ? editorPreferredHeight : 420.0, availableHeight);
+    CGFloat minHeight = MIN(editorVisible ? editorMinHeight : 340.0, availableHeight);
     return CGSizeMake(width, MAX(minHeight, preferredHeight));
 }
 
@@ -1409,6 +1429,97 @@ static char AnClickVolumeObservationContext;
     return insets;
 }
 
+- (UIEdgeInsets)overlaySafeAreaInsetsForView:(UIView *)view window:(UIWindow *)window {
+    UIEdgeInsets insets = UIEdgeInsetsZero;
+    if (@available(iOS 11.0, *)) {
+        if (view) {
+            insets = view.safeAreaInsets;
+        }
+        if (window) {
+            UIEdgeInsets windowInsets = window.safeAreaInsets;
+            insets.top = MAX(insets.top, windowInsets.top);
+            insets.left = MAX(insets.left, windowInsets.left);
+            insets.bottom = MAX(insets.bottom, windowInsets.bottom);
+            insets.right = MAX(insets.right, windowInsets.right);
+        }
+        UIWindow *hostWindow = [self hostWindow];
+        if (hostWindow) {
+            UIEdgeInsets hostInsets = hostWindow.safeAreaInsets;
+            insets.top = MAX(insets.top, hostInsets.top);
+            insets.left = MAX(insets.left, hostInsets.left);
+            insets.bottom = MAX(insets.bottom, hostInsets.bottom);
+            insets.right = MAX(insets.right, hostInsets.right);
+        }
+    }
+
+    CGSize screenSize = view ? view.bounds.size : UIScreen.mainScreen.bounds.size;
+    if (screenSize.width <= 0.0 || screenSize.height <= 0.0) {
+        screenSize = UIScreen.mainScreen.bounds.size;
+    }
+    CGFloat shortSide = MIN(screenSize.width, screenSize.height);
+    CGFloat longSide = MAX(screenSize.width, screenSize.height);
+    BOOL likelyNotchedPhone = shortSide <= 430.0 && longSide >= 812.0;
+    BOOL landscape = screenSize.width > screenSize.height;
+    if (likelyNotchedPhone) {
+        if (landscape) {
+            if (insets.left <= 0.0) {
+                insets.left = 46.0;
+            }
+            if (insets.right <= 0.0) {
+                insets.right = 46.0;
+            }
+            if (insets.bottom <= 0.0) {
+                insets.bottom = 16.0;
+            }
+        } else {
+            if (insets.top <= 0.0) {
+                insets.top = 54.0;
+            }
+            if (insets.bottom <= 0.0) {
+                insets.bottom = 21.0;
+            }
+        }
+    }
+    return insets;
+}
+
+- (void)updateColorPickZoomForCurrentBounds {
+    if (!_colorPickScrollView || !_colorPickImage) {
+        return;
+    }
+
+    CGSize boundsSize = _colorPickScrollView.bounds.size;
+    CGFloat minZoom = MIN(boundsSize.width / MAX(1.0, _colorPickImage.size.width),
+                          boundsSize.height / MAX(1.0, _colorPickImage.size.height));
+    minZoom = MIN(MAX(minZoom, 0.25), 1.0);
+    _colorPickScrollView.minimumZoomScale = minZoom;
+    if (_colorPickScrollView.zoomScale < minZoom) {
+        _colorPickScrollView.zoomScale = minZoom;
+    }
+    [self centerColorPickImageContent];
+}
+
+- (void)relayoutScreenInteractionOverlays {
+    CGRect screenBounds = UIScreen.mainScreen.bounds;
+    if (_pointPickWindow) {
+        _pointPickWindow.frame = screenBounds;
+        _pointPickWindow.rootViewController.view.frame = _pointPickWindow.bounds;
+        _pointPickOverlay.frame = _pointPickWindow.rootViewController.view.bounds;
+        [self updatePointPickCursor];
+        if (_actionMode == AnClickActionModeSwipe && _hasManualSwipeAnchor) {
+            [self showPointPickSwipeStartMarker];
+        }
+    }
+    if (_colorPickWindow) {
+        _colorPickWindow.frame = screenBounds;
+        UIView *root = _colorPickWindow.rootViewController.view;
+        root.frame = _colorPickWindow.bounds;
+        _colorPickScrollView.frame = root.bounds;
+        [self updateColorPickZoomForCurrentBounds];
+        [self layoutColorPickToolbar];
+    }
+}
+
 - (void)reclampPanelWindowForCurrentScreen {
     if (!_panelWindow) {
         return;
@@ -1419,6 +1530,12 @@ static char AnClickVolumeObservationContext;
         _panelWindow.frame = [self clampedPanelFrame:frame];
         _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
         _panelView.frame = _panelWindow.bounds;
+        if (_taskEditorVisible) {
+            [self refreshEditorConfigControls];
+        } else {
+            [self layoutTaskHomeControls];
+            [self refreshTaskList];
+        }
         return;
     }
 
@@ -1495,6 +1612,10 @@ static char AnClickVolumeObservationContext;
     _networkFalseField.hidden = YES;
     _previewView.hidden = YES;
     _colorPreviewView.hidden = YES;
+    _editorContentScrollView.hidden = !visible;
+    if (!visible) {
+        _editorContentScrollView.contentOffset = CGPointZero;
+    }
 
     _addTaskButton.hidden = visible;
     _deleteTaskButton.hidden = visible;
@@ -1511,6 +1632,82 @@ static char AnClickVolumeObservationContext;
         [self refreshEditorConfigControls];
     } else {
         [self layoutTaskHomeControls];
+    }
+}
+
+- (NSArray<UIView *> *)editorContentViews {
+    UIView *views[] = {
+        _descriptionCaptionLabel,
+        _descriptionField,
+        _primaryConfigLabel,
+        _secondaryConfigLabel,
+        _tertiaryConfigLabel,
+        _thresholdCaptionLabel,
+        _delayCaptionLabel,
+        _repeatCaptionLabel,
+        _captureButton,
+        _playButton,
+        _pickPointButton,
+        _runManualButton,
+        _recordSwipeButton,
+        _previewSwipeButton,
+        _clearActionButton,
+        _testButton,
+        _imageActionButton,
+        _networkRequestModeButton,
+        _previewActionButton,
+        _swipeRecordButton,
+        _macroRecordButton,
+        _macroPlayButton,
+        _delayField,
+        _repeatField,
+        _thresholdField,
+        _ocrTargetField,
+        _networkURLField,
+        _networkContainsField,
+        _networkFalseField,
+        _previewView,
+        _colorPreviewView,
+    };
+    NSMutableArray<UIView *> *result = [NSMutableArray array];
+    NSUInteger count = sizeof(views) / sizeof(UIView *);
+    for (NSUInteger i = 0; i < count; i++) {
+        if (views[i]) {
+            [result addObject:views[i]];
+        }
+    }
+    return result;
+}
+
+- (void)installEditorContentSubviewsInScrollView {
+    if (!_editorContentScrollView) {
+        return;
+    }
+
+    for (UIView *view in [self editorContentViews]) {
+        if (view.superview != _editorContentScrollView) {
+            [_editorContentScrollView addSubview:view];
+        }
+    }
+}
+
+- (void)refreshEditorContentScrollSize {
+    if (!_editorContentScrollView) {
+        return;
+    }
+
+    CGFloat maxY = 0.0;
+    for (UIView *view in [self editorContentViews]) {
+        if (!view.hidden) {
+            maxY = MAX(maxY, CGRectGetMaxY(view.frame));
+        }
+    }
+
+    CGFloat contentHeight = MAX(_editorContentScrollView.bounds.size.height + 1.0, maxY + 18.0);
+    _editorContentScrollView.contentSize = CGSizeMake(_editorContentScrollView.bounds.size.width, contentHeight);
+    CGFloat maxOffsetY = MAX(0.0, contentHeight - _editorContentScrollView.bounds.size.height);
+    if (_editorContentScrollView.contentOffset.y > maxOffsetY) {
+        _editorContentScrollView.contentOffset = CGPointMake(_editorContentScrollView.contentOffset.x, maxOffsetY);
     }
 }
 
@@ -1597,13 +1794,10 @@ static char AnClickVolumeObservationContext;
 }
 
 - (CGFloat)editorConfigTopY {
-    if (_modeButtons.count > 6) {
-        NSUInteger columns = 4;
-        NSUInteger rows = (_modeButtons.count + columns - 1) / columns;
-        CGFloat modeBottomY = 64.0 + rows * 30.0 + (rows > 0 ? (rows - 1) * 5.0 : 0.0);
-        return modeBottomY + 99.0;
-    }
-    return 206.0;
+    BOOL compactHeight = _panelView && _panelView.bounds.size.height < 430.0;
+    CGFloat captionHeight = compactHeight ? 18.0 : 20.0;
+    CGFloat fieldHeight = compactHeight ? 36.0 : 40.0;
+    return captionHeight + 2.0 + fieldHeight + (compactHeight ? 10.0 : 12.0);
 }
 
 - (void)layoutEditorScaffold {
@@ -1614,16 +1808,27 @@ static char AnClickVolumeObservationContext;
     CGFloat width = _panelView.bounds.size.width;
     CGFloat height = _panelView.bounds.size.height;
     CGFloat side = 18.0;
-    CGFloat modeGap = 6.0;
-    CGFloat modeTopY = 64.0;
-    CGFloat modeButtonHeight = _modeButtons.count > 6 ? 30.0 : 34.0;
-    NSUInteger modeColumns = _modeButtons.count > 6 ? 4 : MAX((NSUInteger)1, _modeButtons.count);
+    BOOL compactHeight = height < 430.0;
+    CGFloat modeGap = compactHeight ? 5.0 : 6.0;
+    CGFloat modeRowGap = compactHeight ? 4.0 : 5.0;
+    CGFloat modeTopY = compactHeight ? 58.0 : 64.0;
+    CGFloat modeButtonHeight = _modeButtons.count > 6 ? (compactHeight ? 28.0 : 30.0) : (compactHeight ? 30.0 : 34.0);
+    NSUInteger modeColumns = 1;
+    if (_modeButtons.count > 6) {
+        modeColumns = (compactHeight && width >= 400.0) ? 5 : 4;
+    } else {
+        modeColumns = MAX((NSUInteger)1, _modeButtons.count);
+    }
     NSUInteger modeRows = (_modeButtons.count + modeColumns - 1) / modeColumns;
+    [self installEditorContentSubviewsInScrollView];
 
     [_editorBackButton setTitle:@"‹" forState:UIControlStateNormal];
     _editorBackButton.titleLabel.font = [UIFont systemFontOfSize:34 weight:UIFontWeightBold];
-    _editorBackButton.frame = CGRectMake(12, 8, 42, 40);
-    _editorBackButton.layer.cornerRadius = 20.0;
+    CGFloat chromeButtonWidth = compactHeight ? 38.0 : 42.0;
+    CGFloat chromeButtonHeight = compactHeight ? 36.0 : 40.0;
+    CGFloat chromeButtonY = compactHeight ? 7.0 : 8.0;
+    _editorBackButton.frame = CGRectMake(12, chromeButtonY, chromeButtonWidth, chromeButtonHeight);
+    _editorBackButton.layer.cornerRadius = chromeButtonHeight * 0.5;
     _editorBackButton.layer.borderWidth = 0;
     _editorBackButton.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.12];
     _editorBackButton.layer.borderWidth = 1.0;
@@ -1632,8 +1837,8 @@ static char AnClickVolumeObservationContext;
     [self updateButtonShadowPath:_editorBackButton];
 
     [self setCenteredIconForButton:_collapseButton systemName:@"xmark" fallbackTitle:@"×" fontSize:22];
-    _collapseButton.frame = CGRectMake(width - 54, 8, 42, 40);
-    _collapseButton.layer.cornerRadius = 20.0;
+    _collapseButton.frame = CGRectMake(width - chromeButtonWidth - 12.0, chromeButtonY, chromeButtonWidth, chromeButtonHeight);
+    _collapseButton.layer.cornerRadius = chromeButtonHeight * 0.5;
     _collapseButton.layer.borderWidth = 0;
     _collapseButton.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.12];
     _collapseButton.layer.borderWidth = 1.0;
@@ -1644,12 +1849,12 @@ static char AnClickVolumeObservationContext;
 
     _toolTitleLabel.hidden = NO;
     _toolTitleLabel.text = [self toolDisplayName];
-    _toolTitleLabel.frame = CGRectMake(66, 7, width - 132, 17);
+    _toolTitleLabel.frame = CGRectMake(66, compactHeight ? 6.0 : 7.0, width - 132, 17);
     _toolTitleLabel.textColor = [UIColor colorWithWhite:1 alpha:0.70];
     _toolTitleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
 
     _editorTitleLabel.text = (_actionMode == AnClickActionModeNone) ? @"选择动作" : [self currentActionName];
-    _editorTitleLabel.frame = CGRectMake(66, 22, width - 132, 30);
+    _editorTitleLabel.frame = CGRectMake(66, compactHeight ? 21.0 : 22.0, width - 132, 30);
 
     UIView *divider = [_panelView viewWithTag:8811];
     if (!divider) {
@@ -1672,31 +1877,54 @@ static char AnClickVolumeObservationContext;
         CGFloat usedWidth = buttonWidth * itemsInRow + modeGap * (itemsInRow - 1);
         CGFloat rowX = side + floor((rowWidth - usedWidth) * 0.5);
         button.frame = CGRectMake(rowX + (buttonWidth + modeGap) * column,
-                                  modeTopY + (modeButtonHeight + 5.0) * row,
+                                  modeTopY + (modeButtonHeight + modeRowGap) * row,
                                   buttonWidth,
                                   modeButtonHeight);
-        button.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
+        button.titleLabel.font = [UIFont systemFontOfSize:(compactHeight ? 14 : 15) weight:UIFontWeightBold];
     }
 
     CGFloat modeRowGapCount = modeRows > 0 ? (CGFloat)(modeRows - 1) : 0.0;
-    CGFloat modeBottomY = modeTopY + modeRows * modeButtonHeight + modeRowGapCount * 5.0;
-    _statusLabel.frame = CGRectMake(16, modeBottomY + 6.0, width - 32, 22);
+    CGFloat modeBottomY = modeTopY + modeRows * modeButtonHeight + modeRowGapCount * modeRowGap;
+    _statusLabel.frame = CGRectMake(16, modeBottomY + (compactHeight ? 4.0 : 6.0), width - 32, compactHeight ? 20.0 : 22.0);
     _statusLabel.textColor = UIColor.whiteColor;
-    _statusLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
+    _statusLabel.font = [UIFont systemFontOfSize:(compactHeight ? 14 : 15) weight:UIFontWeightMedium];
 
-    _descriptionCaptionLabel.frame = CGRectMake(side, CGRectGetMaxY(_statusLabel.frame) + 6.0, width - side * 2.0, 20);
-    _descriptionField.frame = CGRectMake(side, CGRectGetMaxY(_descriptionCaptionLabel.frame) + 2.0, width - side * 2.0, 40);
+    CGFloat bottomButtonHeight = compactHeight ? 38.0 : 40.0;
+    CGFloat bottomButtonY = height - bottomButtonHeight - (compactHeight ? 8.0 : 12.0);
+    CGFloat scrollTop = CGRectGetMaxY(_statusLabel.frame) + (compactHeight ? 4.0 : 6.0);
+    CGFloat scrollBottom = bottomButtonY - 8.0;
+    CGFloat minimumScrollHeight = compactHeight ? 72.0 : 120.0;
+    if (scrollBottom - scrollTop < minimumScrollHeight) {
+        scrollTop = MAX(58.0, scrollBottom - minimumScrollHeight);
+    }
+    CGFloat scrollHeight = MAX(52.0, scrollBottom - scrollTop);
+    _editorContentScrollView.frame = CGRectMake(0, scrollTop, width, scrollHeight);
+    _editorContentScrollView.scrollIndicatorInsets = UIEdgeInsetsMake(0, 0, 0, 3.0);
 
-    CGFloat bottomButtonY = height - 52.0;
+    CGFloat descriptionCaptionHeight = compactHeight ? 18.0 : 20.0;
+    CGFloat descriptionFieldHeight = compactHeight ? 36.0 : 40.0;
+    _descriptionCaptionLabel.frame = CGRectMake(side, 0, width - side * 2.0, descriptionCaptionHeight);
+    _descriptionField.frame = CGRectMake(side, CGRectGetMaxY(_descriptionCaptionLabel.frame) + 2.0, width - side * 2.0, descriptionFieldHeight);
+
     CGFloat bottomButtonWidth = floor((width - side * 2.0 - 12.0) / 2.0);
-    _cancelEditButton.frame = CGRectMake(side, bottomButtonY, bottomButtonWidth, 40);
-    _saveTaskButton.frame = CGRectMake(side + bottomButtonWidth + 12.0, bottomButtonY, bottomButtonWidth, 40);
+    _cancelEditButton.frame = CGRectMake(side, bottomButtonY, bottomButtonWidth, bottomButtonHeight);
+    _saveTaskButton.frame = CGRectMake(side + bottomButtonWidth + 12.0, bottomButtonY, bottomButtonWidth, bottomButtonHeight);
     [_saveTaskButton setTitle:@"确定" forState:UIControlStateNormal];
     [self updateButtonShadowPath:_cancelEditButton];
     [self updateButtonShadowPath:_saveTaskButton];
     for (UIButton *button in _modeButtons) {
         [self updateButtonShadowPath:button];
+        [_panelView bringSubviewToFront:button];
     }
+    [_panelView bringSubviewToFront:divider];
+    [_panelView bringSubviewToFront:_editorBackButton];
+    [_panelView bringSubviewToFront:_collapseButton];
+    [_panelView bringSubviewToFront:_toolTitleLabel];
+    [_panelView bringSubviewToFront:_editorTitleLabel];
+    [_panelView bringSubviewToFront:_statusLabel];
+    [_panelView bringSubviewToFront:_cancelEditButton];
+    [_panelView bringSubviewToFront:_saveTaskButton];
+    [self refreshEditorContentScrollSize];
 }
 
 - (void)showTaskHome {
@@ -3464,12 +3692,7 @@ static char AnClickVolumeObservationContext;
         [self styleSegmentButton:_previewSwipeButton selected:_imageActionMode == AnClickActionModeDoubleTap];
         [self styleSegmentButton:_clearActionButton selected:_imageActionMode == AnClickActionModeLongPress];
 
-        CGFloat fieldsY = actionButtonY + 40.0;
-        CGFloat bottomLimit = CGRectGetMinY(_saveTaskButton.frame) - 8.0;
-        if (fieldsY + 60.0 > bottomLimit) {
-            fieldsY = MAX(actionButtonY + 8.0, bottomLimit - 60.0);
-        }
-        [self layoutImageFieldsAtY:fieldsY];
+        [self layoutImageFieldsAtY:actionButtonY + 40.0];
     } else if (_actionMode == AnClickActionModeOCR) {
         _saveTaskButton.enabled = YES;
         _saveTaskButton.alpha = 1.0;
@@ -3649,6 +3872,7 @@ static char AnClickVolumeObservationContext;
         [self layoutDoubleTimingFieldsAtY:configTopY + 124.0];
     }
     [self refreshTemplatePreview];
+    [self refreshEditorContentScrollSize];
 }
 
 - (void)updateStatusForCurrentConfig {
@@ -5246,10 +5470,20 @@ static char AnClickVolumeObservationContext;
 }
 
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
-    if ([gestureRecognizer isKindOfClass:UIPanGestureRecognizer.class] &&
-        [gestureRecognizer.view.accessibilityIdentifier isEqualToString:@"AnClickTaskRow"]) {
-        CGPoint velocity = [(UIPanGestureRecognizer *)gestureRecognizer velocityInView:_taskListView];
-        return fabs(velocity.x) > fabs(velocity.y) * 1.25;
+    if ([gestureRecognizer isKindOfClass:UIPanGestureRecognizer.class]) {
+        if (gestureRecognizer.view == _panelView) {
+            if (_taskEditorVisible || _globalSettingsView || _functionMenuView) {
+                return NO;
+            }
+            CGPoint location = [gestureRecognizer locationInView:_panelView];
+            if (!_taskListView.hidden && CGRectContainsPoint(_taskListView.frame, location)) {
+                return NO;
+            }
+        }
+        if ([gestureRecognizer.view.accessibilityIdentifier isEqualToString:@"AnClickTaskRow"]) {
+            CGPoint velocity = [(UIPanGestureRecognizer *)gestureRecognizer velocityInView:_taskListView];
+            return fabs(velocity.x) > fabs(velocity.y) * 1.25;
+        }
     }
     return YES;
 }
@@ -6441,30 +6675,33 @@ static char AnClickVolumeObservationContext;
     }
 
     UIView *root = _colorPickWindow.rootViewController.view;
-    UIEdgeInsets safeInsets = UIEdgeInsetsZero;
-    if (@available(iOS 11.0, *)) {
-        safeInsets = root.safeAreaInsets;
-    }
+    UIEdgeInsets safeInsets = [self overlaySafeAreaInsetsForView:root window:_colorPickWindow];
     CGFloat margin = 8.0;
     CGFloat toolbarHeight = 52.0;
-    CGFloat toolbarWidth = MIN(root.bounds.size.width - margin * 2.0, 390.0);
-    _colorPickToolbar.frame = CGRectMake((root.bounds.size.width - toolbarWidth) * 0.5,
-                                         root.bounds.size.height - safeInsets.bottom - toolbarHeight - margin,
+    CGFloat availableWidth = MAX(1.0, root.bounds.size.width - safeInsets.left - safeInsets.right - margin * 2.0);
+    CGFloat toolbarWidth = MIN(availableWidth, 390.0);
+    CGFloat toolbarX = safeInsets.left + (availableWidth - toolbarWidth) * 0.5 + margin;
+    CGFloat toolbarY = root.bounds.size.height - safeInsets.bottom - toolbarHeight - margin;
+    toolbarY = MAX(safeInsets.top + margin, toolbarY);
+    _colorPickToolbar.frame = CGRectMake(toolbarX,
+                                         toolbarY,
                                          toolbarWidth,
                                          toolbarHeight);
 
-    CGFloat swatchSize = 34.0;
+    CGFloat swatchSize = MIN(34.0, MAX(24.0, toolbarWidth * 0.18));
     _colorPickSwatchView.frame = CGRectMake(10.0, (toolbarHeight - swatchSize) * 0.5, swatchSize, swatchSize);
-    CGFloat buttonWidth = 62.0;
+    CGFloat buttonWidth = MIN(62.0, MAX(0.0, floor((toolbarWidth - margin * 3.0) / 2.0)));
     CGFloat buttonHeight = 34.0;
     CGFloat buttonY = (toolbarHeight - buttonHeight) * 0.5;
     UIButton *cancelButton = (UIButton *)[_colorPickToolbar viewWithTag:4102];
     UIButton *confirmButton = (UIButton *)[_colorPickToolbar viewWithTag:4101];
     cancelButton.frame = CGRectMake(toolbarWidth - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
     confirmButton.frame = CGRectMake(CGRectGetMinX(cancelButton.frame) - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
-    _colorPickInfoLabel.frame = CGRectMake(CGRectGetMaxX(_colorPickSwatchView.frame) + 8.0,
+    CGFloat infoX = CGRectGetMaxX(_colorPickSwatchView.frame) + 8.0;
+    CGFloat infoWidth = MAX(0.0, CGRectGetMinX(confirmButton.frame) - infoX - 8.0);
+    _colorPickInfoLabel.frame = CGRectMake(infoX,
                                            0,
-                                           CGRectGetMinX(confirmButton.frame) - CGRectGetMaxX(_colorPickSwatchView.frame) - 16.0,
+                                           infoWidth,
                                            toolbarHeight);
 }
 
@@ -6747,59 +6984,26 @@ static char AnClickVolumeObservationContext;
 
     CGFloat margin = 8.0;
     CGFloat toolbarHeight = 48.0;
-    UIEdgeInsets safeInsets = UIEdgeInsetsZero;
-    if (@available(iOS 11.0, *)) {
-        safeInsets = _pointPickOverlay.safeAreaInsets;
-        if (_pointPickWindow) {
-            UIEdgeInsets windowInsets = _pointPickWindow.safeAreaInsets;
-            if (safeInsets.top <= 0.0) {
-                safeInsets.top = windowInsets.top;
-            }
-            if (safeInsets.bottom <= 0.0) {
-                safeInsets.bottom = windowInsets.bottom;
-            }
-        }
-        if (safeInsets.top <= 0.0 || safeInsets.bottom <= 0.0) {
-            UIWindow *hostWindow = [self hostWindow];
-            if (hostWindow) {
-                UIEdgeInsets hostInsets = hostWindow.safeAreaInsets;
-                if (safeInsets.top <= 0.0) {
-                    safeInsets.top = hostInsets.top;
-                }
-                if (safeInsets.bottom <= 0.0) {
-                    safeInsets.bottom = hostInsets.bottom;
-                }
-            }
-        }
-    }
-    CGSize screenSize = UIScreen.mainScreen.bounds.size;
-    CGFloat shortSide = MIN(screenSize.width, screenSize.height);
-    CGFloat longSide = MAX(screenSize.width, screenSize.height);
-    BOOL likelyNotchedPhone = shortSide <= 430.0 && longSide >= 812.0;
-    if (likelyNotchedPhone && safeInsets.top <= 0.0) {
-        safeInsets.top = 54.0;
-    }
-    if (likelyNotchedPhone && safeInsets.bottom <= 0.0) {
-        safeInsets.bottom = 21.0;
-    }
+    UIEdgeInsets safeInsets = [self overlaySafeAreaInsetsForView:_pointPickOverlay window:_pointPickWindow];
     CGFloat topY = MAX(margin, safeInsets.top + margin);
     CGFloat bottomY = _pointPickOverlay.bounds.size.height - toolbarHeight - MAX(margin, safeInsets.bottom + margin);
     bottomY = MAX(topY, bottomY);
-    CGFloat toolbarWidth = MIN(_pointPickOverlay.bounds.size.width - margin * 2.0, 360.0);
-    CGFloat x = (_pointPickOverlay.bounds.size.width - toolbarWidth) * 0.5;
+    CGFloat availableWidth = MAX(1.0, _pointPickOverlay.bounds.size.width - safeInsets.left - safeInsets.right - margin * 2.0);
+    CGFloat toolbarWidth = MIN(availableWidth, 360.0);
+    CGFloat x = safeInsets.left + margin + (availableWidth - toolbarWidth) * 0.5;
     BOOL cursorNearBottom = _hasPendingPointPickPoint &&
         _pendingPointPickPoint.y > bottomY - 20.0;
     CGFloat y = cursorNearBottom ? topY : bottomY;
     _pointPickToolbar.frame = CGRectMake(x, y, toolbarWidth, toolbarHeight);
 
-    CGFloat buttonWidth = 64.0;
+    CGFloat buttonWidth = MIN(64.0, MAX(0.0, floor((toolbarWidth - margin * 3.0) / 2.0)));
     CGFloat buttonHeight = 34.0;
     CGFloat buttonY = (toolbarHeight - buttonHeight) * 0.5;
     UIButton *confirmButton = (UIButton *)[_pointPickToolbar viewWithTag:1001];
     UIButton *cancelButton = (UIButton *)[_pointPickToolbar viewWithTag:1002];
     cancelButton.frame = CGRectMake(toolbarWidth - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
     confirmButton.frame = CGRectMake(CGRectGetMinX(cancelButton.frame) - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
-    _pointCoordinateLabel.frame = CGRectMake(10, 0, CGRectGetMinX(confirmButton.frame) - 18, toolbarHeight);
+    _pointCoordinateLabel.frame = CGRectMake(10, 0, MAX(0.0, CGRectGetMinX(confirmButton.frame) - 18), toolbarHeight);
 }
 
 - (BOOL)pointPickLocationHitsToolbar:(CGPoint)location {
