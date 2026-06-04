@@ -12,6 +12,7 @@
 
 @interface AnClickCore : NSObject
 + (UIImage *)captureCurrentWindowImage;
++ (UIImage *)captureCurrentWindowImageWithWindow:(UIWindow **)capturedWindow;
 + (NSDictionary *)findTemplateImageMatch:(UIImage *)templateImage threshold:(double)threshold;
 + (NSDictionary *)findColorMatchWithRed:(NSInteger)red green:(NSInteger)green blue:(NSInteger)blue tolerance:(double)tolerance;
 + (NSValue *)findTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
@@ -131,10 +132,161 @@ static cv::Mat AnClickMatFromUIImage(UIImage *image) {
     return bgr.clone();
 }
 
+static double AnClickColorDistanceSquaredToRGB(const unsigned char *pixel, double red, double green, double blue) {
+    double dr = (double)pixel[0] - red;
+    double dg = (double)pixel[1] - green;
+    double db = (double)pixel[2] - blue;
+    return dr * dr + dg * dg + db * db;
+}
+
+static CGRect AnClickRectFromPixelBounds(size_t minX, size_t minY, size_t maxX, size_t maxY, size_t width, size_t height, int templateCols, int templateRows) {
+    CGRect contentRect = CGRectMake((CGFloat)minX,
+                                    (CGFloat)minY,
+                                    (CGFloat)(maxX - minX + 1),
+                                    (CGFloat)(maxY - minY + 1));
+    if (CGRectIsEmpty(contentRect) || CGRectEqualToRect(CGRectIntegral(contentRect), CGRectMake(0, 0, width, height))) {
+        return CGRectMake(0, 0, MAX(0, templateCols), MAX(0, templateRows));
+    }
+
+    CGFloat xScale = (CGFloat)templateCols / (CGFloat)width;
+    CGFloat yScale = (CGFloat)templateRows / (CGFloat)height;
+    return CGRectMake(contentRect.origin.x * xScale,
+                      contentRect.origin.y * yScale,
+                      contentRect.size.width * xScale,
+                      contentRect.size.height * yScale);
+}
+
+static CGRect AnClickTemplateContentRectInPixels(UIImage *image, int templateCols, int templateRows) {
+    CGRect fullRect = CGRectMake(0, 0, MAX(0, templateCols), MAX(0, templateRows));
+    if (!image.CGImage || templateCols <= 0 || templateRows <= 0) {
+        return fullRect;
+    }
+
+    CGImageRef imageRef = image.CGImage;
+    size_t width = CGImageGetWidth(imageRef);
+    size_t height = CGImageGetHeight(imageRef);
+    if (width == 0 || height == 0) {
+        return fullRect;
+    }
+
+    size_t bytesPerRow = width * 4;
+    std::vector<unsigned char> data(height * bytesPerRow);
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    if (!colorSpace) {
+        return fullRect;
+    }
+
+    CGContextRef context = CGBitmapContextCreate(data.data(),
+                                                 width,
+                                                 height,
+                                                 8,
+                                                 bytesPerRow,
+                                                 colorSpace,
+                                                 kCGImageAlphaPremultipliedLast | kCGBitmapByteOrderDefault);
+    if (!context) {
+        CGColorSpaceRelease(colorSpace);
+        return fullRect;
+    }
+
+    CGContextDrawImage(context, CGRectMake(0, 0, width, height), imageRef);
+    CGContextRelease(context);
+    CGColorSpaceRelease(colorSpace);
+
+    bool hasTransparentPixel = false;
+    bool hasContentPixel = false;
+    size_t minX = width;
+    size_t minY = height;
+    size_t maxX = 0;
+    size_t maxY = 0;
+    for (size_t y = 0; y < height; y++) {
+        const unsigned char *row = data.data() + y * bytesPerRow;
+        for (size_t x = 0; x < width; x++) {
+            unsigned char alpha = row[x * 4 + 3];
+            if (alpha < 250) {
+                hasTransparentPixel = true;
+            }
+            if (alpha <= 16) {
+                continue;
+            }
+            hasContentPixel = true;
+            minX = MIN(minX, x);
+            minY = MIN(minY, y);
+            maxX = MAX(maxX, x);
+            maxY = MAX(maxY, y);
+        }
+    }
+
+    if (hasTransparentPixel && hasContentPixel) {
+        return AnClickRectFromPixelBounds(minX, minY, maxX, maxY, width, height, templateCols, templateRows);
+    }
+
+    if (width < 8 || height < 8) {
+        return fullRect;
+    }
+
+    const unsigned char *topLeft = data.data();
+    const unsigned char *topRight = data.data() + (width - 1) * 4;
+    const unsigned char *bottomLeft = data.data() + (height - 1) * bytesPerRow;
+    const unsigned char *bottomRight = data.data() + (height - 1) * bytesPerRow + (width - 1) * 4;
+    double backgroundRed = ((double)topLeft[0] + (double)topRight[0] + (double)bottomLeft[0] + (double)bottomRight[0]) * 0.25;
+    double backgroundGreen = ((double)topLeft[1] + (double)topRight[1] + (double)bottomLeft[1] + (double)bottomRight[1]) * 0.25;
+    double backgroundBlue = ((double)topLeft[2] + (double)topRight[2] + (double)bottomLeft[2] + (double)bottomRight[2]) * 0.25;
+    double cornerLimitSquared = 24.0 * 24.0;
+    if (AnClickColorDistanceSquaredToRGB(topLeft, backgroundRed, backgroundGreen, backgroundBlue) > cornerLimitSquared ||
+        AnClickColorDistanceSquaredToRGB(topRight, backgroundRed, backgroundGreen, backgroundBlue) > cornerLimitSquared ||
+        AnClickColorDistanceSquaredToRGB(bottomLeft, backgroundRed, backgroundGreen, backgroundBlue) > cornerLimitSquared ||
+        AnClickColorDistanceSquaredToRGB(bottomRight, backgroundRed, backgroundGreen, backgroundBlue) > cornerLimitSquared) {
+        return fullRect;
+    }
+
+    bool hasForeground = false;
+    size_t foregroundMinX = width;
+    size_t foregroundMinY = height;
+    size_t foregroundMaxX = 0;
+    size_t foregroundMaxY = 0;
+    double foregroundLimitSquared = 32.0 * 32.0;
+    for (size_t y = 0; y < height; y++) {
+        const unsigned char *row = data.data() + y * bytesPerRow;
+        for (size_t x = 0; x < width; x++) {
+            const unsigned char *pixel = row + x * 4;
+            if (AnClickColorDistanceSquaredToRGB(pixel, backgroundRed, backgroundGreen, backgroundBlue) <= foregroundLimitSquared) {
+                continue;
+            }
+            hasForeground = true;
+            foregroundMinX = MIN(foregroundMinX, x);
+            foregroundMinY = MIN(foregroundMinY, y);
+            foregroundMaxX = MAX(foregroundMaxX, x);
+            foregroundMaxY = MAX(foregroundMaxY, y);
+        }
+    }
+
+    if (!hasForeground) {
+        return fullRect;
+    }
+
+    CGFloat foregroundWidth = (CGFloat)(foregroundMaxX - foregroundMinX + 1);
+    CGFloat foregroundHeight = (CGFloat)(foregroundMaxY - foregroundMinY + 1);
+    CGFloat foregroundArea = foregroundWidth * foregroundHeight;
+    CGFloat fullArea = (CGFloat)width * (CGFloat)height;
+    BOOL trimsEnough = foregroundMinX > width * 0.04 ||
+        foregroundMinY > height * 0.04 ||
+        foregroundMaxX + 1 < width * 0.96 ||
+        foregroundMaxY + 1 < height * 0.96;
+    if (foregroundWidth < 2.0 || foregroundHeight < 2.0 || foregroundArea >= fullArea * 0.92 || !trimsEnough) {
+        return fullRect;
+    }
+
+    return AnClickRectFromPixelBounds(foregroundMinX, foregroundMinY, foregroundMaxX, foregroundMaxY, width, height, templateCols, templateRows);
+}
+
 @implementation AnClickCore
 
 + (UIImage *)captureCurrentWindowImage {
     return AnClickCaptureActiveWindowImage(NULL);
+}
+
++ (UIImage *)captureCurrentWindowImageWithWindow:(UIWindow **)capturedWindow {
+    return AnClickCaptureActiveWindowImage(capturedWindow);
 }
 
 + (NSDictionary *)findTemplateImageMatch:(UIImage *)templateImage threshold:(double)threshold {
@@ -161,10 +313,15 @@ static cv::Mat AnClickMatFromUIImage(UIImage *image) {
     }
 
     CGFloat scale = UIScreen.mainScreen.scale;
-    CGPoint topLeftWindowPoint = CGPointMake((CGFloat)bestLocation.x / scale,
-                                             (CGFloat)bestLocation.y / scale);
-    CGPoint bottomRightWindowPoint = CGPointMake(((CGFloat)bestLocation.x + (CGFloat)templ.cols) / scale,
-                                                 ((CGFloat)bestLocation.y + (CGFloat)templ.rows) / scale);
+    CGRect contentRect = AnClickTemplateContentRectInPixels(templateImage, templ.cols, templ.rows);
+    CGPoint contentTopLeftPixel = CGPointMake((CGFloat)bestLocation.x + contentRect.origin.x,
+                                              (CGFloat)bestLocation.y + contentRect.origin.y);
+    CGPoint contentBottomRightPixel = CGPointMake((CGFloat)bestLocation.x + CGRectGetMaxX(contentRect),
+                                                  (CGFloat)bestLocation.y + CGRectGetMaxY(contentRect));
+    CGPoint topLeftWindowPoint = CGPointMake(contentTopLeftPixel.x / scale,
+                                             contentTopLeftPixel.y / scale);
+    CGPoint bottomRightWindowPoint = CGPointMake(contentBottomRightPixel.x / scale,
+                                                 contentBottomRightPixel.y / scale);
     CGPoint centerWindowPoint = CGPointMake((topLeftWindowPoint.x + bottomRightWindowPoint.x) * 0.5,
                                             (topLeftWindowPoint.y + bottomRightWindowPoint.y) * 0.5);
     CGPoint topLeftScreenPoint = sourceWindow ? [sourceWindow convertPoint:topLeftWindowPoint toWindow:nil] : topLeftWindowPoint;
@@ -236,7 +393,8 @@ static cv::Mat AnClickMatFromUIImage(UIImage *image) {
 
     double bestDistance = sqrt(bestDistanceSquared);
     CGFloat scale = UIScreen.mainScreen.scale;
-    CGPoint windowPoint = CGPointMake((CGFloat)bestPoint.x / scale, (CGFloat)bestPoint.y / scale);
+    CGPoint windowPoint = CGPointMake(((CGFloat)bestPoint.x + 0.5) / scale,
+                                      ((CGFloat)bestPoint.y + 0.5) / scale);
     CGPoint screenPoint = sourceWindow ? [sourceWindow convertPoint:windowPoint toWindow:nil] : windowPoint;
     CGFloat markerSize = 12.0;
     CGRect screenRect = CGRectMake(screenPoint.x - markerSize * 0.5,
