@@ -7556,13 +7556,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                  8,
                                                  bytesPerRow,
                                                  colorSpace,
-                                                 kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
+                                                 kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
     if (!context) {
         CGColorSpaceRelease(colorSpace);
         [self clearColorPickPixelData];
         return NO;
     }
 
+    CGContextSetBlendMode(context, kCGBlendModeCopy);
+    CGContextSetInterpolationQuality(context, kCGInterpolationNone);
     CGFloat scale = image.scale > 0 ? image.scale : UIScreen.mainScreen.scale;
     CGContextSaveGState(context);
     CGContextScaleCTM(context, scale, scale);
@@ -7580,11 +7582,103 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return YES;
 }
 
+- (BOOL)sampleColorFromImageProvider:(CGImageRef)imageRef pixelX:(NSInteger)pixelX pixelY:(NSInteger)pixelY red:(NSInteger *)red green:(NSInteger *)green blue:(NSInteger *)blue {
+    if (!imageRef || CGImageGetBitsPerPixel(imageRef) != 32 || CGImageGetBitsPerComponent(imageRef) != 8) {
+        return NO;
+    }
+
+    CGDataProviderRef provider = CGImageGetDataProvider(imageRef);
+    if (!provider) {
+        return NO;
+    }
+
+    CFDataRef data = CGDataProviderCopyData(provider);
+    if (!data) {
+        return NO;
+    }
+
+    size_t width = CGImageGetWidth(imageRef);
+    size_t height = CGImageGetHeight(imageRef);
+    size_t bytesPerRow = CGImageGetBytesPerRow(imageRef);
+    CFIndex length = CFDataGetLength(data);
+    BOOL success = NO;
+    if (pixelX >= 0 && pixelY >= 0 &&
+        (size_t)pixelX < width && (size_t)pixelY < height &&
+        bytesPerRow >= width * 4 &&
+        (CFIndex)((size_t)pixelY * bytesPerRow + (size_t)pixelX * 4 + 3) < length) {
+        const UInt8 *bytes = CFDataGetBytePtr(data);
+        const UInt8 *pixel = bytes + (size_t)pixelY * bytesPerRow + (size_t)pixelX * 4;
+        CGBitmapInfo bitmapInfo = CGImageGetBitmapInfo(imageRef);
+        CGBitmapInfo byteOrder = bitmapInfo & kCGBitmapByteOrderMask;
+        CGImageAlphaInfo alphaInfo = (CGImageAlphaInfo)(bitmapInfo & kCGBitmapAlphaInfoMask);
+        NSInteger sampleRed = 0;
+        NSInteger sampleGreen = 0;
+        NSInteger sampleBlue = 0;
+
+        if (byteOrder == kCGBitmapByteOrder32Little) {
+            if (alphaInfo == kCGImageAlphaPremultipliedFirst ||
+                alphaInfo == kCGImageAlphaFirst ||
+                alphaInfo == kCGImageAlphaNoneSkipFirst) {
+                sampleBlue = pixel[0];
+                sampleGreen = pixel[1];
+                sampleRed = pixel[2];
+            } else {
+                sampleRed = pixel[3];
+                sampleGreen = pixel[2];
+                sampleBlue = pixel[1];
+            }
+        } else {
+            if (alphaInfo == kCGImageAlphaPremultipliedFirst ||
+                alphaInfo == kCGImageAlphaFirst ||
+                alphaInfo == kCGImageAlphaNoneSkipFirst) {
+                sampleRed = pixel[1];
+                sampleGreen = pixel[2];
+                sampleBlue = pixel[3];
+            } else {
+                sampleRed = pixel[0];
+                sampleGreen = pixel[1];
+                sampleBlue = pixel[2];
+            }
+        }
+
+        if (red) {
+            *red = sampleRed;
+        }
+        if (green) {
+            *green = sampleGreen;
+        }
+        if (blue) {
+            *blue = sampleBlue;
+        }
+        success = YES;
+    }
+    CFRelease(data);
+    return success;
+}
+
 - (BOOL)sampleColorAtImagePoint:(CGPoint)point image:(UIImage *)image red:(NSInteger *)red green:(NSInteger *)green blue:(NSInteger *)blue {
     CGImageRef imageRef = image.CGImage;
     if (!imageRef) {
         return NO;
     }
+
+    CGFloat scale = image.scale > 0 ? image.scale : UIScreen.mainScreen.scale;
+    NSInteger imagePixelWidth = (NSInteger)CGImageGetWidth(imageRef);
+    NSInteger imagePixelHeight = (NSInteger)CGImageGetHeight(imageRef);
+    if (imagePixelWidth <= 0 || imagePixelHeight <= 0) {
+        return NO;
+    }
+    NSInteger imagePixelX = MIN(MAX((NSInteger)floor(point.x * scale), 0), imagePixelWidth - 1);
+    NSInteger imagePixelY = MIN(MAX((NSInteger)floor(point.y * scale), 0), imagePixelHeight - 1);
+    NSInteger providerRed = 0;
+    NSInteger providerGreen = 0;
+    NSInteger providerBlue = 0;
+    BOOL providerValid = [self sampleColorFromImageProvider:imageRef
+                                                     pixelX:imagePixelX
+                                                     pixelY:imagePixelY
+                                                        red:&providerRed
+                                                      green:&providerGreen
+                                                       blue:&providerBlue];
 
     if (!_colorPickPixelData ||
         image != _colorPickImage ||
@@ -7595,58 +7689,30 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
     }
 
-    CGFloat scale = image.scale > 0 ? image.scale : UIScreen.mainScreen.scale;
     NSInteger pixelX = MIN(MAX((NSInteger)floor(point.x * scale), 0), (NSInteger)_colorPickPixelWidth - 1);
     NSInteger pixelY = MIN(MAX((NSInteger)floor(point.y * scale), 0), (NSInteger)_colorPickPixelHeight - 1);
     const unsigned char *bytes = (const unsigned char *)_colorPickPixelData.bytes;
+    const unsigned char *pixel = bytes + pixelY * _colorPickPixelBytesPerRow + pixelX * 4;
 
-    const unsigned char *centerPixel = bytes + pixelY * _colorPickPixelBytesPerRow + pixelX * 4;
-    NSInteger bestBlue = centerPixel[0];
-    NSInteger bestGreen = centerPixel[1];
-    NSInteger bestRed = centerPixel[2];
-    NSInteger centerMax = MAX(bestRed, MAX(bestGreen, bestBlue));
-    NSInteger centerMin = MIN(bestRed, MIN(bestGreen, bestBlue));
-    NSInteger bestSaturation = centerMax - centerMin;
-    NSInteger bestDistance = 0;
-    NSInteger radius = 2;
-    for (NSInteger dy = -radius; dy <= radius; dy++) {
-        NSInteger y = pixelY + dy;
-        if (y < 0 || y >= (NSInteger)_colorPickPixelHeight) {
-            continue;
-        }
-        for (NSInteger dx = -radius; dx <= radius; dx++) {
-            NSInteger x = pixelX + dx;
-            if (x < 0 || x >= (NSInteger)_colorPickPixelWidth) {
-                continue;
-            }
-            const unsigned char *pixel = bytes + y * _colorPickPixelBytesPerRow + x * 4;
-            NSInteger sampleBlue = pixel[0];
-            NSInteger sampleGreen = pixel[1];
-            NSInteger sampleRed = pixel[2];
-            NSInteger sampleMax = MAX(sampleRed, MAX(sampleGreen, sampleBlue));
-            NSInteger sampleMin = MIN(sampleRed, MIN(sampleGreen, sampleBlue));
-            NSInteger saturation = sampleMax - sampleMin;
-            NSInteger distance = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
-            BOOL betterColor = saturation >= 18 && saturation > bestSaturation + 8;
-            BOOL closerTie = saturation == bestSaturation && distance < bestDistance;
-            if (betterColor || closerTie) {
-                bestRed = sampleRed;
-                bestGreen = sampleGreen;
-                bestBlue = sampleBlue;
-                bestSaturation = saturation;
-                bestDistance = distance;
-            }
-        }
+    NSInteger sampleRed = pixel[0];
+    NSInteger sampleGreen = pixel[1];
+    NSInteger sampleBlue = pixel[2];
+    BOOL cacheWhite = sampleRed >= 245 && sampleGreen >= 245 && sampleBlue >= 245;
+    BOOL providerWhite = providerRed >= 245 && providerGreen >= 245 && providerBlue >= 245;
+    if (cacheWhite && providerValid && !providerWhite) {
+        sampleRed = providerRed;
+        sampleGreen = providerGreen;
+        sampleBlue = providerBlue;
     }
 
     if (red) {
-        *red = bestRed;
+        *red = sampleRed;
     }
     if (green) {
-        *green = bestGreen;
+        *green = sampleGreen;
     }
     if (blue) {
-        *blue = bestBlue;
+        *blue = sampleBlue;
     }
     return YES;
 }
@@ -7916,7 +7982,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (!strongSelf) {
             return;
         }
-        UIImage *image = [strongSelf captureImageForHostWindow:hostWindow];
+        UIImage *image = [AnClickCore captureCurrentWindowImage];
         if (!image.CGImage) {
             strongSelf->_statusLabel.text = @"截图失败";
             [strongSelf restorePanelAfterExternalTap];
@@ -8237,6 +8303,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self rebuildColorPickMarkers];
     [self rebuildColorPickList];
     [self refreshColorPickInfoLabelWithLastSample:displaySample];
+    BOOL sampledWhite = red >= 245 && green >= 245 && blue >= 245;
+    _colorPickInfoLabel.text = [NSString stringWithFormat:@"%@ #%02lX%02lX%02lX  X%.0f Y%.0f",
+                                sampledWhite ? @"采样白色 截图可能白底" : @"采样",
+                                (long)red,
+                                (long)green,
+                                (long)blue,
+                                point.x,
+                                point.y];
+    NSLog(@"[AnClick] Color pick sample #%02lX%02lX%02lX point=(%.1f, %.1f) image=(%.1f, %.1f) scale=%.2f",
+          (long)red,
+          (long)green,
+          (long)blue,
+          point.x,
+          point.y,
+          _colorPickImage.size.width,
+          _colorPickImage.size.height,
+          _colorPickImage.scale);
 }
 
 - (void)finishColorPickingOverlay {

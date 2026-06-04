@@ -3,6 +3,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <opencv2/core.hpp>
 #import <opencv2/imgproc.hpp>
+#include <dlfcn.h>
 #include <float.h>
 #include <math.h>
 #include <vector>
@@ -60,11 +61,103 @@ static UIWindow *AnClickActiveWindow(void) {
     return fallback;
 }
 
+static BOOL AnClickWindowCanBeCaptured(UIWindow *window) {
+    return window &&
+        window.windowLevel < UIWindowLevelAlert &&
+        !window.hidden &&
+        window.alpha > 0.01 &&
+        !CGRectIsEmpty(window.bounds);
+}
+
+static NSArray<UIWindow *> *AnClickCaptureCandidateWindows(UIWindow **primaryWindow) {
+    NSMutableArray<UIWindow *> *windows = [NSMutableArray array];
+    UIWindow *primary = nil;
+
+    if (@available(iOS 13.0, *)) {
+        UIWindowScene *fallbackScene = nil;
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (![scene isKindOfClass:UIWindowScene.class]) {
+                continue;
+            }
+            if (scene.activationState == UISceneActivationStateForegroundActive) {
+                fallbackScene = (UIWindowScene *)scene;
+                break;
+            }
+            if (!fallbackScene && scene.activationState == UISceneActivationStateForegroundInactive) {
+                fallbackScene = (UIWindowScene *)scene;
+            }
+        }
+
+        for (UIWindow *window in fallbackScene.windows) {
+            if (!AnClickWindowCanBeCaptured(window)) {
+                continue;
+            }
+            [windows addObject:window];
+            if (window.isKeyWindow) {
+                primary = window;
+            }
+        }
+    }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    if (windows.count == 0) {
+        for (UIWindow *window in UIApplication.sharedApplication.windows) {
+            if (!AnClickWindowCanBeCaptured(window)) {
+                continue;
+            }
+            [windows addObject:window];
+            if (window.isKeyWindow) {
+                primary = window;
+            }
+        }
+    }
+#pragma clang diagnostic pop
+
+    if (!primary) {
+        primary = windows.firstObject ?: AnClickActiveWindow();
+    }
+    if (primaryWindow) {
+        *primaryWindow = primary;
+    }
+    return windows;
+}
+
+static UIImage *AnClickCaptureHardwareScreenImage(void) {
+    typedef CGImageRef (*AnClickUIGetScreenImageFunction)(void);
+    static AnClickUIGetScreenImageFunction getScreenImage = NULL;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        getScreenImage = (AnClickUIGetScreenImageFunction)dlsym(RTLD_DEFAULT, "UIGetScreenImage");
+    });
+
+    if (!getScreenImage) {
+        return nil;
+    }
+
+    CGImageRef imageRef = getScreenImage();
+    if (!imageRef) {
+        return nil;
+    }
+
+    CGFloat scale = UIScreen.mainScreen.scale > 0 ? UIScreen.mainScreen.scale : 1.0;
+    UIImage *image = [UIImage imageWithCGImage:imageRef scale:scale orientation:UIImageOrientationUp];
+    CGImageRelease(imageRef);
+    return image;
+}
+
 static UIImage *AnClickCaptureActiveWindowImage(UIWindow **capturedWindow) {
     __block UIImage *image = nil;
     __block UIWindow *window = nil;
     void (^captureBlock)(void) = ^{
-        window = AnClickActiveWindow();
+        UIImage *screenImage = AnClickCaptureHardwareScreenImage();
+        if (screenImage.CGImage) {
+            image = screenImage;
+            window = nil;
+            return;
+        }
+
+        NSArray<UIWindow *> *windows = AnClickCaptureCandidateWindows(&window);
         if (!window) {
             return;
         }
@@ -72,9 +165,19 @@ static UIImage *AnClickCaptureActiveWindowImage(UIWindow **capturedWindow) {
         CGSize size = window.bounds.size;
         CGFloat scale = UIScreen.mainScreen.scale;
         UIGraphicsBeginImageContextWithOptions(size, NO, scale);
-        BOOL drawn = [window drawViewHierarchyInRect:window.bounds afterScreenUpdates:NO];
-        if (!drawn) {
-            [window.layer renderInContext:UIGraphicsGetCurrentContext()];
+        CGContextRef context = UIGraphicsGetCurrentContext();
+        for (UIWindow *captureWindow in windows) {
+            if (!AnClickWindowCanBeCaptured(captureWindow)) {
+                continue;
+            }
+            CGPoint origin = [captureWindow convertPoint:CGPointZero toWindow:window];
+            CGContextSaveGState(context);
+            CGContextTranslateCTM(context, origin.x, origin.y);
+            BOOL drawn = [captureWindow drawViewHierarchyInRect:captureWindow.bounds afterScreenUpdates:YES];
+            if (!drawn) {
+                [captureWindow.layer renderInContext:context];
+            }
+            CGContextRestoreGState(context);
         }
         image = UIGraphicsGetImageFromCurrentImageContext();
         UIGraphicsEndImageContext();
