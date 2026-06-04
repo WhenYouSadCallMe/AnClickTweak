@@ -401,8 +401,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return @[];
     }
     return @[@{
-        @"x": @(0.0),
-        @"y": @(0.0),
         @"dx": @(0.0),
         @"dy": @(0.0),
         @"red": @(_targetColorRed),
@@ -466,19 +464,26 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         for (NSDictionary *sample in samples) {
             CGFloat dx = [sample[@"dx"] respondsToSelector:@selector(doubleValue)] ? [sample[@"dx"] doubleValue] : 0.0;
             CGFloat dy = [sample[@"dy"] respondsToSelector:@selector(doubleValue)] ? [sample[@"dy"] doubleValue] : 0.0;
+            NSNumber *xNumber = [sample[@"x"] respondsToSelector:@selector(doubleValue)] ? @([sample[@"x"] doubleValue]) : nil;
+            NSNumber *yNumber = [sample[@"y"] respondsToSelector:@selector(doubleValue)] ? @([sample[@"y"] doubleValue]) : nil;
             if (![sample[@"dx"] respondsToSelector:@selector(doubleValue)] &&
                 [sample[@"x"] respondsToSelector:@selector(doubleValue)] &&
                 [sample[@"y"] respondsToSelector:@selector(doubleValue)]) {
                 dx = [sample[@"x"] doubleValue] - anchorX;
                 dy = [sample[@"y"] doubleValue] - anchorY;
             }
-            [points addObject:@{
+            NSMutableDictionary *point = [@{
                 @"dx": @(dx),
                 @"dy": @(dy),
                 @"red": @([sample[@"red"] integerValue]),
                 @"green": @([sample[@"green"] integerValue]),
                 @"blue": @([sample[@"blue"] integerValue]),
-            }];
+            } mutableCopy];
+            if (xNumber && yNumber) {
+                point[@"x"] = xNumber;
+                point[@"y"] = yNumber;
+            }
+            [points addObject:point];
         }
         return points;
     }
@@ -8105,7 +8110,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     cancelButton.tag = 4102;
     [toolbar addSubview:cancelButton];
 
-    _selectedColorPickSampleIndex = _pendingColorPickSamples.count > 0 ? 0 : -1;
+    _selectedColorPickSampleIndex = -1;
     [self layoutColorPickToolbar];
     [self rebuildColorPickMarkers];
     [self rebuildColorPickList];
