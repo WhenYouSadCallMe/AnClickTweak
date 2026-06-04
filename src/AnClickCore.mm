@@ -246,6 +246,131 @@ static double AnClickColorDistanceSquaredToRGB(const unsigned char *pixel, doubl
     return dr * dr + dg * dg + db * db;
 }
 
+static BOOL AnClickSampleImageProviderRGB(CGImageRef imageRef, NSInteger pixelX, NSInteger pixelY, NSInteger *red, NSInteger *green, NSInteger *blue) {
+    if (!imageRef || CGImageGetBitsPerPixel(imageRef) != 32 || CGImageGetBitsPerComponent(imageRef) != 8) {
+        return NO;
+    }
+
+    CGDataProviderRef provider = CGImageGetDataProvider(imageRef);
+    if (!provider) {
+        return NO;
+    }
+
+    CFDataRef data = CGDataProviderCopyData(provider);
+    if (!data) {
+        return NO;
+    }
+
+    size_t width = CGImageGetWidth(imageRef);
+    size_t height = CGImageGetHeight(imageRef);
+    size_t bytesPerRow = CGImageGetBytesPerRow(imageRef);
+    CFIndex length = CFDataGetLength(data);
+    BOOL success = NO;
+    if (pixelX >= 0 && pixelY >= 0 &&
+        (size_t)pixelX < width && (size_t)pixelY < height &&
+        bytesPerRow >= width * 4 &&
+        (CFIndex)((size_t)pixelY * bytesPerRow + (size_t)pixelX * 4 + 3) < length) {
+        const UInt8 *bytes = CFDataGetBytePtr(data);
+        const UInt8 *pixel = bytes + (size_t)pixelY * bytesPerRow + (size_t)pixelX * 4;
+        CGBitmapInfo bitmapInfo = CGImageGetBitmapInfo(imageRef);
+        CGBitmapInfo byteOrder = bitmapInfo & kCGBitmapByteOrderMask;
+        CGImageAlphaInfo alphaInfo = (CGImageAlphaInfo)(bitmapInfo & kCGBitmapAlphaInfoMask);
+        NSInteger sampleRed = 0;
+        NSInteger sampleGreen = 0;
+        NSInteger sampleBlue = 0;
+
+        if (byteOrder == kCGBitmapByteOrder32Little) {
+            if (alphaInfo == kCGImageAlphaPremultipliedFirst ||
+                alphaInfo == kCGImageAlphaFirst ||
+                alphaInfo == kCGImageAlphaNoneSkipFirst) {
+                sampleBlue = pixel[0];
+                sampleGreen = pixel[1];
+                sampleRed = pixel[2];
+            } else {
+                sampleRed = pixel[3];
+                sampleGreen = pixel[2];
+                sampleBlue = pixel[1];
+            }
+        } else {
+            if (alphaInfo == kCGImageAlphaPremultipliedFirst ||
+                alphaInfo == kCGImageAlphaFirst ||
+                alphaInfo == kCGImageAlphaNoneSkipFirst) {
+                sampleRed = pixel[1];
+                sampleGreen = pixel[2];
+                sampleBlue = pixel[3];
+            } else {
+                sampleRed = pixel[0];
+                sampleGreen = pixel[1];
+                sampleBlue = pixel[2];
+            }
+        }
+
+        if (red) {
+            *red = sampleRed;
+        }
+        if (green) {
+            *green = sampleGreen;
+        }
+        if (blue) {
+            *blue = sampleBlue;
+        }
+        success = YES;
+    }
+    CFRelease(data);
+    return success;
+}
+
+static double AnClickColorDistanceSquaredBGRToRGB(const cv::Vec3b &pixel, NSInteger red, NSInteger green, NSInteger blue) {
+    double db = (double)pixel[0] - (double)blue;
+    double dg = (double)pixel[1] - (double)green;
+    double dr = (double)pixel[2] - (double)red;
+    return db * db + dg * dg + dr * dr;
+}
+
+static BOOL AnClickMatAppearsVerticallyFlippedFromImage(UIImage *image, const cv::Mat &mat) {
+    CGImageRef imageRef = image.CGImage;
+    if (!imageRef || mat.empty() || mat.cols <= 1 || mat.rows <= 1 ||
+        CGImageGetWidth(imageRef) != (size_t)mat.cols ||
+        CGImageGetHeight(imageRef) != (size_t)mat.rows) {
+        return NO;
+    }
+
+    NSArray<NSValue *> *samplePoints = @[
+        [NSValue valueWithCGPoint:CGPointMake(0.20, 0.18)],
+        [NSValue valueWithCGPoint:CGPointMake(0.50, 0.33)],
+        [NSValue valueWithCGPoint:CGPointMake(0.78, 0.62)],
+        [NSValue valueWithCGPoint:CGPointMake(0.35, 0.84)],
+    ];
+    double normalDistance = 0.0;
+    double flippedDistance = 0.0;
+    NSUInteger validSamples = 0;
+    for (NSValue *value in samplePoints) {
+        CGPoint normalizedPoint = value.CGPointValue;
+        int x = MIN(MAX((int)floor(normalizedPoint.x * (double)(mat.cols - 1)), 0), mat.cols - 1);
+        int y = MIN(MAX((int)floor(normalizedPoint.y * (double)(mat.rows - 1)), 0), mat.rows - 1);
+        int flippedY = mat.rows - 1 - y;
+        NSInteger red = 0;
+        NSInteger green = 0;
+        NSInteger blue = 0;
+        NSInteger flippedRed = 0;
+        NSInteger flippedGreen = 0;
+        NSInteger flippedBlue = 0;
+        if (!AnClickSampleImageProviderRGB(imageRef, x, y, &red, &green, &blue) ||
+            !AnClickSampleImageProviderRGB(imageRef, x, flippedY, &flippedRed, &flippedGreen, &flippedBlue)) {
+            continue;
+        }
+        const cv::Vec3b matPixel = mat.at<cv::Vec3b>(y, x);
+        normalDistance += AnClickColorDistanceSquaredBGRToRGB(matPixel, red, green, blue);
+        flippedDistance += AnClickColorDistanceSquaredBGRToRGB(matPixel, flippedRed, flippedGreen, flippedBlue);
+        validSamples++;
+    }
+
+    if (validSamples == 0) {
+        return NO;
+    }
+    return flippedDistance + 1.0 < normalDistance;
+}
+
 static CGRect AnClickRectFromPixelBounds(size_t minX, size_t minY, size_t maxX, size_t maxY, size_t width, size_t height, int templateCols, int templateRows) {
     CGRect contentRect = CGRectMake((CGFloat)minX,
                                     (CGFloat)minY,
@@ -474,11 +599,21 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
     }
 
     CGFloat scale = sourceImage.scale > 0 ? sourceImage.scale : UIScreen.mainScreen.scale;
+    BOOL sourceMatFlipped = AnClickMatAppearsVerticallyFlippedFromImage(sourceImage, source);
     CGRect contentRect = AnClickTemplateContentRectInPixels(templateImage, templ.cols, templ.rows);
-    CGPoint contentTopLeftPixel = CGPointMake((CGFloat)bestLocation.x + contentRect.origin.x,
-                                              (CGFloat)bestLocation.y + contentRect.origin.y);
-    CGPoint contentBottomRightPixel = CGPointMake((CGFloat)bestLocation.x + CGRectGetMaxX(contentRect),
-                                                  (CGFloat)bestLocation.y + CGRectGetMaxY(contentRect));
+    CGPoint contentTopLeftPixel = CGPointZero;
+    CGPoint contentBottomRightPixel = CGPointZero;
+    if (sourceMatFlipped) {
+        CGFloat topY = (CGFloat)source.rows - ((CGFloat)bestLocation.y + CGRectGetMaxY(contentRect));
+        CGFloat bottomY = (CGFloat)source.rows - ((CGFloat)bestLocation.y + CGRectGetMinY(contentRect));
+        contentTopLeftPixel = CGPointMake((CGFloat)bestLocation.x + contentRect.origin.x, topY);
+        contentBottomRightPixel = CGPointMake((CGFloat)bestLocation.x + CGRectGetMaxX(contentRect), bottomY);
+    } else {
+        contentTopLeftPixel = CGPointMake((CGFloat)bestLocation.x + contentRect.origin.x,
+                                          (CGFloat)bestLocation.y + contentRect.origin.y);
+        contentBottomRightPixel = CGPointMake((CGFloat)bestLocation.x + CGRectGetMaxX(contentRect),
+                                              (CGFloat)bestLocation.y + CGRectGetMaxY(contentRect));
+    }
     CGPoint topLeftWindowPoint = CGPointMake(contentTopLeftPixel.x / scale,
                                              contentTopLeftPixel.y / scale);
     CGPoint bottomRightWindowPoint = CGPointMake(contentBottomRightPixel.x / scale,

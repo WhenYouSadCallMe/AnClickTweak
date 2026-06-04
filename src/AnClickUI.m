@@ -4735,7 +4735,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _selectionView.userInteractionEnabled = YES;
     _selectionView.hidden = YES;
     [imageView addSubview:_selectionView];
-    [self addCornerHandles];
 
     UIPanGestureRecognizer *movePan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleSelectionPan:)];
     movePan.maximumNumberOfTouches = 1;
@@ -4777,43 +4776,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     button.layer.borderWidth = 1;
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
-}
-
-- (UIView *)cornerHandleWithTag:(NSInteger)tag {
-    UIView *handle = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 30, 30)];
-    handle.tag = tag;
-    handle.backgroundColor = UIColor.systemYellowColor;
-    handle.layer.cornerRadius = 15;
-    handle.layer.borderColor = UIColor.blackColor.CGColor;
-    handle.layer.borderWidth = 1;
-    handle.userInteractionEnabled = YES;
-    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleCornerPan:)];
-    [handle addGestureRecognizer:pan];
-    return handle;
-}
-
-- (void)addCornerHandles {
-    for (NSInteger tag = 1; tag <= 4; tag++) {
-        [_selectionView addSubview:[self cornerHandleWithTag:tag]];
-    }
-    [self layoutCornerHandles];
-}
-
-- (void)layoutCornerHandles {
-    for (UIView *handle in _selectionView.subviews) {
-        if (handle.tag < 1 || handle.tag > 4) {
-            continue;
-        }
-        if (handle.tag == 1) {
-            handle.center = CGPointMake(0, 0);
-        } else if (handle.tag == 2) {
-            handle.center = CGPointMake(_selectionView.bounds.size.width, 0);
-        } else if (handle.tag == 3) {
-            handle.center = CGPointMake(0, _selectionView.bounds.size.height);
-        } else if (handle.tag == 4) {
-            handle.center = CGPointMake(_selectionView.bounds.size.width, _selectionView.bounds.size.height);
-        }
-    }
 }
 
 - (CGRect)clampedSelectionFrame:(CGRect)frame {
@@ -4925,7 +4887,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self setCaptureActionButtonsHidden:YES];
         _selectionView.hidden = NO;
         _selectionView.frame = CGRectMake(point.x, point.y, 1.0, 1.0);
-        [self layoutCornerHandles];
         return;
     }
 
@@ -4938,7 +4899,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         CGRect frame = [self selectionFrameFromPoint:_captureDragStartPoint toPoint:point];
         _selectionView.frame = frame;
         _selectionView.hidden = CGRectGetWidth(frame) < 2.0 || CGRectGetHeight(frame) < 2.0;
-        [self layoutCornerHandles];
     }
 
     if (recognizer.state == UIGestureRecognizerStateEnded ||
@@ -4973,45 +4933,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         recognizer.state == UIGestureRecognizerStateFailed) {
         [self layoutCaptureActionButtonsAvoidingSelection];
     }
-}
-
-- (void)handleCornerPan:(UIPanGestureRecognizer *)recognizer {
-    CGPoint translation = [recognizer translationInView:_captureImageView];
-    CGRect frame = _selectionView.frame;
-
-    if (recognizer.view.tag == 1) {
-        frame.origin.x += translation.x;
-        frame.origin.y += translation.y;
-        frame.size.width -= translation.x;
-        frame.size.height -= translation.y;
-    } else if (recognizer.view.tag == 2) {
-        frame.origin.y += translation.y;
-        frame.size.width += translation.x;
-        frame.size.height -= translation.y;
-    } else if (recognizer.view.tag == 3) {
-        frame.origin.x += translation.x;
-        frame.size.width -= translation.x;
-        frame.size.height += translation.y;
-    } else {
-        frame.size.width += translation.x;
-        frame.size.height += translation.y;
-    }
-
-    _selectionView.frame = [self clampedSelectionFrame:frame];
-    [self layoutCornerHandles];
-    [recognizer setTranslation:CGPointZero inView:_captureImageView];
-}
-
-- (void)handleSelectionPinch:(UIPinchGestureRecognizer *)recognizer {
-    CGRect frame = _selectionView.frame;
-    CGPoint center = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
-    frame.size.width *= recognizer.scale;
-    frame.size.height *= recognizer.scale;
-    frame.origin.x = center.x - frame.size.width * 0.5;
-    frame.origin.y = center.y - frame.size.height * 0.5;
-    _selectionView.frame = [self clampedSelectionFrame:frame];
-    [self layoutCornerHandles];
-    recognizer.scale = 1.0;
 }
 
 - (void)saveSelectedTemplate {
