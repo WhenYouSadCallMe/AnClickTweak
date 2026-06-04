@@ -7548,9 +7548,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return NO;
     }
 
-    CGContextTranslateCTM(context, 0, (CGFloat)height);
-    CGContextScaleCTM(context, 1.0, -1.0);
-    CGContextDrawImage(context, CGRectMake(0, 0, width, height), imageRef);
+    CGFloat scale = image.scale > 0 ? image.scale : UIScreen.mainScreen.scale;
+    CGContextSaveGState(context);
+    CGContextScaleCTM(context, scale, scale);
+    UIGraphicsPushContext(context);
+    [image drawInRect:CGRectMake(0, 0, image.size.width, image.size.height)];
+    UIGraphicsPopContext();
+    CGContextRestoreGState(context);
     CGContextRelease(context);
     CGColorSpaceRelease(colorSpace);
 
@@ -7580,16 +7584,54 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSInteger pixelX = MIN(MAX((NSInteger)floor(point.x * scale), 0), (NSInteger)_colorPickPixelWidth - 1);
     NSInteger pixelY = MIN(MAX((NSInteger)floor(point.y * scale), 0), (NSInteger)_colorPickPixelHeight - 1);
     const unsigned char *bytes = (const unsigned char *)_colorPickPixelData.bytes;
-    const unsigned char *pixel = bytes + pixelY * _colorPickPixelBytesPerRow + pixelX * 4;
+
+    const unsigned char *centerPixel = bytes + pixelY * _colorPickPixelBytesPerRow + pixelX * 4;
+    NSInteger bestRed = centerPixel[0];
+    NSInteger bestGreen = centerPixel[1];
+    NSInteger bestBlue = centerPixel[2];
+    NSInteger centerMax = MAX(bestRed, MAX(bestGreen, bestBlue));
+    NSInteger centerMin = MIN(bestRed, MIN(bestGreen, bestBlue));
+    NSInteger bestSaturation = centerMax - centerMin;
+    NSInteger bestDistance = 0;
+    NSInteger radius = 2;
+    for (NSInteger dy = -radius; dy <= radius; dy++) {
+        NSInteger y = pixelY + dy;
+        if (y < 0 || y >= (NSInteger)_colorPickPixelHeight) {
+            continue;
+        }
+        for (NSInteger dx = -radius; dx <= radius; dx++) {
+            NSInteger x = pixelX + dx;
+            if (x < 0 || x >= (NSInteger)_colorPickPixelWidth) {
+                continue;
+            }
+            const unsigned char *pixel = bytes + y * _colorPickPixelBytesPerRow + x * 4;
+            NSInteger sampleRed = pixel[0];
+            NSInteger sampleGreen = pixel[1];
+            NSInteger sampleBlue = pixel[2];
+            NSInteger sampleMax = MAX(sampleRed, MAX(sampleGreen, sampleBlue));
+            NSInteger sampleMin = MIN(sampleRed, MIN(sampleGreen, sampleBlue));
+            NSInteger saturation = sampleMax - sampleMin;
+            NSInteger distance = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
+            BOOL betterColor = saturation >= 18 && saturation > bestSaturation + 8;
+            BOOL closerTie = saturation == bestSaturation && distance < bestDistance;
+            if (betterColor || closerTie) {
+                bestRed = sampleRed;
+                bestGreen = sampleGreen;
+                bestBlue = sampleBlue;
+                bestSaturation = saturation;
+                bestDistance = distance;
+            }
+        }
+    }
 
     if (red) {
-        *red = pixel[0];
+        *red = bestRed;
     }
     if (green) {
-        *green = pixel[1];
+        *green = bestGreen;
     }
     if (blue) {
-        *blue = pixel[2];
+        *blue = bestBlue;
     }
     return YES;
 }
