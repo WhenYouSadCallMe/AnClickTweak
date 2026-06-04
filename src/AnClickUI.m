@@ -5103,6 +5103,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 }
 
+- (UIImage *)captureImageForHostWindow:(UIWindow *)hostWindow {
+    if (!hostWindow) {
+        return nil;
+    }
+
+    UIGraphicsBeginImageContextWithOptions(hostWindow.bounds.size, NO, UIScreen.mainScreen.scale);
+    BOOL drawn = [hostWindow drawViewHierarchyInRect:hostWindow.bounds afterScreenUpdates:YES];
+    if (!drawn) {
+        [hostWindow.layer renderInContext:UIGraphicsGetCurrentContext()];
+    }
+    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return image;
+}
+
 - (void)restorePanelAfterScreenDelay:(NSTimeInterval)delay {
     NSUInteger restoreGeneration = [self invalidatePendingPanelRestore];
     __weak typeof(self) weakSelf = self;
@@ -7541,7 +7556,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                  8,
                                                  bytesPerRow,
                                                  colorSpace,
-                                                 kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+                                                 kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
     if (!context) {
         CGColorSpaceRelease(colorSpace);
         [self clearColorPickPixelData];
@@ -7586,9 +7601,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     const unsigned char *bytes = (const unsigned char *)_colorPickPixelData.bytes;
 
     const unsigned char *centerPixel = bytes + pixelY * _colorPickPixelBytesPerRow + pixelX * 4;
-    NSInteger bestRed = centerPixel[0];
+    NSInteger bestBlue = centerPixel[0];
     NSInteger bestGreen = centerPixel[1];
-    NSInteger bestBlue = centerPixel[2];
+    NSInteger bestRed = centerPixel[2];
     NSInteger centerMax = MAX(bestRed, MAX(bestGreen, bestBlue));
     NSInteger centerMin = MIN(bestRed, MIN(bestGreen, bestBlue));
     NSInteger bestSaturation = centerMax - centerMin;
@@ -7605,9 +7620,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 continue;
             }
             const unsigned char *pixel = bytes + y * _colorPickPixelBytesPerRow + x * 4;
-            NSInteger sampleRed = pixel[0];
+            NSInteger sampleBlue = pixel[0];
             NSInteger sampleGreen = pixel[1];
-            NSInteger sampleBlue = pixel[2];
+            NSInteger sampleRed = pixel[2];
             NSInteger sampleMax = MAX(sampleRed, MAX(sampleGreen, sampleBlue));
             NSInteger sampleMin = MIN(sampleRed, MIN(sampleGreen, sampleBlue));
             NSInteger saturation = sampleMax - sampleMin;
@@ -7901,7 +7916,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (!strongSelf) {
             return;
         }
-        UIImage *image = [AnClickCore captureCurrentWindowImage];
+        UIImage *image = [strongSelf captureImageForHostWindow:hostWindow];
         if (!image.CGImage) {
             strongSelf->_statusLabel.text = @"截图失败";
             [strongSelf restorePanelAfterExternalTap];
