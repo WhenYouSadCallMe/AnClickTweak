@@ -4163,12 +4163,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (UIColor *)targetUIColor {
-    if (!_hasTargetColor) {
+    NSDictionary *anchor = [self effectiveTargetColorSamples].firstObject;
+    if (!anchor) {
         return [UIColor colorWithWhite:1 alpha:0.10];
     }
-    return [UIColor colorWithRed:_targetColorRed / 255.0
-                           green:_targetColorGreen / 255.0
-                            blue:_targetColorBlue / 255.0
+    return [UIColor colorWithRed:MIN(255, MAX(0, [anchor[@"red"] integerValue])) / 255.0
+                           green:MIN(255, MAX(0, [anchor[@"green"] integerValue])) / 255.0
+                            blue:MIN(255, MAX(0, [anchor[@"blue"] integerValue])) / 255.0
                            alpha:1.0];
 }
 
@@ -5637,9 +5638,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             }
             return nil;
         }
-        task[@"colorRed"] = @(_targetColorRed);
-        task[@"colorGreen"] = @(_targetColorGreen);
-        task[@"colorBlue"] = @(_targetColorBlue);
+        NSDictionary *anchorColor = colorSamples.firstObject;
+        task[@"colorRed"] = @([anchorColor[@"red"] integerValue]);
+        task[@"colorGreen"] = @([anchorColor[@"green"] integerValue]);
+        task[@"colorBlue"] = @([anchorColor[@"blue"] integerValue]);
         task[@"colorPoints"] = colorSamples;
         task[@"colorTolerance"] = @(_colorTolerance);
         task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
@@ -7758,6 +7760,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (!_colorPickInfoLabel) {
         return;
     }
+    NSDictionary *previewSample = _pendingColorPickSamples.firstObject ?: sample;
+    if (previewSample) {
+        NSInteger previewRed = [previewSample[@"red"] integerValue];
+        NSInteger previewGreen = [previewSample[@"green"] integerValue];
+        NSInteger previewBlue = [previewSample[@"blue"] integerValue];
+        _colorPickSwatchView.backgroundColor = [UIColor colorWithRed:MIN(255, MAX(0, previewRed)) / 255.0
+                                                               green:MIN(255, MAX(0, previewGreen)) / 255.0
+                                                                blue:MIN(255, MAX(0, previewBlue)) / 255.0
+                                                               alpha:1.0];
+    }
     if (!sample) {
         _colorPickInfoLabel.text = @"第1点为点击坐标";
         _colorPickSwatchView.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
@@ -7766,23 +7778,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (![sample[@"x"] respondsToSelector:@selector(doubleValue)] ||
         ![sample[@"y"] respondsToSelector:@selector(doubleValue)]) {
         _colorPickInfoLabel.text = @"旧颜色 点截图重设";
-        NSInteger red = [sample[@"red"] integerValue];
-        NSInteger green = [sample[@"green"] integerValue];
-        NSInteger blue = [sample[@"blue"] integerValue];
-        _colorPickSwatchView.backgroundColor = [UIColor colorWithRed:red / 255.0
-                                                               green:green / 255.0
-                                                                blue:blue / 255.0
-                                                               alpha:1.0];
         return;
     }
 
     NSInteger red = [sample[@"red"] integerValue];
     NSInteger green = [sample[@"green"] integerValue];
     NSInteger blue = [sample[@"blue"] integerValue];
-    _colorPickSwatchView.backgroundColor = [UIColor colorWithRed:red / 255.0
-                                                           green:green / 255.0
-                                                            blue:blue / 255.0
-                                                           alpha:1.0];
     NSUInteger displayIndex = _pendingColorPickSamples.count > 0 ? [_pendingColorPickSamples indexOfObjectIdenticalTo:sample] : NSNotFound;
     if (displayIndex == NSNotFound) {
         displayIndex = _pendingColorPickSamples.count > 0 ? _pendingColorPickSamples.count - 1 : 0;
@@ -7981,23 +7982,25 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     cancelButton.tag = 4102;
     [toolbar addSubview:cancelButton];
 
-    _selectedColorPickSampleIndex = -1;
+    _selectedColorPickSampleIndex = _pendingColorPickSamples.count > 0 ? 0 : -1;
     [self layoutColorPickToolbar];
     [self rebuildColorPickMarkers];
     [self rebuildColorPickList];
-    NSDictionary *lastSample = _pendingColorPickSamples.lastObject;
-    if ([lastSample[@"x"] respondsToSelector:@selector(doubleValue)] &&
-        [lastSample[@"y"] respondsToSelector:@selector(doubleValue)]) {
-        _pendingColorPickPoint = CGPointMake([lastSample[@"x"] doubleValue], [lastSample[@"y"] doubleValue]);
-        _pendingColorRed = [lastSample[@"red"] integerValue];
-        _pendingColorGreen = [lastSample[@"green"] integerValue];
-        _pendingColorBlue = [lastSample[@"blue"] integerValue];
+    NSDictionary *displaySample = _selectedColorPickSampleIndex >= 0
+        ? _pendingColorPickSamples[(NSUInteger)_selectedColorPickSampleIndex]
+        : _pendingColorPickSamples.lastObject;
+    if ([displaySample[@"x"] respondsToSelector:@selector(doubleValue)] &&
+        [displaySample[@"y"] respondsToSelector:@selector(doubleValue)]) {
+        _pendingColorPickPoint = CGPointMake([displaySample[@"x"] doubleValue], [displaySample[@"y"] doubleValue]);
+        _pendingColorRed = [displaySample[@"red"] integerValue];
+        _pendingColorGreen = [displaySample[@"green"] integerValue];
+        _pendingColorBlue = [displaySample[@"blue"] integerValue];
         _hasPendingColorPickPoint = YES;
         [self updateColorPickCursorAtImagePoint:_pendingColorPickPoint];
     } else {
         _hasPendingColorPickPoint = NO;
     }
-    [self refreshColorPickInfoLabelWithLastSample:lastSample];
+    [self refreshColorPickInfoLabelWithLastSample:displaySample];
     _colorPickWindow.hidden = NO;
     _statusLabel.text = @"截图取色";
 }
