@@ -451,7 +451,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    _hardwareVolumeButtonObserverRegistered = YES;
     _hardwareVolumeButtonClient = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
     if (!_hardwareVolumeButtonClient) {
         NSLog(@"[AnClick] Hardware volume shortcut HID client unavailable");
@@ -465,6 +464,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     IOHIDEventSystemClientScheduleWithRunLoop(_hardwareVolumeButtonClient,
                                               CFRunLoopGetMain(),
                                               kCFRunLoopCommonModes);
+    _hardwareVolumeButtonObserverRegistered = YES;
 }
 
 - (void)registerVolumeOutputObserverIfNeeded {
@@ -589,15 +589,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self refreshCollapsedButtonTitle];
         return;
     }
-    if (_globalNetworkGateEnabled && _globalNetworkURL.length == 0) {
-        _statusLabel.text = @"网络联动未填链接";
-        [self showVolumeShortcutToast:@"音量- 网络未填链接"];
-        [self refreshCollapsedButtonTitle];
-        return;
-    }
-    if (_globalNetworkGateEnabled && ![self normalizedNetworkURLString:_globalNetworkURL]) {
-        _statusLabel.text = @"网络联动链接无效";
-        [self showVolumeShortcutToast:@"音量- 网络链接无效"];
+    NSString *networkValidationMessage = [self globalNetworkGateValidationMessage];
+    if (networkValidationMessage.length > 0) {
+        _statusLabel.text = networkValidationMessage;
+        [self showVolumeShortcutToast:[NSString stringWithFormat:@"音量- %@", networkValidationMessage]];
         [self refreshCollapsedButtonTitle];
         return;
     }
@@ -2640,8 +2635,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @"定时停止（到时间自动停止）",
         @"播放前网络判断（不满足会持续监控）",
         @"网络判断链接（GET）",
-        @"返回包含这些就运行（空=状态真）",
-        @"返回包含这些就不运行（空=状态假）",
+        @"返回包含这些就运行（至少填一项）",
+        @"返回包含这些就不运行（至少填一项）",
     ];
     NSMutableArray<UIView *> *controls = [NSMutableArray array];
     _globalDelayField = [self globalSettingsTextFieldWithPlaceholder:@"无延时"];
@@ -4125,9 +4120,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             conditionTopY += 46.0;
         }
 
-        _secondaryConfigLabel.text = roomyNetworkLayout ? @"返回包含这些就运行（空=状态真）" : @"包含就运行";
+        _secondaryConfigLabel.text = roomyNetworkLayout ? @"返回包含这些就运行（关键字/正则）" : @"包含就运行";
         _secondaryConfigLabel.hidden = _networkRequestOnly;
-        _tertiaryConfigLabel.text = roomyNetworkLayout ? @"返回包含这些就不运行（空=状态假）" : @"包含就不运行";
+        _tertiaryConfigLabel.text = roomyNetworkLayout ? @"返回包含这些就不运行（关键字/正则）" : @"包含就不运行";
         _tertiaryConfigLabel.hidden = _networkRequestOnly;
         _networkContainsField.hidden = _networkRequestOnly;
         _networkFalseField.hidden = _networkRequestOnly;
@@ -4268,14 +4263,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     if (_actionMode == AnClickActionModeNetwork) {
         NSString *urlState = _networkURL.length > 0 ? @"有链接" : @"先填链接";
-        BOOL oneShot = _networkRequestOnly || [self networkTaskIsOneShotWithURL:_networkURL trueText:_networkContainsText falseText:_networkFalseText];
-        NSString *conditionState = oneShot
-            ? @"请求一次"
-            : (_networkContainsText.length > 0 ? [NSString stringWithFormat:@"包含%@就运行", _networkContainsText] : @"状态真就运行");
+        BOOL oneShot = _networkRequestOnly;
+        NSString *conditionState = nil;
+        if (oneShot) {
+            conditionState = @"请求一次";
+        } else if (_networkContainsText.length > 0) {
+            conditionState = [NSString stringWithFormat:@"包含%@就运行", _networkContainsText];
+        } else if (_networkFalseText.length > 0) {
+            conditionState = @"未命中不运行就继续";
+        } else {
+            conditionState = @"先填判断条件";
+        }
         if (_networkFalseText.length > 0) {
             conditionState = [conditionState stringByAppendingFormat:@" 包含%@就不运行", _networkFalseText];
         }
-        if (!oneShot) {
+        if (!oneShot && [self currentNetworkJudgementHasCondition]) {
             conditionState = [conditionState stringByAppendingFormat:@" %@", _networkRetryForever ? @"一直判断" : [NSString stringWithFormat:@"判断%ld次", (long)MAX(1, _actionRepeatCount)]];
         }
         _statusLabel.text = [NSString stringWithFormat:@"网络 %@ %@ %@", [self normalizedNetworkMethodFromPostFlag:_networkUsesPost], urlState, conditionState];
@@ -5261,6 +5263,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return YES;
 }
 
+- (BOOL)networkHasJudgementConditionWithTrueText:(NSString *)trueText falseText:(NSString *)falseText {
+    return [self trimmedActionDescription:trueText].length > 0 ||
+        [self trimmedActionDescription:falseText].length > 0;
+}
+
+- (BOOL)currentNetworkJudgementHasCondition {
+    return [self networkHasJudgementConditionWithTrueText:_networkContainsText falseText:_networkFalseText];
+}
+
 - (void)loadNetworkRequestConfigFromTask:(NSDictionary *)task {
     _networkURL = [self trimmedActionDescription:task[@"networkURL"]];
     _networkPostBody = [self trimmedActionDescription:task[@"networkPostBody"]];
@@ -5359,6 +5370,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
             return nil;
         }
+        if (!_networkRequestOnly && ![self currentNetworkJudgementHasCondition]) {
+            _statusLabel.text = @"先填运行或不运行条件";
+            return nil;
+        }
         task[@"networkRequestOnly"] = @(_networkRequestOnly);
         task[@"networkRetryForever"] = @(_networkRetryForever);
         task[@"networkRetryLimit"] = @(MAX(1, _actionRepeatCount));
@@ -5454,7 +5469,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         BOOL requestOnly = [task[@"networkRequestOnly"] boolValue];
         if (url.length == 0) {
             subtitle = @"未设置链接";
-        } else if (requestOnly || [self networkTaskIsOneShotWithURL:url trueText:contains falseText:falseText]) {
+        } else if (requestOnly) {
             subtitle = [NSString stringWithFormat:@"%@ · %@ 请求一次", url, method];
         } else if (contains.length > 0) {
             subtitle = [NSString stringWithFormat:@"%@ · %@ · 包含 %@ 就运行", url, method, contains];
@@ -5462,11 +5477,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 subtitle = [subtitle stringByAppendingFormat:@" · 包含 %@ 就不运行", falseText];
             }
         } else if (falseText.length > 0) {
-            subtitle = [NSString stringWithFormat:@"%@ · %@ · 状态真就运行 · 包含 %@ 就不运行", url, method, falseText];
+            subtitle = [NSString stringWithFormat:@"%@ · %@ · 未命中不运行就继续 · 包含 %@ 就不运行", url, method, falseText];
         } else {
-            subtitle = [NSString stringWithFormat:@"%@ · %@ · 状态真就运行 / 状态假就不运行", url, method];
+            subtitle = [NSString stringWithFormat:@"%@ · %@ · 缺少判断条件", url, method];
         }
-        if (!requestOnly && ![self networkTaskIsOneShotWithURL:url trueText:contains falseText:falseText]) {
+        if (!requestOnly && [self networkHasJudgementConditionWithTrueText:contains falseText:falseText]) {
             subtitle = [subtitle stringByAppendingFormat:@" · %@",
                         [self networkRetryForeverForTask:task]
                             ? @"一直判断"
@@ -6270,6 +6285,27 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return defaultExpectedTrue && [self networkBodyMatchesDefaultFalse:body];
 }
 
+- (NSString *)globalNetworkGateValidationMessage {
+    if (!_globalNetworkGateEnabled) {
+        return nil;
+    }
+
+    [self syncGlobalSettingsFromFields];
+    NSString *url = [self trimmedActionDescription:_globalNetworkURL];
+    NSString *contains = [self trimmedActionDescription:_globalNetworkContainsText];
+    NSString *falseText = [self trimmedActionDescription:_globalNetworkFalseText];
+    if (url.length == 0) {
+        return @"网络判断未填链接";
+    }
+    if (![self normalizedNetworkURLString:url]) {
+        return @"网络判断链接无效";
+    }
+    if (contains.length == 0 && falseText.length == 0) {
+        return @"网络判断至少填一个条件";
+    }
+    return nil;
+}
+
 - (void)performNetworkRequestWithURLString:(NSString *)urlString
                                     method:(NSString *)method
                                   postBody:(NSString *)postBody
@@ -6321,31 +6357,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [task resume];
 }
 
-- (BOOL)networkURLStringIsControlRequest:(NSString *)urlString {
-    NSString *normalizedURLString = [self normalizedNetworkURLString:urlString];
-    if (normalizedURLString.length == 0) {
-        return NO;
-    }
-
-    NSURL *url = [NSURL URLWithString:normalizedURLString];
-    NSString *path = [[url.path ?: @"" lowercaseString] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    return [path hasSuffix:@"/set_false_anclick"] || [path hasSuffix:@"/set_true_anclick"];
-}
-
-- (BOOL)networkTaskIsOneShotWithURL:(NSString *)urlString trueText:(NSString *)trueText falseText:(NSString *)falseText {
-    NSString *trueRule = [self trimmedActionDescription:trueText];
-    NSString *falseRule = [self trimmedActionDescription:falseText];
-    return trueRule.length == 0 && falseRule.length == 0 && [self networkURLStringIsControlRequest:urlString];
-}
-
 - (BOOL)networkTaskIsOneShot:(NSDictionary *)task {
-    if ([task[@"networkRequestOnly"] boolValue]) {
-        return YES;
-    }
-    NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
+    return [task[@"networkRequestOnly"] boolValue];
+}
+
+- (BOOL)networkTaskHasJudgementCondition:(NSDictionary *)task {
     NSString *contains = [self trimmedActionDescription:task[@"networkContains"]];
     NSString *falseText = [self trimmedActionDescription:task[@"networkFalse"]];
-    return [self networkTaskIsOneShotWithURL:url trueText:contains falseText:falseText];
+    return [self networkHasJudgementConditionWithTrueText:contains falseText:falseText];
 }
 
 - (NSString *)networkStatusTextWithMatched:(BOOL)matched requestSucceeded:(BOOL)requestSucceeded statusCode:(NSInteger)statusCode error:(NSError *)error {
@@ -6377,15 +6396,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     BOOL oneShot = [self networkTaskIsOneShot:task];
+    if (!oneShot && ![self networkTaskHasJudgementCondition:task]) {
+        _statusLabel.text = @"网络判断未填条件";
+        [self showToast:_statusLabel.text];
+        if (completion) {
+            completion(NO, NO, NO);
+        }
+        return;
+    }
     NSTimeInterval timeout = [self networkTimeoutForTask:task];
     [self showToast:oneShot ? @"网络仅请求" : @"网络请求中"];
     NSString *method = [self networkMethodForTask:task];
     NSString *postBody = [self networkPostBodyForTask:task];
-    [self performNetworkRequestWithURLString:url method:method postBody:postBody trueText:contains falseText:falseText defaultExpectedTrue:!oneShot timeout:timeout completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
+    [self performNetworkRequestWithURLString:url method:method postBody:postBody trueText:contains falseText:falseText defaultExpectedTrue:NO timeout:timeout completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
         if (runGeneration != 0 && (!self->_taskRunActive || runGeneration != self->_taskRunGeneration)) {
             return;
         }
-        BOOL blocked = !oneShot && requestSucceeded && [self networkBody:body matchesBlockText:falseText defaultExpectedTrue:YES];
+        BOOL blocked = !oneShot && requestSucceeded && [self networkBody:body matchesBlockText:falseText defaultExpectedTrue:NO];
         self->_statusLabel.text = oneShot
             ? (requestSucceeded ? @"网络请求完成" : [self networkStatusTextWithMatched:NO requestSucceeded:requestSucceeded statusCode:statusCode error:error])
             : (blocked ? @"命中不运行" : [self networkStatusTextWithMatched:matched requestSucceeded:requestSucceeded statusCode:statusCode error:error]);
@@ -6425,7 +6452,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return;
         }
 
-        if (matched && !blocked) {
+        NSString *runRule = [self trimmedActionDescription:task[@"networkContains"]];
+        BOOL shouldContinue = runRule.length > 0 ? (matched && !blocked) : (requestSucceeded && !blocked);
+        if (shouldContinue) {
             [self continueTaskRunAfterIndex:index inWindow:hostWindow generation:runGeneration];
             return;
         }
@@ -6917,6 +6946,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _statusLabel.text = @"任务网络链接无效";
             return NO;
         }
+        if (![self networkTaskIsOneShot:task] && ![self networkTaskHasJudgementCondition:task]) {
+            _statusLabel.text = @"任务网络缺少判断条件";
+            return NO;
+        }
         return YES;
     }
     if (mode == AnClickActionModeMacro) {
@@ -7027,25 +7060,36 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *url = _globalNetworkURL;
     NSString *contains = _globalNetworkContainsText;
     NSString *falseText = _globalNetworkFalseText;
-    [self performNetworkRequestWithURLString:url method:@"GET" postBody:nil trueText:contains falseText:falseText defaultExpectedTrue:YES timeout:8.0 completion:^(BOOL matched, BOOL requestSucceeded, __unused NSString *body, NSInteger statusCode, NSError *error) {
-        if (!self->_taskRunActive || runGeneration != self->_taskRunGeneration) {
+    __weak typeof(self) weakSelf = self;
+    [self performNetworkRequestWithURLString:url method:@"GET" postBody:nil trueText:contains falseText:falseText defaultExpectedTrue:NO timeout:8.0 completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf || !strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration) {
             return;
         }
-        if (matched) {
-            self->_statusLabel.text = scheduled ? @"定时命中运行" : @"命中运行";
-            [self showToast:self->_statusLabel.text];
-            [self refreshCollapsedButtonTitle];
-            [self runTaskAtIndex:0 inWindow:hostWindow generation:runGeneration];
+        NSString *runRule = [strongSelf trimmedActionDescription:contains];
+        BOOL blocked = requestSucceeded && [strongSelf networkBody:body matchesBlockText:falseText defaultExpectedTrue:NO];
+        BOOL shouldRun = runRule.length > 0 ? matched : (requestSucceeded && !blocked);
+        if (shouldRun) {
+            strongSelf->_statusLabel.text = scheduled ? @"定时命中运行" : @"命中运行";
+            [strongSelf showToast:strongSelf->_statusLabel.text];
+            [strongSelf refreshCollapsedButtonTitle];
+            [strongSelf runTaskAtIndex:0 inWindow:hostWindow generation:runGeneration];
             return;
         }
 
-        self->_statusLabel.text = requestSucceeded
-            ? @"网络监控中"
-            : [self networkStatusTextWithMatched:NO requestSucceeded:requestSucceeded statusCode:statusCode error:error];
-        [self showToast:self->_statusLabel.text];
-        [self refreshCollapsedButtonTitle];
+        strongSelf->_statusLabel.text = blocked
+            ? @"命中不运行 继续监控"
+            : (requestSucceeded
+                ? @"未命中运行 继续监控"
+                : [strongSelf networkStatusTextWithMatched:NO requestSucceeded:requestSucceeded statusCode:statusCode error:error]);
+        [strongSelf showToast:strongSelf->_statusLabel.text];
+        [strongSelf refreshCollapsedButtonTitle];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self monitorGlobalNetworkGateWithHostWindow:hostWindow scheduled:scheduled generation:runGeneration];
+            __strong typeof(weakSelf) retrySelf = weakSelf;
+            if (!retrySelf || !retrySelf->_taskRunActive || runGeneration != retrySelf->_taskRunGeneration) {
+                return;
+            }
+            [retrySelf monitorGlobalNetworkGateWithHostWindow:hostWindow scheduled:scheduled generation:runGeneration];
         });
     }];
 }
@@ -7073,15 +7117,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    if (_globalNetworkGateEnabled && _globalNetworkURL.length == 0) {
+    NSString *networkValidationMessage = [self globalNetworkGateValidationMessage];
+    if (networkValidationMessage.length > 0) {
         _volumeShortcutRunSuppressToasts = NO;
-        _statusLabel.text = @"网络联动未填链接";
-        [self showToast:_statusLabel.text];
-        return;
-    }
-    if (_globalNetworkGateEnabled && ![self normalizedNetworkURLString:_globalNetworkURL]) {
-        _volumeShortcutRunSuppressToasts = NO;
-        _statusLabel.text = @"网络联动链接无效";
+        _statusLabel.text = networkValidationMessage;
         [self showToast:_statusLabel.text];
         return;
     }
@@ -7213,14 +7252,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat scale = image.scale > 0 ? image.scale : UIScreen.mainScreen.scale;
     NSInteger pixelX = MIN(MAX((NSInteger)floor(point.x * scale), 0), (NSInteger)width - 1);
     NSInteger pixelY = MIN(MAX((NSInteger)floor(point.y * scale), 0), (NSInteger)height - 1);
-    size_t bytesPerRow = width * 4;
-    NSMutableData *data = [NSMutableData dataWithLength:height * bytesPerRow];
+    unsigned char pixel[4] = {0, 0, 0, 0};
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-    CGContextRef context = CGBitmapContextCreate(data.mutableBytes,
-                                                 width,
-                                                 height,
+    if (!colorSpace) {
+        return NO;
+    }
+    CGContextRef context = CGBitmapContextCreate(pixel,
+                                                 1,
+                                                 1,
                                                  8,
-                                                 bytesPerRow,
+                                                 4,
                                                  colorSpace,
                                                  kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
     if (!context) {
@@ -7228,20 +7269,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return NO;
     }
 
+    CGContextTranslateCTM(context, -(CGFloat)pixelX, -(CGFloat)pixelY);
     CGContextDrawImage(context, CGRectMake(0, 0, width, height), imageRef);
     CGContextRelease(context);
     CGColorSpaceRelease(colorSpace);
 
-    unsigned char *bytes = (unsigned char *)data.mutableBytes;
-    size_t index = (size_t)pixelY * bytesPerRow + (size_t)pixelX * 4;
     if (red) {
-        *red = bytes[index];
+        *red = pixel[0];
     }
     if (green) {
-        *green = bytes[index + 1];
+        *green = pixel[1];
     }
     if (blue) {
-        *blue = bytes[index + 2];
+        *blue = pixel[2];
     }
     return YES;
 }

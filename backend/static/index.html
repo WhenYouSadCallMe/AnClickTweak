@@ -61,6 +61,34 @@
       grid-template-columns: repeat(3, 1fr);
       gap: 10px;
     }
+    .links {
+      display: grid;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .link-row {
+      display: grid;
+      grid-template-columns: 86px 1fr 70px;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      border-radius: 8px;
+      background: #0f1115;
+      border: 1px solid rgba(255,255,255,.08);
+    }
+    .link-name {
+      color: rgba(255,255,255,.70);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .link-url {
+      overflow: hidden;
+      color: rgba(255,255,255,.86);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     button {
       height: 46px;
       border: 0;
@@ -77,6 +105,11 @@
     button.true {
       background: #16a34a;
     }
+    button.copy {
+      height: 34px;
+      background: #374151;
+      font-size: 14px;
+    }
     button:disabled {
       opacity: .55;
       cursor: wait;
@@ -92,12 +125,41 @@
       border: 1px solid rgba(255,255,255,.08);
       min-height: 48px;
     }
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: max(22px, env(safe-area-inset-bottom));
+      z-index: 10;
+      max-width: min(420px, calc(100vw - 32px));
+      padding: 11px 16px;
+      border-radius: 8px;
+      color: #fff;
+      background: rgba(15,17,21,.94);
+      border: 1px solid rgba(255,255,255,.12);
+      box-shadow: 0 12px 34px rgba(0,0,0,.34);
+      font-size: 14px;
+      font-weight: 700;
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, 8px);
+      transition: opacity .18s ease, transform .18s ease;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
     @media (max-width: 520px) {
       main {
         padding: 20px;
       }
       .actions {
         grid-template-columns: 1fr;
+      }
+      .link-row {
+        grid-template-columns: 1fr 70px;
+      }
+      .link-name {
+        grid-column: 1 / -1;
       }
     }
   </style>
@@ -117,18 +179,85 @@
       <button id="trueBtn" class="true" type="button">设为 true</button>
       <button id="falseBtn" class="false" type="button">设为 false</button>
     </section>
+    <section class="links" aria-label="接口地址">
+      <div class="link-row">
+        <div class="link-name">查询状态</div>
+        <div id="statusUrl" class="link-url"></div>
+        <button class="copy" type="button" data-copy-path="/get_status_anclick">复制</button>
+      </div>
+      <div class="link-row">
+        <div class="link-name">设为 true</div>
+        <div id="trueUrl" class="link-url"></div>
+        <button class="copy" type="button" data-copy-path="/set_true_anclick">复制</button>
+      </div>
+      <div class="link-row">
+        <div class="link-name">设为 false</div>
+        <div id="falseUrl" class="link-url"></div>
+        <button class="copy" type="button" data-copy-path="/set_false_anclick">复制</button>
+      </div>
+    </section>
     <pre id="result">等待操作</pre>
   </main>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script>
     const statusText = document.getElementById('statusText');
     const updatedAt = document.getElementById('updatedAt');
     const result = document.getElementById('result');
-    const buttons = Array.from(document.querySelectorAll('button'));
+    const toast = document.getElementById('toast');
+    const requestButtons = [
+      document.getElementById('refreshBtn'),
+      document.getElementById('trueBtn'),
+      document.getElementById('falseBtn')
+    ];
+    const endpointRows = [
+      { id: 'statusUrl', path: '/get_status_anclick' },
+      { id: 'trueUrl', path: '/set_true_anclick' },
+      { id: 'falseUrl', path: '/set_false_anclick' }
+    ];
+    let toastTimer = 0;
     let polling = false;
 
     function setBusy(busy) {
-      buttons.forEach(button => button.disabled = busy);
+      requestButtons.forEach(button => button.disabled = busy);
+    }
+
+    function endpointURL(path) {
+      return new URL(path, window.location.origin).href;
+    }
+
+    function showToast(message) {
+      window.clearTimeout(toastTimer);
+      toast.textContent = message;
+      toast.classList.add('show');
+      toastTimer = window.setTimeout(() => {
+        toast.classList.remove('show');
+      }, 1800);
+    }
+
+    async function copyText(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    }
+
+    function renderEndpointLinks() {
+      endpointRows.forEach(item => {
+        const text = endpointURL(item.path);
+        const element = document.getElementById(item.id);
+        element.textContent = text;
+        element.title = text;
+      });
     }
 
     function renderStatus(data) {
@@ -151,12 +280,16 @@
           result.textContent = JSON.stringify(data, null, 2);
         }
         renderStatus(data);
+        if (!silent) {
+          showToast(data.msg || '请求完成');
+        }
         if (refreshAfter) {
           await request('/get_status_anclick', false, true);
         }
       } catch (error) {
         if (!silent) {
           result.textContent = '请求失败: ' + error.message;
+          showToast('请求失败');
         }
       } finally {
         if (!silent) {
@@ -180,7 +313,20 @@
     document.getElementById('refreshBtn').addEventListener('click', () => request('/get_status_anclick', false));
     document.getElementById('trueBtn').addEventListener('click', () => request('/set_true_anclick', true));
     document.getElementById('falseBtn').addEventListener('click', () => request('/set_false_anclick', true));
+    document.querySelectorAll('[data-copy-path]').forEach(button => {
+      button.addEventListener('click', async () => {
+        const url = endpointURL(button.dataset.copyPath);
+        try {
+          await copyText(url);
+          showToast('已复制接口链接');
+        } catch (error) {
+          result.textContent = '复制失败: ' + error.message;
+          showToast('复制失败');
+        }
+      });
+    });
 
+    renderEndpointLinks();
     request('/get_status_anclick', false);
     setInterval(pollStatus, 5000);
   </script>

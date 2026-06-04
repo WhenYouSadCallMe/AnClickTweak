@@ -97,10 +97,18 @@ static cv::Mat AnClickMatFromUIImage(UIImage *image) {
     CGImageRef imageRef = image.CGImage;
     size_t width = CGImageGetWidth(imageRef);
     size_t height = CGImageGetHeight(imageRef);
+    if (width == 0 || height == 0) {
+        return cv::Mat();
+    }
+
     size_t bytesPerRow = width * 4;
     std::vector<unsigned char> data(height * bytesPerRow);
 
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    if (!colorSpace) {
+        return cv::Mat();
+    }
+
     CGContextRef context = CGBitmapContextCreate(data.data(),
                                                  width,
                                                  height,
@@ -108,10 +116,13 @@ static cv::Mat AnClickMatFromUIImage(UIImage *image) {
                                                  bytesPerRow,
                                                  colorSpace,
                                                  kCGImageAlphaPremultipliedLast | kCGBitmapByteOrderDefault);
-    if (context) {
-        CGContextDrawImage(context, CGRectMake(0, 0, width, height), imageRef);
-        CGContextRelease(context);
+    if (!context) {
+        CGColorSpaceRelease(colorSpace);
+        return cv::Mat();
     }
+
+    CGContextDrawImage(context, CGRectMake(0, 0, width, height), imageRef);
+    CGContextRelease(context);
     CGColorSpaceRelease(colorSpace);
 
     cv::Mat rgba((int)height, (int)width, CV_8UC4, data.data(), bytesPerRow);
@@ -194,7 +205,8 @@ static cv::Mat AnClickMatFromUIImage(UIImage *image) {
     NSInteger targetGreen = MIN(255, MAX(0, green));
     NSInteger targetBlue = MIN(255, MAX(0, blue));
     double maxDistance = MIN(255.0, MAX(0.0, tolerance));
-    double bestDistance = DBL_MAX;
+    double maxDistanceSquared = maxDistance * maxDistance;
+    double bestDistanceSquared = DBL_MAX;
     cv::Point bestPoint(0, 0);
 
     for (int y = 0; y < source.rows; y++) {
@@ -204,24 +216,25 @@ static cv::Mat AnClickMatFromUIImage(UIImage *image) {
             double db = (double)pixel[0] - (double)targetBlue;
             double dg = (double)pixel[1] - (double)targetGreen;
             double dr = (double)pixel[2] - (double)targetRed;
-            double distance = sqrt(db * db + dg * dg + dr * dr);
-            if (distance < bestDistance) {
-                bestDistance = distance;
+            double distanceSquared = db * db + dg * dg + dr * dr;
+            if (distanceSquared < bestDistanceSquared) {
+                bestDistanceSquared = distanceSquared;
                 bestPoint = cv::Point(x, y);
-                if (bestDistance <= 0.0) {
+                if (bestDistanceSquared <= 0.0) {
                     break;
                 }
             }
         }
-        if (bestDistance <= 0.0) {
+        if (bestDistanceSquared <= 0.0) {
             break;
         }
     }
 
-    if (bestDistance > maxDistance) {
+    if (bestDistanceSquared > maxDistanceSquared) {
         return nil;
     }
 
+    double bestDistance = sqrt(bestDistanceSquared);
     CGFloat scale = UIScreen.mainScreen.scale;
     CGPoint windowPoint = CGPointMake((CGFloat)bestPoint.x / scale, (CGFloat)bestPoint.y / scale);
     CGPoint screenPoint = sourceWindow ? [sourceWindow convertPoint:windowPoint toWindow:nil] : windowPoint;
