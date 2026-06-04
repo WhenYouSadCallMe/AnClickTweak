@@ -4,6 +4,7 @@
 #import <opencv2/core.hpp>
 #import <opencv2/imgproc.hpp>
 #include <float.h>
+#include <math.h>
 #include <vector>
 
 @interface AnClickFakeTouch : NSObject
@@ -15,6 +16,7 @@
 + (UIImage *)captureCurrentWindowImageWithWindow:(UIWindow **)capturedWindow;
 + (NSDictionary *)findTemplateImageMatch:(UIImage *)templateImage threshold:(double)threshold;
 + (NSDictionary *)findColorMatchWithRed:(NSInteger)red green:(NSInteger)green blue:(NSInteger)blue tolerance:(double)tolerance;
++ (NSDictionary *)findColorPatternMatchWithPoints:(NSArray<NSDictionary *> *)points tolerance:(double)tolerance;
 + (NSValue *)findTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 + (BOOL)findAndTapTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 @end
@@ -116,12 +118,14 @@ static cv::Mat AnClickMatFromUIImage(UIImage *image) {
                                                  8,
                                                  bytesPerRow,
                                                  colorSpace,
-                                                 kCGImageAlphaPremultipliedLast | kCGBitmapByteOrderDefault);
+                                                 kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
     if (!context) {
         CGColorSpaceRelease(colorSpace);
         return cv::Mat();
     }
 
+    CGContextTranslateCTM(context, 0, (CGFloat)height);
+    CGContextScaleCTM(context, 1.0, -1.0);
     CGContextDrawImage(context, CGRectMake(0, 0, width, height), imageRef);
     CGContextRelease(context);
     CGColorSpaceRelease(colorSpace);
@@ -182,12 +186,14 @@ static CGRect AnClickTemplateContentRectInPixels(UIImage *image, int templateCol
                                                  8,
                                                  bytesPerRow,
                                                  colorSpace,
-                                                 kCGImageAlphaPremultipliedLast | kCGBitmapByteOrderDefault);
+                                                 kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
     if (!context) {
         CGColorSpaceRelease(colorSpace);
         return fullRect;
     }
 
+    CGContextTranslateCTM(context, 0, (CGFloat)height);
+    CGContextScaleCTM(context, 1.0, -1.0);
     CGContextDrawImage(context, CGRectMake(0, 0, width, height), imageRef);
     CGContextRelease(context);
     CGColorSpaceRelease(colorSpace);
@@ -279,6 +285,58 @@ static CGRect AnClickTemplateContentRectInPixels(UIImage *image, int templateCol
     return AnClickRectFromPixelBounds(foregroundMinX, foregroundMinY, foregroundMaxX, foregroundMaxY, width, height, templateCols, templateRows);
 }
 
+static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
+                                             CGFloat scale,
+                                             const std::vector<cv::Point> &matchedPixels,
+                                             double totalDistance,
+                                             double tolerance) {
+    if (matchedPixels.empty()) {
+        return nil;
+    }
+
+    int minX = matchedPixels[0].x;
+    int minY = matchedPixels[0].y;
+    int maxX = matchedPixels[0].x;
+    int maxY = matchedPixels[0].y;
+    for (const cv::Point &point : matchedPixels) {
+        minX = MIN(minX, point.x);
+        minY = MIN(minY, point.y);
+        maxX = MAX(maxX, point.x);
+        maxY = MAX(maxY, point.y);
+    }
+
+    CGPoint anchorWindowPoint = CGPointMake(((CGFloat)matchedPixels[0].x + 0.5) / scale,
+                                            ((CGFloat)matchedPixels[0].y + 0.5) / scale);
+    CGPoint topLeftWindowPoint = CGPointMake((CGFloat)minX / scale,
+                                             (CGFloat)minY / scale);
+    CGPoint bottomRightWindowPoint = CGPointMake((CGFloat)(maxX + 1) / scale,
+                                                 (CGFloat)(maxY + 1) / scale);
+    CGPoint screenPoint = sourceWindow ? [sourceWindow convertPoint:anchorWindowPoint toWindow:nil] : anchorWindowPoint;
+    CGPoint topLeftScreenPoint = sourceWindow ? [sourceWindow convertPoint:topLeftWindowPoint toWindow:nil] : topLeftWindowPoint;
+    CGPoint bottomRightScreenPoint = sourceWindow ? [sourceWindow convertPoint:bottomRightWindowPoint toWindow:nil] : bottomRightWindowPoint;
+    CGRect screenRect = CGRectStandardize(CGRectMake(topLeftScreenPoint.x,
+                                                     topLeftScreenPoint.y,
+                                                     bottomRightScreenPoint.x - topLeftScreenPoint.x,
+                                                     bottomRightScreenPoint.y - topLeftScreenPoint.y));
+    if (screenRect.size.width < 12.0) {
+        screenRect.origin.x -= (12.0 - screenRect.size.width) * 0.5;
+        screenRect.size.width = 12.0;
+    }
+    if (screenRect.size.height < 12.0) {
+        screenRect.origin.y -= (12.0 - screenRect.size.height) * 0.5;
+        screenRect.size.height = 12.0;
+    }
+
+    double averageDistance = totalDistance / MAX((double)matchedPixels.size(), 1.0);
+    double score = MAX(0.0, 1.0 - averageDistance / MAX(1.0, tolerance));
+    return @{
+        @"point": [NSValue valueWithCGPoint:screenPoint],
+        @"rect": [NSValue valueWithCGRect:screenRect],
+        @"distance": @(averageDistance),
+        @"score": @(score),
+    };
+}
+
 @implementation AnClickCore
 
 + (UIImage *)captureCurrentWindowImage {
@@ -312,7 +370,7 @@ static CGRect AnClickTemplateContentRectInPixels(UIImage *image, int templateCol
         return nil;
     }
 
-    CGFloat scale = UIScreen.mainScreen.scale;
+    CGFloat scale = sourceImage.scale > 0 ? sourceImage.scale : UIScreen.mainScreen.scale;
     CGRect contentRect = AnClickTemplateContentRectInPixels(templateImage, templ.cols, templ.rows);
     CGPoint contentTopLeftPixel = CGPointMake((CGFloat)bestLocation.x + contentRect.origin.x,
                                               (CGFloat)bestLocation.y + contentRect.origin.y);
@@ -346,7 +404,11 @@ static CGRect AnClickTemplateContentRectInPixels(UIImage *image, int templateCol
     };
 }
 
-+ (NSDictionary *)findColorMatchWithRed:(NSInteger)red green:(NSInteger)green blue:(NSInteger)blue tolerance:(double)tolerance {
++ (NSDictionary *)findColorPatternMatchWithPoints:(NSArray<NSDictionary *> *)points tolerance:(double)tolerance {
+    if (![points isKindOfClass:NSArray.class] || points.count == 0) {
+        return nil;
+    }
+
     UIWindow *sourceWindow = nil;
     UIImage *sourceImage = AnClickCaptureActiveWindowImage(&sourceWindow);
     if (!sourceImage) {
@@ -358,55 +420,136 @@ static CGRect AnClickTemplateContentRectInPixels(UIImage *image, int templateCol
         return nil;
     }
 
-    NSInteger targetRed = MIN(255, MAX(0, red));
-    NSInteger targetGreen = MIN(255, MAX(0, green));
-    NSInteger targetBlue = MIN(255, MAX(0, blue));
     double maxDistance = MIN(255.0, MAX(0.0, tolerance));
     double maxDistanceSquared = maxDistance * maxDistance;
-    double bestDistanceSquared = DBL_MAX;
-    cv::Point bestPoint(0, 0);
+    CGFloat scale = sourceImage.scale > 0 ? sourceImage.scale : UIScreen.mainScreen.scale;
 
-    for (int y = 0; y < source.rows; y++) {
+    struct AnClickColorPoint {
+        int dx;
+        int dy;
+        double red;
+        double green;
+        double blue;
+    };
+
+    std::vector<AnClickColorPoint> normalizedPoints;
+    normalizedPoints.reserve(points.count);
+    int minDx = 0;
+    int minDy = 0;
+    int maxDx = 0;
+    int maxDy = 0;
+    for (NSDictionary *point in points) {
+        if (![point isKindOfClass:NSDictionary.class]) {
+            continue;
+        }
+        id redValue = point[@"red"];
+        id greenValue = point[@"green"];
+        id blueValue = point[@"blue"];
+        if (![redValue respondsToSelector:@selector(doubleValue)] ||
+            ![greenValue respondsToSelector:@selector(doubleValue)] ||
+            ![blueValue respondsToSelector:@selector(doubleValue)]) {
+            continue;
+        }
+        double dxValue = [point[@"dx"] respondsToSelector:@selector(doubleValue)] ? [point[@"dx"] doubleValue] : 0.0;
+        double dyValue = [point[@"dy"] respondsToSelector:@selector(doubleValue)] ? [point[@"dy"] doubleValue] : 0.0;
+        AnClickColorPoint colorPoint = {
+            (int)llround(dxValue * scale),
+            (int)llround(dyValue * scale),
+            (double)MIN(255.0, MAX(0.0, [redValue doubleValue])),
+            (double)MIN(255.0, MAX(0.0, [greenValue doubleValue])),
+            (double)MIN(255.0, MAX(0.0, [blueValue doubleValue])),
+        };
+        minDx = MIN(minDx, colorPoint.dx);
+        minDy = MIN(minDy, colorPoint.dy);
+        maxDx = MAX(maxDx, colorPoint.dx);
+        maxDy = MAX(maxDy, colorPoint.dy);
+        normalizedPoints.push_back(colorPoint);
+    }
+
+    if (normalizedPoints.empty()) {
+        return nil;
+    }
+
+    double bestTotalDistanceSquared = DBL_MAX;
+    cv::Point bestAnchor(0, 0);
+
+    int startX = MAX(0, -minDx);
+    int endX = MIN(source.cols - 1, source.cols - 1 - maxDx);
+    int startY = MAX(0, -minDy);
+    int endY = MIN(source.rows - 1, source.rows - 1 - maxDy);
+    if (startX > endX || startY > endY) {
+        return nil;
+    }
+
+    const AnClickColorPoint &anchorPoint = normalizedPoints[0];
+    for (int y = startY; y <= endY; y++) {
         const cv::Vec3b *row = source.ptr<cv::Vec3b>(y);
-        for (int x = 0; x < source.cols; x++) {
+        for (int x = startX; x <= endX; x++) {
             const cv::Vec3b pixel = row[x];
-            double db = (double)pixel[0] - (double)targetBlue;
-            double dg = (double)pixel[1] - (double)targetGreen;
-            double dr = (double)pixel[2] - (double)targetRed;
-            double distanceSquared = db * db + dg * dg + dr * dr;
-            if (distanceSquared < bestDistanceSquared) {
-                bestDistanceSquared = distanceSquared;
-                bestPoint = cv::Point(x, y);
-                if (bestDistanceSquared <= 0.0) {
+            double db = (double)pixel[0] - anchorPoint.blue;
+            double dg = (double)pixel[1] - anchorPoint.green;
+            double dr = (double)pixel[2] - anchorPoint.red;
+            double totalDistanceSquared = db * db + dg * dg + dr * dr;
+            if (totalDistanceSquared > maxDistanceSquared) {
+                continue;
+            }
+
+            BOOL matched = YES;
+            for (size_t index = 1; index < normalizedPoints.size(); index++) {
+                const AnClickColorPoint &colorPoint = normalizedPoints[index];
+                const cv::Vec3b samplePixel = source.at<cv::Vec3b>(y + colorPoint.dy, x + colorPoint.dx);
+                double sampleDb = (double)samplePixel[0] - colorPoint.blue;
+                double sampleDg = (double)samplePixel[1] - colorPoint.green;
+                double sampleDr = (double)samplePixel[2] - colorPoint.red;
+                double sampleDistanceSquared = sampleDb * sampleDb + sampleDg * sampleDg + sampleDr * sampleDr;
+                if (sampleDistanceSquared > maxDistanceSquared) {
+                    matched = NO;
+                    break;
+                }
+                totalDistanceSquared += sampleDistanceSquared;
+            }
+
+            if (!matched) {
+                continue;
+            }
+
+            if (totalDistanceSquared < bestTotalDistanceSquared) {
+                bestTotalDistanceSquared = totalDistanceSquared;
+                bestAnchor = cv::Point(x, y);
+                if (bestTotalDistanceSquared <= 0.0) {
                     break;
                 }
             }
         }
-        if (bestDistanceSquared <= 0.0) {
+        if (bestTotalDistanceSquared <= 0.0) {
             break;
         }
     }
 
-    if (bestDistanceSquared > maxDistanceSquared) {
+    if (bestTotalDistanceSquared == DBL_MAX) {
         return nil;
     }
 
-    double bestDistance = sqrt(bestDistanceSquared);
-    CGFloat scale = UIScreen.mainScreen.scale;
-    CGPoint windowPoint = CGPointMake(((CGFloat)bestPoint.x + 0.5) / scale,
-                                      ((CGFloat)bestPoint.y + 0.5) / scale);
-    CGPoint screenPoint = sourceWindow ? [sourceWindow convertPoint:windowPoint toWindow:nil] : windowPoint;
-    CGFloat markerSize = 12.0;
-    CGRect screenRect = CGRectMake(screenPoint.x - markerSize * 0.5,
-                                   screenPoint.y - markerSize * 0.5,
-                                   markerSize,
-                                   markerSize);
-    return @{
-        @"point": [NSValue valueWithCGPoint:screenPoint],
-        @"rect": [NSValue valueWithCGRect:screenRect],
-        @"distance": @(bestDistance),
-        @"score": @(MAX(0.0, 1.0 - bestDistance / MAX(1.0, maxDistance))),
-    };
+    std::vector<cv::Point> matchedPixels;
+    matchedPixels.reserve(normalizedPoints.size());
+    for (const AnClickColorPoint &point : normalizedPoints) {
+        matchedPixels.push_back(cv::Point(bestAnchor.x + point.dx, bestAnchor.y + point.dy));
+    }
+    return AnClickColorMatchResult(sourceWindow,
+                                   scale,
+                                   matchedPixels,
+                                   sqrt(MAX(0.0, bestTotalDistanceSquared)),
+                                   maxDistance);
+}
+
++ (NSDictionary *)findColorMatchWithRed:(NSInteger)red green:(NSInteger)green blue:(NSInteger)blue tolerance:(double)tolerance {
+    return [self findColorPatternMatchWithPoints:@[@{
+        @"dx": @(0.0),
+        @"dy": @(0.0),
+        @"red": @(MIN(255, MAX(0, red))),
+        @"green": @(MIN(255, MAX(0, green))),
+        @"blue": @(MIN(255, MAX(0, blue))),
+    }] tolerance:tolerance];
 }
 
 + (NSValue *)findTemplateImage:(UIImage *)templateImage threshold:(double)threshold {

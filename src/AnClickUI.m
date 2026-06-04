@@ -58,6 +58,8 @@ static const NSInteger AnClickHIDUsageConsumerVolumeIncrement = 0xE9;
 static const NSInteger AnClickHIDUsageConsumerVolumeDecrement = 0xEA;
 static const NSInteger AnClickSpringBoardVolumeUpButtonType = 102;
 static const NSInteger AnClickSpringBoardVolumeDownButtonType = 103;
+static const NSInteger AnClickColorPickMarkerTagBase = 43100;
+static const NSUInteger AnClickColorPickMaxSamples = 8;
 static CFStringRef const AnClickVolumeShortcutDownNotification = CFSTR("com.anclick.volume.down");
 static CFStringRef const AnClickVolumeShortcutUpNotification = CFSTR("com.anclick.volume.up");
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
@@ -83,6 +85,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 + (UIImage *)captureCurrentWindowImage;
 + (NSDictionary *)findTemplateImageMatch:(UIImage *)templateImage threshold:(double)threshold;
 + (NSDictionary *)findColorMatchWithRed:(NSInteger)red green:(NSInteger)green blue:(NSInteger)blue tolerance:(double)tolerance;
++ (NSDictionary *)findColorPatternMatchWithPoints:(NSArray<NSDictionary *> *)points tolerance:(double)tolerance;
 + (NSValue *)findTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 + (BOOL)findAndTapTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 @end
@@ -181,9 +184,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UITextField *_networkFalseField;
     UITextField *_networkPostBodyField;
     UIView *_captureOverlay;
+    UIScrollView *_captureScrollView;
+    UIImageView *_captureImageView;
     UIView *_selectionView;
     UIView *_pointPickOverlay;
     UIWindow *_pointPickWindow;
+    UIScrollView *_pointPickScrollView;
+    UIImageView *_pointPickImageView;
     UIView *_pointCursorView;
     UIView *_pointPickToolbar;
     UILabel *_pointCoordinateLabel;
@@ -195,7 +202,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UILabel *_colorPickInfoLabel;
     UIView *_colorPickSwatchView;
     UIImage *_captureSnapshot;
+    UIImage *_pointPickSnapshot;
     UIImage *_colorPickImage;
+    NSMutableData *_colorPickPixelData;
     UIImageView *_previewView;
     UIView *_colorPreviewView;
     UIView *_tapMarkerView;
@@ -285,6 +294,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSInteger _pendingColorGreen;
     NSInteger _pendingColorBlue;
     BOOL _hasTargetColor;
+    size_t _colorPickPixelWidth;
+    size_t _colorPickPixelHeight;
+    size_t _colorPickPixelBytesPerRow;
     float _lastObservedSystemVolume;
     CGPoint _pendingColorPickPoint;
     BOOL _hasPendingColorPickPoint;
@@ -308,9 +320,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *_globalNetworkURL;
     NSString *_globalNetworkContainsText;
     NSString *_globalNetworkFalseText;
+    NSMutableArray<NSDictionary *> *_targetColorSamples;
+    NSMutableArray<NSDictionary *> *_pendingColorPickSamples;
     AnClickActionMode _actionMode;
     AnClickActionMode _imageActionMode;
     AnClickOCRMode _ocrMode;
+    UIWindow *_pointPickHostWindow;
 }
 
 - (UIColor *)themeHighlightColor {
@@ -323,6 +338,171 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSString *)toolDisplayName {
     return @"安姐连点器v1.0";
+}
+
+- (NSMutableArray<NSDictionary *> *)mutableColorSamplesArrayFromObject:(id)object {
+    NSMutableArray<NSDictionary *> *samples = [NSMutableArray array];
+    if (![object isKindOfClass:NSArray.class]) {
+        return samples;
+    }
+
+    for (NSDictionary *sample in (NSArray *)object) {
+        if (![sample isKindOfClass:NSDictionary.class]) {
+            continue;
+        }
+        NSNumber *redNumber = AnClickNumberValueForObjectKeys(sample, @[@"red", @"r"]);
+        NSNumber *greenNumber = AnClickNumberValueForObjectKeys(sample, @[@"green", @"g"]);
+        NSNumber *blueNumber = AnClickNumberValueForObjectKeys(sample, @[@"blue", @"b"]);
+        NSNumber *xNumber = AnClickNumberValueForObjectKeys(sample, @[@"x"]);
+        NSNumber *yNumber = AnClickNumberValueForObjectKeys(sample, @[@"y"]);
+        NSNumber *dxNumber = AnClickNumberValueForObjectKeys(sample, @[@"dx"]);
+        NSNumber *dyNumber = AnClickNumberValueForObjectKeys(sample, @[@"dy"]);
+        if (!redNumber || !greenNumber || !blueNumber) {
+            continue;
+        }
+        NSMutableDictionary *normalized = [@{
+            @"red": @(MIN(255, MAX(0, redNumber.integerValue))),
+            @"green": @(MIN(255, MAX(0, greenNumber.integerValue))),
+            @"blue": @(MIN(255, MAX(0, blueNumber.integerValue))),
+        } mutableCopy];
+        if (xNumber && yNumber) {
+            normalized[@"x"] = @(xNumber.doubleValue);
+            normalized[@"y"] = @(yNumber.doubleValue);
+        }
+        if (dxNumber && dyNumber) {
+            normalized[@"dx"] = @(dxNumber.doubleValue);
+            normalized[@"dy"] = @(dyNumber.doubleValue);
+        }
+        [samples addObject:normalized];
+        if (samples.count >= AnClickColorPickMaxSamples) {
+            break;
+        }
+    }
+    return samples;
+}
+
+- (NSArray<NSDictionary *> *)colorSamplesForPersistence:(NSArray<NSDictionary *> *)samples {
+    NSMutableArray<NSDictionary *> *result = [NSMutableArray array];
+    for (NSDictionary *sample in [self mutableColorSamplesArrayFromObject:samples]) {
+        [result addObject:[sample copy]];
+    }
+    return result;
+}
+
+- (NSArray<NSDictionary *> *)effectiveTargetColorSamples {
+    if (_targetColorSamples.count > 0) {
+        return [self colorSamplesForPersistence:_targetColorSamples];
+    }
+    if (!_hasTargetColor) {
+        return @[];
+    }
+    return @[@{
+        @"x": @(0.0),
+        @"y": @(0.0),
+        @"dx": @(0.0),
+        @"dy": @(0.0),
+        @"red": @(_targetColorRed),
+        @"green": @(_targetColorGreen),
+        @"blue": @(_targetColorBlue),
+    }];
+}
+
+- (void)applyTargetColorSamples:(NSArray<NSDictionary *> *)samples {
+    _targetColorSamples = [[self mutableColorSamplesArrayFromObject:samples] mutableCopy];
+    NSDictionary *anchor = _targetColorSamples.firstObject;
+    if (anchor) {
+        _targetColorRed = MIN(255, MAX(0, [anchor[@"red"] integerValue]));
+        _targetColorGreen = MIN(255, MAX(0, [anchor[@"green"] integerValue]));
+        _targetColorBlue = MIN(255, MAX(0, [anchor[@"blue"] integerValue]));
+        _hasTargetColor = YES;
+    } else {
+        _targetColorRed = 0;
+        _targetColorGreen = 0;
+        _targetColorBlue = 0;
+        _hasTargetColor = NO;
+    }
+}
+
+- (NSString *)colorHexStringForSample:(NSDictionary *)sample {
+    NSInteger red = MIN(255, MAX(0, [sample[@"red"] integerValue]));
+    NSInteger green = MIN(255, MAX(0, [sample[@"green"] integerValue]));
+    NSInteger blue = MIN(255, MAX(0, [sample[@"blue"] integerValue]));
+    return [NSString stringWithFormat:@"#%02lX%02lX%02lX", (long)red, (long)green, (long)blue];
+}
+
+- (NSString *)targetColorShortDescription {
+    NSArray<NSDictionary *> *samples = [self effectiveTargetColorSamples];
+    if (samples.count == 0) {
+        return @"先取色";
+    }
+    if (samples.count == 1) {
+        return [self colorHexStringForSample:samples.firstObject];
+    }
+    return [NSString stringWithFormat:@"%@ +%lu点", [self colorHexStringForSample:samples.firstObject], (unsigned long)samples.count - 1];
+}
+
+- (NSString *)targetColorDetailedDescription {
+    NSArray<NSDictionary *> *samples = [self effectiveTargetColorSamples];
+    if (samples.count == 0) {
+        return @"先取色";
+    }
+    if (samples.count == 1) {
+        return [NSString stringWithFormat:@"%@ 继续加点", [self colorHexStringForSample:samples.firstObject]];
+    }
+    return [NSString stringWithFormat:@"已取%lu点 %@ 继续加点", (unsigned long)samples.count, [self colorHexStringForSample:samples.firstObject]];
+}
+
+- (NSArray<NSDictionary *> *)normalizedColorPatternPointsForTask:(NSDictionary *)task {
+    NSArray<NSDictionary *> *samples = [self mutableColorSamplesArrayFromObject:task[@"colorPoints"]];
+    if (samples.count > 0) {
+        NSMutableArray<NSDictionary *> *points = [NSMutableArray arrayWithCapacity:samples.count];
+        NSDictionary *anchor = samples.firstObject;
+        CGFloat anchorX = [anchor[@"x"] respondsToSelector:@selector(doubleValue)] ? [anchor[@"x"] doubleValue] : 0.0;
+        CGFloat anchorY = [anchor[@"y"] respondsToSelector:@selector(doubleValue)] ? [anchor[@"y"] doubleValue] : 0.0;
+        for (NSDictionary *sample in samples) {
+            CGFloat dx = [sample[@"dx"] respondsToSelector:@selector(doubleValue)] ? [sample[@"dx"] doubleValue] : 0.0;
+            CGFloat dy = [sample[@"dy"] respondsToSelector:@selector(doubleValue)] ? [sample[@"dy"] doubleValue] : 0.0;
+            if (![sample[@"dx"] respondsToSelector:@selector(doubleValue)] &&
+                [sample[@"x"] respondsToSelector:@selector(doubleValue)] &&
+                [sample[@"y"] respondsToSelector:@selector(doubleValue)]) {
+                dx = [sample[@"x"] doubleValue] - anchorX;
+                dy = [sample[@"y"] doubleValue] - anchorY;
+            }
+            [points addObject:@{
+                @"dx": @(dx),
+                @"dy": @(dy),
+                @"red": @([sample[@"red"] integerValue]),
+                @"green": @([sample[@"green"] integerValue]),
+                @"blue": @([sample[@"blue"] integerValue]),
+            }];
+        }
+        return points;
+    }
+
+    if (![task[@"colorRed"] respondsToSelector:@selector(integerValue)] ||
+        ![task[@"colorGreen"] respondsToSelector:@selector(integerValue)] ||
+        ![task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
+        return @[];
+    }
+    return @[@{
+        @"dx": @(0.0),
+        @"dy": @(0.0),
+        @"red": @([task[@"colorRed"] integerValue]),
+        @"green": @([task[@"colorGreen"] integerValue]),
+        @"blue": @([task[@"colorBlue"] integerValue]),
+    }];
+}
+
+- (NSString *)colorPatternSummaryForTask:(NSDictionary *)task {
+    NSArray<NSDictionary *> *points = [self normalizedColorPatternPointsForTask:task];
+    if (points.count == 0) {
+        return @"未取色";
+    }
+    NSString *hex = [self colorHexStringForSample:points.firstObject];
+    if (points.count <= 1) {
+        return hex;
+    }
+    return [NSString stringWithFormat:@"%@ +%lu点", hex, (unsigned long)points.count - 1];
 }
 
 - (NSSet *)archiveAllowedClasses {
@@ -1719,15 +1899,67 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return insets;
 }
 
+- (CGFloat)minimumZoomScaleForImageSize:(CGSize)imageSize inBoundsSize:(CGSize)boundsSize {
+    CGFloat width = MAX(1.0, imageSize.width);
+    CGFloat height = MAX(1.0, imageSize.height);
+    CGFloat boundWidth = MAX(1.0, boundsSize.width);
+    CGFloat boundHeight = MAX(1.0, boundsSize.height);
+    CGFloat minZoom = MIN(boundWidth / width, boundHeight / height);
+    return MIN(MAX(minZoom, 0.25), 1.0);
+}
+
+- (void)centerCaptureImageContent {
+    if (!_captureScrollView || !_captureImageView) {
+        return;
+    }
+    CGSize boundsSize = _captureScrollView.bounds.size;
+    CGRect frame = _captureImageView.frame;
+    frame.origin.x = frame.size.width < boundsSize.width ? (boundsSize.width - frame.size.width) * 0.5 : 0.0;
+    frame.origin.y = frame.size.height < boundsSize.height ? (boundsSize.height - frame.size.height) * 0.5 : 0.0;
+    _captureImageView.frame = frame;
+}
+
+- (void)updateCaptureZoomForCurrentBounds {
+    if (!_captureScrollView || !_captureSnapshot) {
+        return;
+    }
+    CGFloat minZoom = [self minimumZoomScaleForImageSize:_captureSnapshot.size inBoundsSize:_captureScrollView.bounds.size];
+    _captureScrollView.minimumZoomScale = minZoom;
+    if (_captureScrollView.zoomScale < minZoom) {
+        _captureScrollView.zoomScale = minZoom;
+    }
+    [self centerCaptureImageContent];
+}
+
+- (void)centerPointPickImageContent {
+    if (!_pointPickScrollView || !_pointPickImageView) {
+        return;
+    }
+    CGSize boundsSize = _pointPickScrollView.bounds.size;
+    CGRect frame = _pointPickImageView.frame;
+    frame.origin.x = frame.size.width < boundsSize.width ? (boundsSize.width - frame.size.width) * 0.5 : 0.0;
+    frame.origin.y = frame.size.height < boundsSize.height ? (boundsSize.height - frame.size.height) * 0.5 : 0.0;
+    _pointPickImageView.frame = frame;
+}
+
+- (void)updatePointPickZoomForCurrentBounds {
+    if (!_pointPickScrollView || !_pointPickSnapshot) {
+        return;
+    }
+    CGFloat minZoom = [self minimumZoomScaleForImageSize:_pointPickSnapshot.size inBoundsSize:_pointPickScrollView.bounds.size];
+    _pointPickScrollView.minimumZoomScale = minZoom;
+    if (_pointPickScrollView.zoomScale < minZoom) {
+        _pointPickScrollView.zoomScale = minZoom;
+    }
+    [self centerPointPickImageContent];
+}
+
 - (void)updateColorPickZoomForCurrentBounds {
     if (!_colorPickScrollView || !_colorPickImage) {
         return;
     }
 
-    CGSize boundsSize = _colorPickScrollView.bounds.size;
-    CGFloat minZoom = MIN(boundsSize.width / MAX(1.0, _colorPickImage.size.width),
-                          boundsSize.height / MAX(1.0, _colorPickImage.size.height));
-    minZoom = MIN(MAX(minZoom, 0.25), 1.0);
+    CGFloat minZoom = [self minimumZoomScaleForImageSize:_colorPickImage.size inBoundsSize:_colorPickScrollView.bounds.size];
     _colorPickScrollView.minimumZoomScale = minZoom;
     if (_colorPickScrollView.zoomScale < minZoom) {
         _colorPickScrollView.zoomScale = minZoom;
@@ -1737,10 +1969,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)relayoutScreenInteractionOverlays {
     CGRect screenBounds = UIScreen.mainScreen.bounds;
+    if (_captureOverlay) {
+        _captureOverlay.frame = screenBounds;
+        _captureScrollView.frame = _captureOverlay.bounds;
+        [self updateCaptureZoomForCurrentBounds];
+        [self layoutCaptureActionButtonsAvoidingSelection];
+    }
     if (_pointPickWindow) {
         _pointPickWindow.frame = screenBounds;
         _pointPickWindow.rootViewController.view.frame = _pointPickWindow.bounds;
         _pointPickOverlay.frame = _pointPickWindow.rootViewController.view.bounds;
+        _pointPickScrollView.frame = _pointPickOverlay.bounds;
+        [self updatePointPickZoomForCurrentBounds];
         [self updatePointPickCursor];
         if (_actionMode == AnClickActionModeSwipe && _hasManualSwipeAnchor) {
             [self showPointPickSwipeStartMarker];
@@ -3143,6 +3383,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkRetryForever = YES;
     _networkTimeout = 8.0;
     _hasTargetColor = NO;
+    _targetColorSamples = [NSMutableArray array];
+    _pendingColorPickSamples = [NSMutableArray array];
     _targetColorRed = 0;
     _targetColorGreen = 0;
     _targetColorBlue = 0;
@@ -3909,13 +4151,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)targetColorSummary {
-    if (!_hasTargetColor) {
+    if ([self effectiveTargetColorSamples].count == 0) {
         return @"截图放大取色";
     }
-    return [NSString stringWithFormat:@"#%02lX%02lX%02lX  重新取色",
-            (long)_targetColorRed,
-            (long)_targetColorGreen,
-            (long)_targetColorBlue];
+    return [self targetColorDetailedDescription];
 }
 
 - (UIColor *)targetUIColor {
@@ -4249,9 +4488,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     if (_actionMode == AnClickActionModeColor) {
-        NSString *targetState = _hasTargetColor
-            ? [NSString stringWithFormat:@"#%02lX%02lX%02lX", (long)_targetColorRed, (long)_targetColorGreen, (long)_targetColorBlue]
-            : @"先取色";
+        NSString *targetState = [self targetColorShortDescription];
         _statusLabel.text = [NSString stringWithFormat:@"识色 %@ 容差%.0f 后%@",
                              targetState,
                              _colorTolerance,
@@ -4447,11 +4684,33 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_captureOverlay removeFromSuperview];
 
     _captureOverlay = [[UIView alloc] initWithFrame:hostWindow.bounds];
-    _captureOverlay.backgroundColor = [UIColor colorWithWhite:0 alpha:0.36];
+    _captureOverlay.backgroundColor = UIColor.blackColor;
     _captureOverlay.userInteractionEnabled = YES;
 
+    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:_captureOverlay.bounds];
+    scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    scrollView.delegate = self;
+    scrollView.backgroundColor = UIColor.blackColor;
+    scrollView.minimumZoomScale = 1.0;
+    scrollView.maximumZoomScale = 8.0;
+    scrollView.showsHorizontalScrollIndicator = NO;
+    scrollView.showsVerticalScrollIndicator = NO;
+    scrollView.panGestureRecognizer.minimumNumberOfTouches = 2;
+    [_captureOverlay addSubview:scrollView];
+    _captureScrollView = scrollView;
+
+    UIImageView *imageView = [[UIImageView alloc] initWithImage:_captureSnapshot];
+    imageView.frame = CGRectMake(0, 0, _captureSnapshot.size.width, _captureSnapshot.size.height);
+    imageView.userInteractionEnabled = YES;
+    [scrollView addSubview:imageView];
+    _captureImageView = imageView;
+    scrollView.contentSize = imageView.bounds.size;
+    [self updateCaptureZoomForCurrentBounds];
+    scrollView.zoomScale = scrollView.minimumZoomScale;
+    [self centerCaptureImageContent];
+
     UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(12, 54, hostWindow.bounds.size.width - 24, 42)];
-    hint.text = @"按住拖动框选模板区域";
+    hint.text = @"双指缩放移动，单指框选模板区域";
     hint.textColor = UIColor.whiteColor;
     hint.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     hint.adjustsFontSizeToFitWidth = YES;
@@ -4464,14 +4723,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _selectionView.layer.borderWidth = 2.0;
     _selectionView.userInteractionEnabled = YES;
     _selectionView.hidden = YES;
-    [_captureOverlay addSubview:_selectionView];
+    [imageView addSubview:_selectionView];
+    [self addCornerHandles];
 
     UIPanGestureRecognizer *movePan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleSelectionPan:)];
+    movePan.maximumNumberOfTouches = 1;
     [_selectionView addGestureRecognizer:movePan];
 
     UIPanGestureRecognizer *drawPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleCaptureDrawPan:)];
+    drawPan.maximumNumberOfTouches = 1;
     drawPan.cancelsTouchesInView = NO;
-    [_captureOverlay addGestureRecognizer:drawPan];
+    [imageView addGestureRecognizer:drawPan];
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleCaptureOverlayTap:)];
     tap.cancelsTouchesInView = NO;
@@ -4481,17 +4743,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     saveButton.tag = 3001;
     saveButton.frame = CGRectMake(16, hostWindow.bounds.size.height - 70, 86, 44);
     saveButton.hidden = YES;
-    saveButton.userInteractionEnabled = NO;
     [_captureOverlay addSubview:saveButton];
 
     UIButton *cancelButton = [self overlayButtonWithTitle:@"取消" action:@selector(cancelTemplateCapture)];
     cancelButton.tag = 3002;
     cancelButton.frame = CGRectMake(hostWindow.bounds.size.width - 102, hostWindow.bounds.size.height - 70, 86, 44);
-    cancelButton.hidden = YES;
-    cancelButton.userInteractionEnabled = NO;
+    cancelButton.hidden = NO;
     [_captureOverlay addSubview:cancelButton];
 
     [hostWindow addSubview:_captureOverlay];
+    [self layoutCaptureActionButtonsAvoidingSelection];
 }
 
 - (UIButton *)overlayButtonWithTitle:(NSString *)title action:(SEL)action {
@@ -4545,7 +4806,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (CGRect)clampedSelectionFrame:(CGRect)frame {
-    CGRect bounds = _captureOverlay.bounds;
+    CGRect bounds = _captureImageView ? _captureImageView.bounds : _captureOverlay.bounds;
     CGFloat minSide = 8.0;
     CGFloat maxWidth = MAX(minSide, bounds.size.width);
     CGFloat maxHeight = MAX(minSide, bounds.size.height);
@@ -4572,8 +4833,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)layoutCaptureActionButtonsAvoidingSelection {
-    if (!_captureOverlay || !_selectionView || _selectionView.hidden) {
-        [self setCaptureActionButtonsHidden:YES];
+    if (!_captureOverlay) {
         return;
     }
 
@@ -4583,30 +4843,44 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
+    UIEdgeInsets safeInsets = [self overlaySafeAreaInsetsForView:_captureOverlay window:_captureOverlay.window];
     CGFloat margin = 14.0;
     CGFloat gap = 12.0;
     CGFloat buttonWidth = 86.0;
     CGFloat buttonHeight = 44.0;
-    CGRect selectionFrame = _selectionView.frame;
+    CGFloat bottomY = _captureOverlay.bounds.size.height - buttonHeight - MAX(margin, safeInsets.bottom + margin);
+    CGFloat cancelX = _captureOverlay.bounds.size.width - safeInsets.right - margin - buttonWidth;
+    cancelButton.frame = CGRectMake(cancelX, bottomY, buttonWidth, buttonHeight);
+
+    if (!_selectionView || _selectionView.hidden) {
+        saveButton.hidden = YES;
+        cancelButton.hidden = NO;
+        return;
+    }
+
+    CGRect selectionFrame = [_selectionView.superview convertRect:_selectionView.frame toView:_captureOverlay];
     CGFloat totalWidth = buttonWidth * 2.0 + gap;
-    CGFloat x = MIN(MAX(CGRectGetMidX(selectionFrame) - totalWidth * 0.5,
-                        margin),
-                    _captureOverlay.bounds.size.width - totalWidth - margin);
+    CGFloat minX = safeInsets.left + margin;
+    CGFloat maxX = _captureOverlay.bounds.size.width - safeInsets.right - totalWidth - margin;
+    CGFloat x = MIN(MAX(CGRectGetMidX(selectionFrame) - totalWidth * 0.5, minX), maxX);
 
     CGFloat belowY = CGRectGetMaxY(selectionFrame) + margin;
     CGFloat aboveY = CGRectGetMinY(selectionFrame) - buttonHeight - margin;
     CGFloat y = 0.0;
-    if (belowY + buttonHeight <= _captureOverlay.bounds.size.height - margin) {
+    CGFloat minY = MAX(margin, safeInsets.top + margin);
+    CGFloat maxY = _captureOverlay.bounds.size.height - buttonHeight - MAX(margin, safeInsets.bottom + margin);
+    if (belowY <= maxY) {
         y = belowY;
-    } else if (aboveY >= margin) {
+    } else if (aboveY >= minY) {
         y = aboveY;
     } else {
-        y = _captureOverlay.bounds.size.height - buttonHeight - margin;
+        y = maxY;
     }
 
     saveButton.frame = CGRectMake(x, y, buttonWidth, buttonHeight);
     cancelButton.frame = CGRectMake(x + buttonWidth + gap, y, buttonWidth, buttonHeight);
-    [self setCaptureActionButtonsHidden:NO];
+    saveButton.hidden = NO;
+    cancelButton.hidden = NO;
 }
 
 - (void)handleCaptureOverlayTap:(UITapGestureRecognizer *)recognizer {
@@ -4629,7 +4903,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    CGPoint point = [recognizer locationInView:_captureOverlay];
+    CGPoint point = [recognizer locationInView:_captureImageView];
     if (recognizer.state == UIGestureRecognizerStateBegan) {
         if (!_selectionView.hidden && CGRectContainsPoint(_selectionView.frame, point)) {
             _captureDrawingSelection = NO;
@@ -4677,12 +4951,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (recognizer.state == UIGestureRecognizerStateBegan) {
         [self setCaptureActionButtonsHidden:YES];
     }
-    CGPoint translation = [recognizer translationInView:_captureOverlay];
+    CGPoint translation = [recognizer translationInView:_captureImageView];
     CGRect frame = _selectionView.frame;
     frame.origin.x += translation.x;
     frame.origin.y += translation.y;
     _selectionView.frame = [self clampedSelectionFrame:frame];
-    [recognizer setTranslation:CGPointZero inView:_captureOverlay];
+    [recognizer setTranslation:CGPointZero inView:_captureImageView];
     if (recognizer.state == UIGestureRecognizerStateEnded ||
         recognizer.state == UIGestureRecognizerStateCancelled ||
         recognizer.state == UIGestureRecognizerStateFailed) {
@@ -4691,7 +4965,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)handleCornerPan:(UIPanGestureRecognizer *)recognizer {
-    CGPoint translation = [recognizer translationInView:_captureOverlay];
+    CGPoint translation = [recognizer translationInView:_captureImageView];
     CGRect frame = _selectionView.frame;
 
     if (recognizer.view.tag == 1) {
@@ -4714,7 +4988,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     _selectionView.frame = [self clampedSelectionFrame:frame];
     [self layoutCornerHandles];
-    [recognizer setTranslation:CGPointZero inView:_captureOverlay];
+    [recognizer setTranslation:CGPointZero inView:_captureImageView];
 }
 
 - (void)handleSelectionPinch:(UIPinchGestureRecognizer *)recognizer {
@@ -4776,6 +5050,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)finishTemplateCapture {
     [_captureOverlay removeFromSuperview];
     _captureOverlay = nil;
+    _captureScrollView = nil;
+    _captureImageView = nil;
     _selectionView = nil;
     _captureSnapshot = nil;
     _captureDrawingSelection = NO;
@@ -5349,7 +5625,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     if (_actionMode == AnClickActionModeColor) {
-        if (!_hasTargetColor) {
+        NSArray<NSDictionary *> *colorSamples = [self effectiveTargetColorSamples];
+        if (colorSamples.count == 0) {
             if (requireComplete) {
                 _statusLabel.text = @"先取目标颜色";
             }
@@ -5358,6 +5635,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         task[@"colorRed"] = @(_targetColorRed);
         task[@"colorGreen"] = @(_targetColorGreen);
         task[@"colorBlue"] = @(_targetColorBlue);
+        task[@"colorPoints"] = colorSamples;
         task[@"colorTolerance"] = @(_colorTolerance);
         task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
         if (_imageActionMode == AnClickActionModeNetwork && ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
@@ -5444,16 +5722,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             subtitle = [subtitle stringByAppendingFormat:@" · 成功后%@请求%@", [self networkMethodForTask:task], url.length > 0 ? @"" : @"未设置"];
         }
     } else if (desc.length == 0 && mode == AnClickActionModeColor) {
-        if ([task[@"colorRed"] respondsToSelector:@selector(integerValue)] &&
-            [task[@"colorGreen"] respondsToSelector:@selector(integerValue)] &&
-            [task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
-            subtitle = [NSString stringWithFormat:@"#%02lX%02lX%02lX",
-                        (long)[task[@"colorRed"] integerValue],
-                        (long)[task[@"colorGreen"] integerValue],
-                        (long)[task[@"colorBlue"] integerValue]];
-        } else {
-            subtitle = @"未取色";
-        }
+        subtitle = [self colorPatternSummaryForTask:task];
         if ([self taskUsesRecognitionNetworkAction:task]) {
             NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
             subtitle = [subtitle stringByAppendingFormat:@" · 成功后%@请求%@", [self networkMethodForTask:task], url.length > 0 ? @"" : @"未设置"];
@@ -5510,14 +5779,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (detail.length == 0 && mode == AnClickActionModeOCR) {
         detail = [self trimmedActionDescription:task[@"ocrText"]];
     } else if (detail.length == 0 && mode == AnClickActionModeColor) {
-        if ([task[@"colorRed"] respondsToSelector:@selector(integerValue)] &&
-            [task[@"colorGreen"] respondsToSelector:@selector(integerValue)] &&
-            [task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
-            detail = [NSString stringWithFormat:@"#%02lX%02lX%02lX",
-                      (long)[task[@"colorRed"] integerValue],
-                      (long)[task[@"colorGreen"] integerValue],
-                      (long)[task[@"colorBlue"] integerValue]];
-        }
+        detail = [self colorPatternSummaryForTask:task];
     } else if (detail.length == 0 && mode == AnClickActionModeNetwork) {
         BOOL requestOnly = [self networkTaskIsOneShot:task];
         detail = [NSString stringWithFormat:@"%@ %@", [self networkMethodForTask:task], requestOnly ? @"仅请求" : @"判断返回"];
@@ -5772,13 +6034,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _hasManualActionPoint[(NSUInteger)AnClickActionModeOCR] = YES;
         }
     } else if (mode == AnClickActionModeColor) {
-        if ([task[@"colorRed"] respondsToSelector:@selector(integerValue)] &&
-            [task[@"colorGreen"] respondsToSelector:@selector(integerValue)] &&
-            [task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
-            _targetColorRed = MIN(255, MAX(0, [task[@"colorRed"] integerValue]));
-            _targetColorGreen = MIN(255, MAX(0, [task[@"colorGreen"] integerValue]));
-            _targetColorBlue = MIN(255, MAX(0, [task[@"colorBlue"] integerValue]));
-            _hasTargetColor = YES;
+        NSArray<NSDictionary *> *savedColorPoints = [self mutableColorSamplesArrayFromObject:task[@"colorPoints"]];
+        if (savedColorPoints.count > 0) {
+            [self applyTargetColorSamples:savedColorPoints];
+        } else if ([task[@"colorRed"] respondsToSelector:@selector(integerValue)] &&
+                   [task[@"colorGreen"] respondsToSelector:@selector(integerValue)] &&
+                   [task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
+            [self applyTargetColorSamples:@[@{
+                @"dx": @(0.0),
+                @"dy": @(0.0),
+                @"red": @([task[@"colorRed"] integerValue]),
+                @"green": @([task[@"colorGreen"] integerValue]),
+                @"blue": @([task[@"colorBlue"] integerValue]),
+            }]];
         }
         NSNumber *toleranceNumber = task[@"colorTolerance"];
         _colorTolerance = toleranceNumber ? MIN(255.0, MAX(0.0, toleranceNumber.doubleValue)) : 18.0;
@@ -6789,9 +7057,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 inWindow:(UIWindow *)hostWindow
            runGeneration:(NSUInteger)runGeneration
               completion:(void (^)(void))completion {
-    if (![task[@"colorRed"] respondsToSelector:@selector(integerValue)] ||
-        ![task[@"colorGreen"] respondsToSelector:@selector(integerValue)] ||
-        ![task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
+    NSArray<NSDictionary *> *colorPoints = [self normalizedColorPatternPointsForTask:task];
+    if (colorPoints.count == 0) {
         _statusLabel.text = @"识色未取色";
         if (completion) {
             completion();
@@ -6799,17 +7066,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    NSInteger red = MIN(255, MAX(0, [task[@"colorRed"] integerValue]));
-    NSInteger green = MIN(255, MAX(0, [task[@"colorGreen"] integerValue]));
-    NSInteger blue = MIN(255, MAX(0, [task[@"colorBlue"] integerValue]));
     double tolerance = [task[@"colorTolerance"] respondsToSelector:@selector(doubleValue)]
         ? MIN(255.0, MAX(0.0, [task[@"colorTolerance"] doubleValue]))
         : 18.0;
     AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+    NSString *patternSummary = [self colorPatternSummaryForTask:task];
     _templateSearchInProgress = YES;
     __weak typeof(self) weakSelf = self;
     dispatch_async([self templateSearchQueue], ^{
-        NSDictionary *match = [AnClickCore findColorMatchWithRed:red green:green blue:blue tolerance:tolerance];
+        NSDictionary *match = [AnClickCore findColorPatternMatchWithPoints:colorPoints tolerance:tolerance];
         dispatch_async(dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) {
@@ -6842,19 +7107,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
             if (actionMode == AnClickActionModeNetwork) {
                 [strongSelf performRecognitionNetworkActionForTask:task runGeneration:runGeneration completion:completion];
-                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 #%02lX%02lX%02lX 网络请求",
-                                                 (long)red,
-                                                 (long)green,
-                                                 (long)blue];
+                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ 网络请求", patternSummary];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 return;
             }
             CGPoint actionPoint = pointValue.CGPointValue;
             [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
-            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 #%02lX%02lX%02lX %.0f,%.0f",
-                                             (long)red,
-                                             (long)green,
-                                             (long)blue,
+            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ %.0f,%.0f",
+                                             patternSummary,
                                              actionPoint.x,
                                              actionPoint.y];
             [strongSelf showToast:strongSelf->_statusLabel.text];
@@ -6920,9 +7180,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return YES;
     }
     if (mode == AnClickActionModeColor) {
-        if (![task[@"colorRed"] respondsToSelector:@selector(integerValue)] ||
-            ![task[@"colorGreen"] respondsToSelector:@selector(integerValue)] ||
-            ![task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
+        if ([self normalizedColorPatternPointsForTask:task].count == 0) {
             _statusLabel.text = @"任务未取色";
             return NO;
         }
@@ -7241,38 +7499,81 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     });
 }
 
+- (void)clearColorPickPixelData {
+    _colorPickPixelData = nil;
+    _colorPickPixelWidth = 0;
+    _colorPickPixelHeight = 0;
+    _colorPickPixelBytesPerRow = 0;
+}
+
+- (BOOL)prepareColorPickPixelDataForImage:(UIImage *)image {
+    CGImageRef imageRef = image.CGImage;
+    if (!imageRef) {
+        [self clearColorPickPixelData];
+        return NO;
+    }
+
+    size_t width = CGImageGetWidth(imageRef);
+    size_t height = CGImageGetHeight(imageRef);
+    if (width == 0 || height == 0) {
+        [self clearColorPickPixelData];
+        return NO;
+    }
+
+    size_t bytesPerRow = width * 4;
+    NSMutableData *pixelData = [NSMutableData dataWithLength:height * bytesPerRow];
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    if (!colorSpace) {
+        [self clearColorPickPixelData];
+        return NO;
+    }
+
+    CGContextRef context = CGBitmapContextCreate(pixelData.mutableBytes,
+                                                 width,
+                                                 height,
+                                                 8,
+                                                 bytesPerRow,
+                                                 colorSpace,
+                                                 kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    if (!context) {
+        CGColorSpaceRelease(colorSpace);
+        [self clearColorPickPixelData];
+        return NO;
+    }
+
+    CGContextTranslateCTM(context, 0, (CGFloat)height);
+    CGContextScaleCTM(context, 1.0, -1.0);
+    CGContextDrawImage(context, CGRectMake(0, 0, width, height), imageRef);
+    CGContextRelease(context);
+    CGColorSpaceRelease(colorSpace);
+
+    _colorPickPixelData = pixelData;
+    _colorPickPixelWidth = width;
+    _colorPickPixelHeight = height;
+    _colorPickPixelBytesPerRow = bytesPerRow;
+    return YES;
+}
+
 - (BOOL)sampleColorAtImagePoint:(CGPoint)point image:(UIImage *)image red:(NSInteger *)red green:(NSInteger *)green blue:(NSInteger *)blue {
     CGImageRef imageRef = image.CGImage;
     if (!imageRef) {
         return NO;
     }
 
-    size_t width = CGImageGetWidth(imageRef);
-    size_t height = CGImageGetHeight(imageRef);
-    CGFloat scale = image.scale > 0 ? image.scale : UIScreen.mainScreen.scale;
-    NSInteger pixelX = MIN(MAX((NSInteger)floor(point.x * scale), 0), (NSInteger)width - 1);
-    NSInteger pixelY = MIN(MAX((NSInteger)floor(point.y * scale), 0), (NSInteger)height - 1);
-    unsigned char pixel[4] = {0, 0, 0, 0};
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-    if (!colorSpace) {
-        return NO;
-    }
-    CGContextRef context = CGBitmapContextCreate(pixel,
-                                                 1,
-                                                 1,
-                                                 8,
-                                                 4,
-                                                 colorSpace,
-                                                 kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
-    if (!context) {
-        CGColorSpaceRelease(colorSpace);
-        return NO;
+    if (!_colorPickPixelData ||
+        image != _colorPickImage ||
+        _colorPickPixelWidth != CGImageGetWidth(imageRef) ||
+        _colorPickPixelHeight != CGImageGetHeight(imageRef)) {
+        if (![self prepareColorPickPixelDataForImage:image]) {
+            return NO;
+        }
     }
 
-    CGContextTranslateCTM(context, -(CGFloat)pixelX, -(CGFloat)pixelY);
-    CGContextDrawImage(context, CGRectMake(0, 0, width, height), imageRef);
-    CGContextRelease(context);
-    CGColorSpaceRelease(colorSpace);
+    CGFloat scale = image.scale > 0 ? image.scale : UIScreen.mainScreen.scale;
+    NSInteger pixelX = MIN(MAX((NSInteger)floor(point.x * scale), 0), (NSInteger)_colorPickPixelWidth - 1);
+    NSInteger pixelY = MIN(MAX((NSInteger)floor(point.y * scale), 0), (NSInteger)_colorPickPixelHeight - 1);
+    const unsigned char *bytes = (const unsigned char *)_colorPickPixelData.bytes;
+    const unsigned char *pixel = bytes + pixelY * _colorPickPixelBytesPerRow + pixelX * 4;
 
     if (red) {
         *red = pixel[0];
@@ -7284,6 +7585,97 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         *blue = pixel[2];
     }
     return YES;
+}
+
+- (void)removeColorPickMarkers {
+    if (!_colorPickImageView) {
+        return;
+    }
+    for (NSUInteger index = 0; index < AnClickColorPickMaxSamples; index++) {
+        [[_colorPickImageView viewWithTag:AnClickColorPickMarkerTagBase + (NSInteger)index] removeFromSuperview];
+    }
+}
+
+- (void)rebuildColorPickMarkers {
+    if (!_colorPickImageView) {
+        return;
+    }
+
+    [self removeColorPickMarkers];
+    CGFloat zoomScale = MAX(0.01, _colorPickScrollView.zoomScale);
+    for (NSUInteger index = 0; index < _pendingColorPickSamples.count && index < AnClickColorPickMaxSamples; index++) {
+        NSDictionary *sample = _pendingColorPickSamples[index];
+        if (![sample[@"x"] respondsToSelector:@selector(doubleValue)] ||
+            ![sample[@"y"] respondsToSelector:@selector(doubleValue)]) {
+            continue;
+        }
+
+        CGFloat markerSize = (index == 0 ? 12.0 : 10.0) / zoomScale;
+        UIView *marker = [[UIView alloc] initWithFrame:CGRectMake(0, 0, markerSize, markerSize)];
+        marker.tag = AnClickColorPickMarkerTagBase + (NSInteger)index;
+        marker.userInteractionEnabled = NO;
+        marker.backgroundColor = UIColor.clearColor;
+        marker.layer.cornerRadius = markerSize * 0.5;
+        marker.layer.borderWidth = MAX(0.8, 1.2 / zoomScale);
+        marker.layer.borderColor = (index == 0 ? [self themeHighlightColor] : UIColor.systemGreenColor).CGColor;
+        marker.layer.shadowColor = UIColor.blackColor.CGColor;
+        marker.layer.shadowOpacity = 0.28;
+        marker.layer.shadowRadius = 1.0 / zoomScale;
+        marker.layer.shadowOffset = CGSizeZero;
+        marker.center = CGPointMake([sample[@"x"] doubleValue], [sample[@"y"] doubleValue]);
+
+        CGFloat dotSize = MAX(2.0, 3.0 / zoomScale);
+        UIView *dot = [[UIView alloc] initWithFrame:CGRectMake((markerSize - dotSize) * 0.5,
+                                                               (markerSize - dotSize) * 0.5,
+                                                               dotSize,
+                                                               dotSize)];
+        dot.backgroundColor = index == 0 ? [self themeHighlightColor] : UIColor.systemGreenColor;
+        dot.layer.cornerRadius = dotSize * 0.5;
+        dot.userInteractionEnabled = NO;
+        [marker addSubview:dot];
+        [_colorPickImageView addSubview:marker];
+    }
+}
+
+- (void)refreshColorPickInfoLabelWithLastSample:(NSDictionary *)lastSample {
+    NSDictionary *sample = lastSample ?: _pendingColorPickSamples.lastObject;
+    if (!_colorPickInfoLabel) {
+        return;
+    }
+    if (!sample) {
+        _colorPickInfoLabel.text = @"首点为点击点 再点可加校验点";
+        _colorPickSwatchView.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+        return;
+    }
+    if (![sample[@"x"] respondsToSelector:@selector(doubleValue)] ||
+        ![sample[@"y"] respondsToSelector:@selector(doubleValue)]) {
+        _colorPickInfoLabel.text = @"已有旧颜色 点一下重设首点";
+        NSInteger red = [sample[@"red"] integerValue];
+        NSInteger green = [sample[@"green"] integerValue];
+        NSInteger blue = [sample[@"blue"] integerValue];
+        _colorPickSwatchView.backgroundColor = [UIColor colorWithRed:red / 255.0
+                                                               green:green / 255.0
+                                                                blue:blue / 255.0
+                                                               alpha:1.0];
+        return;
+    }
+
+    NSInteger red = [sample[@"red"] integerValue];
+    NSInteger green = [sample[@"green"] integerValue];
+    NSInteger blue = [sample[@"blue"] integerValue];
+    _colorPickSwatchView.backgroundColor = [UIColor colorWithRed:red / 255.0
+                                                           green:green / 255.0
+                                                            blue:blue / 255.0
+                                                           alpha:1.0];
+    NSString *pointRole = _pendingColorPickSamples.count <= 1 ? @"点击点" : [NSString stringWithFormat:@"校验点%lu", (unsigned long)_pendingColorPickSamples.count - 1];
+    _colorPickInfoLabel.text = [NSString stringWithFormat:@"已取%lu点 %@  X %.0f Y %.0f  #%02lX%02lX%02lX",
+                                (unsigned long)_pendingColorPickSamples.count,
+                                pointRole,
+                                [sample[@"x"] doubleValue],
+                                [sample[@"y"] doubleValue],
+                                (long)red,
+                                (long)green,
+                                (long)blue];
 }
 
 - (void)beginColorPicking {
@@ -7314,7 +7706,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_colorPickWindow removeFromSuperview];
     _colorPickWindow.hidden = YES;
     _colorPickImage = image;
+    _pendingColorPickSamples = [[self mutableColorSamplesArrayFromObject:_targetColorSamples] mutableCopy];
     _hasPendingColorPickPoint = NO;
+    if (![self prepareColorPickPixelDataForImage:image]) {
+        _statusLabel.text = @"取色初始化失败";
+        [self restorePanelAfterExternalTap];
+        return;
+    }
 
     _colorPickWindow = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     if (@available(iOS 13.0, *)) {
@@ -7400,6 +7798,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [toolbar addSubview:cancelButton];
 
     [self layoutColorPickToolbar];
+    [self rebuildColorPickMarkers];
+    NSDictionary *lastSample = _pendingColorPickSamples.lastObject;
+    if ([lastSample[@"x"] respondsToSelector:@selector(doubleValue)] &&
+        [lastSample[@"y"] respondsToSelector:@selector(doubleValue)]) {
+        _pendingColorPickPoint = CGPointMake([lastSample[@"x"] doubleValue], [lastSample[@"y"] doubleValue]);
+        _pendingColorRed = [lastSample[@"red"] integerValue];
+        _pendingColorGreen = [lastSample[@"green"] integerValue];
+        _pendingColorBlue = [lastSample[@"blue"] integerValue];
+        _hasPendingColorPickPoint = YES;
+        [self updateColorPickCursorAtImagePoint:_pendingColorPickPoint];
+    } else {
+        _hasPendingColorPickPoint = NO;
+    }
+    [self refreshColorPickInfoLabelWithLastSample:lastSample];
     _colorPickWindow.hidden = NO;
     _statusLabel.text = @"截图取色";
 }
@@ -7452,6 +7864,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (UIView *)viewForZoomingInScrollView:(UIScrollView *)scrollView {
+    if (scrollView == _captureScrollView) {
+        return _captureImageView;
+    }
+    if (scrollView == _pointPickScrollView) {
+        return _pointPickImageView;
+    }
     if (scrollView == _colorPickScrollView) {
         return _colorPickImageView;
     }
@@ -7459,11 +7877,38 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)scrollViewDidZoom:(UIScrollView *)scrollView {
+    if (scrollView == _captureScrollView) {
+        [self centerCaptureImageContent];
+        [self layoutCaptureActionButtonsAvoidingSelection];
+        return;
+    }
+    if (scrollView == _pointPickScrollView) {
+        [self centerPointPickImageContent];
+        if (_hasPendingPointPickPoint) {
+            [self updatePointPickCursor];
+        }
+        if (_actionMode == AnClickActionModeSwipe && _hasManualSwipeAnchor) {
+            [self showPointPickSwipeStartMarker];
+        }
+        return;
+    }
     if (scrollView == _colorPickScrollView) {
         [self centerColorPickImageContent];
         if (_hasPendingColorPickPoint) {
             [self updateColorPickCursorAtImagePoint:_pendingColorPickPoint];
         }
+        [self rebuildColorPickMarkers];
+    }
+}
+
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    if (scrollView == _captureScrollView) {
+        [self layoutCaptureActionButtonsAvoidingSelection];
+        return;
+    }
+    if (scrollView == _pointPickScrollView) {
+        [self layoutPointPickToolbar];
+        return;
     }
 }
 
@@ -7498,19 +7943,39 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
+    NSDictionary *existingAnchor = _pendingColorPickSamples.firstObject;
+    if (existingAnchor &&
+        ![existingAnchor[@"x"] respondsToSelector:@selector(doubleValue)] &&
+        ![existingAnchor[@"y"] respondsToSelector:@selector(doubleValue)]) {
+        [_pendingColorPickSamples removeAllObjects];
+    }
+
+    if (_pendingColorPickSamples.count >= AnClickColorPickMaxSamples) {
+        _colorPickInfoLabel.text = [NSString stringWithFormat:@"最多支持%lu点", (unsigned long)AnClickColorPickMaxSamples];
+        return;
+    }
+
+    NSDictionary *anchorSample = _pendingColorPickSamples.firstObject;
+    CGFloat anchorX = [anchorSample[@"x"] respondsToSelector:@selector(doubleValue)] ? [anchorSample[@"x"] doubleValue] : point.x;
+    CGFloat anchorY = [anchorSample[@"y"] respondsToSelector:@selector(doubleValue)] ? [anchorSample[@"y"] doubleValue] : point.y;
+    NSDictionary *sample = @{
+        @"x": @(point.x),
+        @"y": @(point.y),
+        @"dx": @(_pendingColorPickSamples.count == 0 ? 0.0 : point.x - anchorX),
+        @"dy": @(_pendingColorPickSamples.count == 0 ? 0.0 : point.y - anchorY),
+        @"red": @(red),
+        @"green": @(green),
+        @"blue": @(blue),
+    };
+    [_pendingColorPickSamples addObject:sample];
     _pendingColorPickPoint = point;
     _pendingColorRed = red;
     _pendingColorGreen = green;
     _pendingColorBlue = blue;
     _hasPendingColorPickPoint = YES;
     [self updateColorPickCursorAtImagePoint:point];
-    _colorPickSwatchView.backgroundColor = [UIColor colorWithRed:red / 255.0 green:green / 255.0 blue:blue / 255.0 alpha:1.0];
-    _colorPickInfoLabel.text = [NSString stringWithFormat:@"X %.0f  Y %.0f  #%02lX%02lX%02lX",
-                                point.x,
-                                point.y,
-                                (long)red,
-                                (long)green,
-                                (long)blue];
+    [self rebuildColorPickMarkers];
+    [self refreshColorPickInfoLabelWithLastSample:sample];
 }
 
 - (void)finishColorPickingOverlay {
@@ -7523,19 +7988,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _colorPickInfoLabel = nil;
     _colorPickSwatchView = nil;
     _colorPickImage = nil;
+    _pendingColorPickSamples = [NSMutableArray array];
     _hasPendingColorPickPoint = NO;
+    [self clearColorPickPixelData];
     [self restorePanelAfterExternalTap];
 }
 
 - (void)confirmColorPicking {
-    if (!_hasPendingColorPickPoint) {
+    if (_pendingColorPickSamples.count == 0) {
         _colorPickInfoLabel.text = @"先点选颜色";
         return;
     }
-    _targetColorRed = _pendingColorRed;
-    _targetColorGreen = _pendingColorGreen;
-    _targetColorBlue = _pendingColorBlue;
-    _hasTargetColor = YES;
+    [self applyTargetColorSamples:_pendingColorPickSamples];
     [self finishColorPickingOverlay];
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
@@ -7583,19 +8047,78 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+        UIImage *image = [AnClickCore captureCurrentWindowImage];
+        if (!image.CGImage) {
+            strongSelf->_statusLabel.text = @"截图失败";
+            [strongSelf restorePanelAfterExternalTap];
+            return;
+        }
+        [strongSelf showPointPickOverlayWithImage:image hostWindow:hostWindow];
+    });
+}
+
+- (void)showPointPickOverlayWithImage:(UIImage *)image hostWindow:(UIWindow *)hostWindow {
     [_pointPickOverlay removeFromSuperview];
     _pointPickWindow.hidden = YES;
+    _pointPickSnapshot = image;
+    _pointPickHostWindow = hostWindow;
+
     _pointPickWindow = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     if (@available(iOS 13.0, *)) {
         _pointPickWindow.windowScene = hostWindow.windowScene ?: [self activeWindowScene];
     }
     _pointPickWindow.windowLevel = UIWindowLevelAlert + 2000;
-    _pointPickWindow.backgroundColor = UIColor.clearColor;
+    _pointPickWindow.backgroundColor = UIColor.blackColor;
     _pointPickWindow.rootViewController = [[UIViewController alloc] init];
+    _pointPickWindow.rootViewController.view.frame = _pointPickWindow.bounds;
+    _pointPickWindow.rootViewController.view.backgroundColor = UIColor.blackColor;
 
-    UIView *overlay = [[UIView alloc] initWithFrame:_pointPickWindow.bounds];
-    overlay.backgroundColor = UIColor.clearColor;
+    UIView *overlay = [[UIView alloc] initWithFrame:_pointPickWindow.rootViewController.view.bounds];
+    overlay.backgroundColor = UIColor.blackColor;
     overlay.userInteractionEnabled = YES;
+    [_pointPickWindow.rootViewController.view addSubview:overlay];
+    _pointPickOverlay = overlay;
+
+    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:overlay.bounds];
+    scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    scrollView.delegate = self;
+    scrollView.backgroundColor = UIColor.blackColor;
+    scrollView.minimumZoomScale = 1.0;
+    scrollView.maximumZoomScale = 8.0;
+    scrollView.showsHorizontalScrollIndicator = NO;
+    scrollView.showsVerticalScrollIndicator = NO;
+    scrollView.panGestureRecognizer.minimumNumberOfTouches = 2;
+    [overlay addSubview:scrollView];
+    _pointPickScrollView = scrollView;
+
+    UIImageView *imageView = [[UIImageView alloc] initWithImage:image];
+    imageView.frame = CGRectMake(0, 0, image.size.width, image.size.height);
+    imageView.userInteractionEnabled = YES;
+    [scrollView addSubview:imageView];
+    _pointPickImageView = imageView;
+    scrollView.contentSize = imageView.bounds.size;
+    [self updatePointPickZoomForCurrentBounds];
+    scrollView.zoomScale = scrollView.minimumZoomScale;
+    [self centerPointPickImageContent];
+
+    UIEdgeInsets safeInsets = [self overlaySafeAreaInsetsForView:overlay window:_pointPickWindow];
+    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(12,
+                                                              safeInsets.top + 12.0,
+                                                              overlay.bounds.size.width - 24.0,
+                                                              38.0)];
+    hint.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    hint.text = @"双指缩放移动，单指点选或微调";
+    hint.textColor = UIColor.whiteColor;
+    hint.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    hint.adjustsFontSizeToFitWidth = YES;
+    hint.textAlignment = NSTextAlignmentCenter;
+    [overlay addSubview:hint];
 
     CGFloat cursorSize = 32.0;
     UIView *cursor = [[UIView alloc] initWithFrame:CGRectMake(0, 0, cursorSize, cursorSize)];
@@ -7605,27 +8128,31 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     cursor.layer.borderColor = UIColor.systemYellowColor.CGColor;
     cursor.userInteractionEnabled = NO;
     UIView *horizontal = [[UIView alloc] initWithFrame:CGRectMake(6, cursorSize * 0.5 - 0.5, cursorSize - 12, 1)];
+    horizontal.tag = 1;
     horizontal.backgroundColor = UIColor.systemYellowColor;
     horizontal.userInteractionEnabled = NO;
     [cursor addSubview:horizontal];
     UIView *vertical = [[UIView alloc] initWithFrame:CGRectMake(cursorSize * 0.5 - 0.5, 6, 1, cursorSize - 12)];
+    vertical.tag = 2;
     vertical.backgroundColor = UIColor.systemYellowColor;
     vertical.userInteractionEnabled = NO;
     [cursor addSubview:vertical];
     UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(cursorSize * 0.5 - 2, cursorSize * 0.5 - 2, 4, 4)];
+    dot.tag = 3;
     dot.backgroundColor = UIColor.systemRedColor;
     dot.layer.cornerRadius = 2;
     dot.userInteractionEnabled = NO;
     [cursor addSubview:dot];
-    [overlay addSubview:cursor];
+    [imageView addSubview:cursor];
     _pointCursorView = cursor;
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingTap:)];
     tap.cancelsTouchesInView = NO;
-    [overlay addGestureRecognizer:tap];
+    [imageView addGestureRecognizer:tap];
     UIPanGestureRecognizer *overlayPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingOverlayPan:)];
+    overlayPan.maximumNumberOfTouches = 1;
     overlayPan.cancelsTouchesInView = NO;
-    [overlay addGestureRecognizer:overlayPan];
+    [imageView addGestureRecognizer:overlayPan];
 
     UIView *toolbar = [[UIView alloc] initWithFrame:CGRectZero];
     toolbar.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.72];
@@ -7651,8 +8178,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     cancelButton.tag = 1002;
     [toolbar addSubview:cancelButton];
 
-    [_pointPickWindow.rootViewController.view addSubview:overlay];
-    _pointPickOverlay = overlay;
     _pendingPointPickPoint = [self initialPointPickPointInOverlay:overlay];
     _hasPendingPointPickPoint = YES;
     if (_actionMode == AnClickActionModeSwipe && _pickingSwipeEndPoint && _hasManualSwipeAnchor) {
@@ -7664,36 +8189,83 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (CGPoint)initialPointPickPointInOverlay:(UIView *)overlay {
-    if (_actionMode == AnClickActionModeSwipe && _pickingSwipeEndPoint && _hasManualSwipeAnchor) {
-        return [self clampedPointPickPoint:_manualSwipeAnchor inOverlay:overlay];
+    UIWindow *hostWindow = _pointPickHostWindow;
+    if (_actionMode == AnClickActionModeSwipe && _pickingSwipeEndPoint && _hasManualSwipeAnchor && hostWindow) {
+        return [self clampedPointPickPoint:[hostWindow convertPoint:_manualSwipeAnchor fromWindow:nil] inOverlay:overlay];
     }
-    if ([self hasManualPointForMode:_actionMode]) {
-        return [self clampedPointPickPoint:_manualActionPoints[(NSUInteger)_actionMode] inOverlay:overlay];
+    if ([self hasManualPointForMode:_actionMode] && hostWindow) {
+        return [self clampedPointPickPoint:[hostWindow convertPoint:_manualActionPoints[(NSUInteger)_actionMode] fromWindow:nil]
+                                  inOverlay:overlay];
     }
-    return CGPointMake(CGRectGetMidX(overlay.bounds), CGRectGetMidY(overlay.bounds));
+    CGRect bounds = _pointPickImageView ? _pointPickImageView.bounds : (overlay ? overlay.bounds : CGRectMake(0, 0, _pointPickSnapshot.size.width, _pointPickSnapshot.size.height));
+    return CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds));
+}
+
+- (CGPoint)pointPickScreenPointFromImagePoint:(CGPoint)point {
+    UIWindow *hostWindow = _pointPickHostWindow ?: [self hostWindow];
+    if (!hostWindow) {
+        return point;
+    }
+    return [hostWindow convertPoint:point toWindow:nil];
+}
+
+- (CGPoint)pointPickImagePointFromScreenPoint:(CGPoint)point {
+    UIWindow *hostWindow = _pointPickHostWindow ?: [self hostWindow];
+    if (!hostWindow) {
+        return point;
+    }
+    return [hostWindow convertPoint:point fromWindow:nil];
 }
 
 - (CGPoint)clampedPointPickPoint:(CGPoint)point inOverlay:(UIView *)overlay {
-    CGFloat margin = 0;
-    point.x = MIN(MAX(point.x, margin), overlay.bounds.size.width - margin);
-    point.y = MIN(MAX(point.y, margin), overlay.bounds.size.height - margin);
+    CGRect bounds = _pointPickImageView ? _pointPickImageView.bounds : (overlay ? overlay.bounds : CGRectMake(0, 0, _pointPickSnapshot.size.width, _pointPickSnapshot.size.height));
+    point.x = MIN(MAX(point.x, 0.0), bounds.size.width);
+    point.y = MIN(MAX(point.y, 0.0), bounds.size.height);
     return point;
 }
 
 - (void)updatePointPickCursor {
-    if (!_pointPickOverlay || !_pointCursorView || !_hasPendingPointPickPoint) {
+    if (!_pointPickImageView || !_pointCursorView || !_hasPendingPointPickPoint) {
         return;
     }
     _pendingPointPickPoint = [self clampedPointPickPoint:_pendingPointPickPoint inOverlay:_pointPickOverlay];
+
+    CGFloat zoomScale = MAX(0.01, _pointPickScrollView.zoomScale);
+    CGFloat cursorSize = 28.0 / zoomScale;
+    _pointCursorView.bounds = CGRectMake(0, 0, cursorSize, cursorSize);
     _pointCursorView.center = _pendingPointPickPoint;
+    _pointCursorView.layer.cornerRadius = cursorSize * 0.5;
+    _pointCursorView.layer.borderWidth = MAX(0.8, 1.2 / zoomScale);
+
+    UIView *horizontal = [_pointCursorView viewWithTag:1];
+    UIView *vertical = [_pointCursorView viewWithTag:2];
+    UIView *dot = [_pointCursorView viewWithTag:3];
+    CGFloat lineInset = 5.0 / zoomScale;
+    CGFloat lineThickness = MAX(0.8, 1.0 / zoomScale);
+    horizontal.frame = CGRectMake(lineInset,
+                                  cursorSize * 0.5 - lineThickness * 0.5,
+                                  MAX(0.0, cursorSize - lineInset * 2.0),
+                                  lineThickness);
+    vertical.frame = CGRectMake(cursorSize * 0.5 - lineThickness * 0.5,
+                                lineInset,
+                                lineThickness,
+                                MAX(0.0, cursorSize - lineInset * 2.0));
+    CGFloat dotSize = MAX(2.0, 4.0 / zoomScale);
+    dot.frame = CGRectMake((cursorSize - dotSize) * 0.5,
+                           (cursorSize - dotSize) * 0.5,
+                           dotSize,
+                           dotSize);
+    dot.layer.cornerRadius = dotSize * 0.5;
+
+    CGPoint screenPoint = [self pointPickScreenPointFromImagePoint:_pendingPointPickPoint];
     BOOL pickingCustomClickPoint = _actionMode == AnClickActionModeImage || _actionMode == AnClickActionModeOCR;
     NSString *stage = (_actionMode == AnClickActionModeSwipe)
         ? (_pickingSwipeEndPoint ? @"终点" : @"起点")
         : (pickingCustomClickPoint ? @"点击点" : [self currentActionName]);
     _pointCoordinateLabel.text = [NSString stringWithFormat:@"%@  X %.0f  Y %.0f",
                                   stage,
-                                  _pendingPointPickPoint.x,
-                                  _pendingPointPickPoint.y];
+                                  screenPoint.x,
+                                  screenPoint.y];
     [self layoutPointPickToolbar];
 }
 
@@ -7726,8 +8298,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat availableWidth = MAX(1.0, _pointPickOverlay.bounds.size.width - safeInsets.left - safeInsets.right - margin * 2.0);
     CGFloat toolbarWidth = MIN(availableWidth, 360.0);
     CGFloat x = safeInsets.left + margin + (availableWidth - toolbarWidth) * 0.5;
-    BOOL cursorNearBottom = _hasPendingPointPickPoint &&
-        _pendingPointPickPoint.y > bottomY - 20.0;
+    CGPoint overlayPoint = _hasPendingPointPickPoint && _pointPickImageView
+        ? [_pointPickImageView convertPoint:_pendingPointPickPoint toView:_pointPickOverlay]
+        : CGPointMake(CGRectGetMidX(_pointPickOverlay.bounds), CGRectGetMidY(_pointPickOverlay.bounds));
+    BOOL cursorNearBottom = overlayPoint.y > bottomY - 20.0;
     CGFloat y = cursorNearBottom ? topY : bottomY;
     _pointPickToolbar.frame = CGRectMake(x, y, toolbarWidth, toolbarHeight);
 
@@ -7746,38 +8320,51 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)showPointPickSwipeStartMarker {
-    if (!_pointPickOverlay || !_hasManualSwipeAnchor) {
+    if (!_pointPickImageView || !_hasManualSwipeAnchor) {
         return;
     }
 
-    [[_pointPickOverlay viewWithTag:2201] removeFromSuperview];
-    CGFloat size = 24.0;
+    [[_pointPickImageView viewWithTag:2201] removeFromSuperview];
+    CGFloat zoomScale = MAX(0.01, _pointPickScrollView.zoomScale);
+    CGFloat size = 22.0 / zoomScale;
     UIView *marker = [[UIView alloc] initWithFrame:CGRectMake(0, 0, size, size)];
     marker.tag = 2201;
-    marker.center = [self clampedPointPickPoint:_manualSwipeAnchor inOverlay:_pointPickOverlay];
+    marker.center = [self clampedPointPickPoint:[self pointPickImagePointFromScreenPoint:_manualSwipeAnchor] inOverlay:_pointPickOverlay];
     marker.userInteractionEnabled = NO;
     marker.backgroundColor = UIColor.clearColor;
     marker.layer.cornerRadius = size * 0.5;
-    marker.layer.borderWidth = 2.0;
+    marker.layer.borderWidth = MAX(1.0, 1.8 / zoomScale);
     marker.layer.borderColor = UIColor.systemGreenColor.CGColor;
 
-    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(size * 0.5 - 2, size * 0.5 - 2, 4, 4)];
+    CGFloat dotSize = MAX(2.0, 4.0 / zoomScale);
+    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake((size - dotSize) * 0.5,
+                                                           (size - dotSize) * 0.5,
+                                                           dotSize,
+                                                           dotSize)];
     dot.backgroundColor = UIColor.systemGreenColor;
-    dot.layer.cornerRadius = 2;
+    dot.layer.cornerRadius = dotSize * 0.5;
     dot.userInteractionEnabled = NO;
     [marker addSubview:dot];
-    [_pointPickOverlay insertSubview:marker belowSubview:_pointCursorView];
+    if (_pointCursorView) {
+        [_pointPickImageView insertSubview:marker belowSubview:_pointCursorView];
+    } else {
+        [_pointPickImageView addSubview:marker];
+    }
 }
 
 - (void)finishPointPickingOverlay {
     [_pointPickOverlay removeFromSuperview];
     _pointPickOverlay = nil;
+    _pointPickScrollView = nil;
+    _pointPickImageView = nil;
     _pointCursorView = nil;
     _pointPickToolbar = nil;
     _pointCoordinateLabel = nil;
+    _pointPickSnapshot = nil;
     _hasPendingPointPickPoint = NO;
     _pointPickWindow.hidden = YES;
     _pointPickWindow = nil;
+    _pointPickHostWindow = nil;
     _pickingSwipeEndPoint = NO;
     [self restorePanelAfterExternalTap];
 }
@@ -7788,68 +8375,56 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)handlePointPickingTap:(UITapGestureRecognizer *)recognizer {
-    if (recognizer.state != UIGestureRecognizerStateEnded) {
+    if (recognizer.state != UIGestureRecognizerStateEnded || !_pointPickImageView) {
         return;
     }
-    CGPoint location = [recognizer locationInView:_pointPickOverlay];
-    if ([self pointPickLocationHitsToolbar:location]) {
-        return;
-    }
+    CGPoint location = [recognizer locationInView:_pointPickImageView];
     _pendingPointPickPoint = [self clampedPointPickPoint:location inOverlay:_pointPickOverlay];
     _hasPendingPointPickPoint = YES;
     [self updatePointPickCursor];
 }
 
 - (void)handlePointPickingOverlayPan:(UIPanGestureRecognizer *)recognizer {
-    if (!_pointPickOverlay) {
+    if (!_pointPickImageView) {
         return;
     }
     if (recognizer.state == UIGestureRecognizerStateBegan) {
-        _pointPickPanStartedOnToolbar = [self pointPickLocationHitsToolbar:[recognizer locationInView:_pointPickOverlay]];
-        [recognizer setTranslation:CGPointZero inView:_pointPickOverlay];
-        return;
-    }
-    if (_pointPickPanStartedOnToolbar) {
-        if (recognizer.state == UIGestureRecognizerStateEnded ||
-            recognizer.state == UIGestureRecognizerStateCancelled ||
-            recognizer.state == UIGestureRecognizerStateFailed) {
-            _pointPickPanStartedOnToolbar = NO;
-        }
+        [recognizer setTranslation:CGPointZero inView:_pointPickImageView];
         return;
     }
     if (recognizer.state == UIGestureRecognizerStateChanged ||
         recognizer.state == UIGestureRecognizerStateEnded) {
-        CGPoint translation = [recognizer translationInView:_pointPickOverlay];
+        CGPoint translation = [recognizer translationInView:_pointPickImageView];
         _pendingPointPickPoint = [self clampedPointPickPoint:CGPointMake(_pendingPointPickPoint.x + translation.x,
                                                                          _pendingPointPickPoint.y + translation.y)
                                                   inOverlay:_pointPickOverlay];
         _hasPendingPointPickPoint = YES;
         [self updatePointPickCursor];
-        [recognizer setTranslation:CGPointZero inView:_pointPickOverlay];
+        [recognizer setTranslation:CGPointZero inView:_pointPickImageView];
     }
 }
 
 - (void)handlePointCursorPan:(UIPanGestureRecognizer *)recognizer {
-    if (!_pointPickOverlay) {
+    if (!_pointPickImageView) {
         return;
     }
-    CGPoint translation = [recognizer translationInView:_pointPickOverlay];
+    CGPoint translation = [recognizer translationInView:_pointPickImageView];
     _pendingPointPickPoint = [self clampedPointPickPoint:CGPointMake(_pendingPointPickPoint.x + translation.x,
                                                                      _pendingPointPickPoint.y + translation.y)
                                               inOverlay:_pointPickOverlay];
     _hasPendingPointPickPoint = YES;
     [self updatePointPickCursor];
-    [recognizer setTranslation:CGPointZero inView:_pointPickOverlay];
+    [recognizer setTranslation:CGPointZero inView:_pointPickImageView];
 }
 
 - (void)confirmPointPicking {
-    UIWindow *hostWindow = [self hostWindow];
+    UIWindow *hostWindow = _pointPickHostWindow ?: [self hostWindow];
     if (!hostWindow || !_hasPendingPointPickPoint) {
         [self cancelPointPicking];
         return;
     }
 
-    CGPoint screenPoint = _pendingPointPickPoint;
+    CGPoint screenPoint = [self pointPickScreenPointFromImagePoint:_pendingPointPickPoint];
 
     if (_actionMode == AnClickActionModeNone) {
         [self cancelPointPicking];
@@ -7864,7 +8439,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _hasManualSwipeEndPoint = NO;
             _manualSwipeEndPoint = CGPointZero;
             _pickingSwipeEndPoint = YES;
-            _pendingPointPickPoint = screenPoint;
+            _pendingPointPickPoint = [self pointPickImagePointFromScreenPoint:screenPoint];
             [self showPointPickSwipeStartMarker];
             [self updatePointPickCursor];
             [self refreshEditorConfigControls];
@@ -8032,19 +8607,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _statusLabel.text = _networkURL.length > 0 ? @"识色成功后请求网络" : @"先填网络链接";
             return;
         }
-        if (!_hasTargetColor) {
+        NSArray<NSDictionary *> *colorPoints = [self effectiveTargetColorSamples];
+        if (colorPoints.count == 0) {
             _statusLabel.text = @"先取目标颜色";
             return;
         }
-        NSInteger red = _targetColorRed;
-        NSInteger green = _targetColorGreen;
-        NSInteger blue = _targetColorBlue;
         double tolerance = _colorTolerance;
         NSTimeInterval previewDuration = 1.2;
+        NSString *patternSummary = [self targetColorShortDescription];
         [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
         __weak typeof(self) weakSelf = self;
         dispatch_async([self templateSearchQueue], ^{
-            NSDictionary *match = [AnClickCore findColorMatchWithRed:red green:green blue:blue tolerance:tolerance];
+            NSDictionary *match = [AnClickCore findColorPatternMatchWithPoints:colorPoints tolerance:tolerance];
             dispatch_async(dispatch_get_main_queue(), ^{
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) {
@@ -8061,7 +8635,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:[match[@"score"] doubleValue] inWindow:hostWindow duration:previewDuration];
                 }
                 CGPoint point = pointValue ? pointValue.CGPointValue : CGPointZero;
-                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览识色 %.0f,%.0f", point.x, point.y];
+                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览识色 %@ %.0f,%.0f", patternSummary, point.x, point.y];
                 [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
             });
         });
