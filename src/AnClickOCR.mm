@@ -285,7 +285,7 @@
         return nil;
     }
 
-    const unsigned char *bytes = rgbaData.bytes;
+    const unsigned char *bytes = (const unsigned char *)rgbaData.bytes;
     double bgR = 0.0;
     double bgG = 0.0;
     double bgB = 0.0;
