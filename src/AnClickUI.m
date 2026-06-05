@@ -1738,10 +1738,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         UIWindow *hostWindow = [self hostWindow];
         if (hostWindow) {
             [self ensureHostToastInWindow:hostWindow];
+            self->_hostToastView.hidden = NO;
             self->_hostToastLabel.text = text;
             [self layoutHostToastWithMessage:text inWindow:hostWindow];
         }
         if (self->_toastWindow) {
+            self->_toastView.hidden = NO;
             self->_toastLabel.text = text;
             [self layoutToastWithMessage:text];
             self->_toastWindow.hidden = NO;
@@ -1777,6 +1779,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } else {
         dispatch_async(dispatch_get_main_queue(), presentToast);
     }
+}
+
+- (void)hideToastForRecognitionCapture {
+    _toastGeneration++;
+    _toastDeferNonVolumeUntil = MAX(_toastDeferNonVolumeUntil, CACurrentMediaTime() + 0.16);
+    [_toastView.layer removeAllAnimations];
+    [_hostToastView.layer removeAllAnimations];
+    _toastView.alpha = 0.0;
+    _hostToastView.alpha = 0.0;
+    _toastView.hidden = YES;
+    _hostToastView.hidden = YES;
+    _toastWindow.hidden = YES;
 }
 
 - (void)showVolumeShortcutToast:(NSString *)message {
@@ -6037,8 +6051,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     AnClickActionMode mode = [self modeForTask:task];
     NSString *name = (mode == AnClickActionModeNone) ? @"动作" : [self actionNameForMode:mode];
     NSString *detail = [self trimmedActionDescription:task[@"desc"]];
-    if (detail.length == 0 && mode == AnClickActionModeOCR) {
-        detail = [self trimmedActionDescription:task[@"ocrText"]];
+    if (mode == AnClickActionModeOCR) {
+        detail = @"定位中";
     } else if (detail.length == 0 && mode == AnClickActionModeColor) {
         detail = [self colorPatternSummaryForTask:task];
     } else if (detail.length == 0 && mode == AnClickActionModeNetwork) {
@@ -7299,58 +7313,70 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     _templateSearchInProgress = YES;
     __weak typeof(self) weakSelf = self;
-    dispatch_async([self templateSearchQueue], ^{
-        NSDictionary *match = [AnClickOCR findText:targetText mode:ocrMode];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (!strongSelf) {
-                return;
-            }
-            strongSelf->_templateSearchInProgress = NO;
-            UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
-                                                                          runGeneration:runGeneration
-                                                                                 status:@"窗口变化停止"];
-            if (!currentHostWindow) {
-                return;
-            }
-            NSString *error = [match[@"error"] isKindOfClass:NSString.class] ? match[@"error"] : nil;
-            if (error.length > 0) {
-                strongSelf->_statusLabel.text = error;
-                [strongSelf showToast:error];
-                if (completion) {
-                    completion();
+    [self hideToastForRecognitionCapture];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) delayedSelf = weakSelf;
+        if (!delayedSelf) {
+            return;
+        }
+        if (runGeneration != 0 &&
+            ![delayedSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+            delayedSelf->_templateSearchInProgress = NO;
+            return;
+        }
+        dispatch_async([delayedSelf templateSearchQueue], ^{
+            NSDictionary *match = [AnClickOCR findText:targetText mode:ocrMode];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) {
+                    return;
                 }
-                return;
-            }
-            NSValue *pointValue = match[@"point"];
-            NSValue *rectValue = match[@"rect"];
-            NSNumber *scoreNumber = match[@"score"];
-            NSString *text = [match[@"text"] isKindOfClass:NSString.class] ? match[@"text"] : targetText;
-            if (!pointValue || !rectValue) {
-                strongSelf->_statusLabel.text = @"识字未找到";
-                [strongSelf showToast:@"识字未找到"];
-                if (completion) {
-                    completion();
+                strongSelf->_templateSearchInProgress = NO;
+                UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
+                                                                              runGeneration:runGeneration
+                                                                                     status:@"窗口变化停止"];
+                if (!currentHostWindow) {
+                    return;
                 }
-                return;
-            }
-            [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
-            if (actionMode == AnClickActionModeNetwork) {
-                [strongSelf performRecognitionNetworkActionForTask:task runGeneration:runGeneration completion:completion];
-                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ 网络请求", text];
+                NSString *error = [match[@"error"] isKindOfClass:NSString.class] ? match[@"error"] : nil;
+                if (error.length > 0) {
+                    strongSelf->_statusLabel.text = error;
+                    [strongSelf showToast:error];
+                    if (completion) {
+                        completion();
+                    }
+                    return;
+                }
+                NSValue *pointValue = match[@"point"];
+                NSValue *rectValue = match[@"rect"];
+                NSNumber *scoreNumber = match[@"score"];
+                NSString *text = [match[@"text"] isKindOfClass:NSString.class] ? match[@"text"] : targetText;
+                if (!pointValue || !rectValue) {
+                    strongSelf->_statusLabel.text = @"识字未找到";
+                    [strongSelf showToast:@"识字未找到"];
+                    if (completion) {
+                        completion();
+                    }
+                    return;
+                }
+                [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
+                if (actionMode == AnClickActionModeNetwork) {
+                    [strongSelf performRecognitionNetworkActionForTask:task runGeneration:runGeneration completion:completion];
+                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ 网络请求", text];
+                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    return;
+                }
+                CGPoint actionPoint = useMatchPoint ? pointValue.CGPointValue : customPointValue.CGPointValue;
+                [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
+                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %.0f,%.0f",
+                                                 text,
+                                                 actionPoint.x,
+                                                 actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
-                return;
-            }
-            CGPoint actionPoint = useMatchPoint ? pointValue.CGPointValue : customPointValue.CGPointValue;
-            [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
-            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %.0f,%.0f",
-                                             text,
-                                             actionPoint.x,
-                                             actionPoint.y];
-            [strongSelf showToast:strongSelf->_statusLabel.text];
-            if (completion) {
-                completion();
-            }
+                if (completion) {
+                    completion();
+                }
+            });
         });
     });
 }

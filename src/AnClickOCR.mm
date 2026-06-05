@@ -61,7 +61,7 @@
 }
 
 + (CGRect)screenRectFromImageRect:(CGRect)imageRect image:(UIImage *)image sourceWindow:(UIWindow *)sourceWindow {
-    if (CGRectIsEmpty(imageRect)) {
+    if (CGRectIsNull(imageRect) || CGRectIsEmpty(imageRect)) {
         return CGRectZero;
     }
 
@@ -217,160 +217,68 @@
     return 1;
 }
 
-+ (NSData *)rgbaPixelDataForImage:(UIImage *)image
-                            width:(size_t *)widthOut
-                           height:(size_t *)heightOut
-                      bytesPerRow:(size_t *)bytesPerRowOut {
-    if (!image.CGImage) {
-        return nil;
++ (CGRect)clippedImageRect:(CGRect)rect image:(UIImage *)image {
+    if (CGRectIsNull(rect) || CGRectIsEmpty(rect) || image.size.width <= 0.0 || image.size.height <= 0.0) {
+        return CGRectNull;
     }
-
-    CGImageRef imageRef = image.CGImage;
-    size_t width = CGImageGetWidth(imageRef);
-    size_t height = CGImageGetHeight(imageRef);
-    if (width == 0 || height == 0) {
-        return nil;
+    CGRect imageBounds = CGRectMake(0, 0, image.size.width, image.size.height);
+    CGRect clippedRect = CGRectIntersection(CGRectStandardize(rect), imageBounds);
+    if (CGRectIsNull(clippedRect) || CGRectIsEmpty(clippedRect) || clippedRect.size.width <= 0.5 || clippedRect.size.height <= 0.5) {
+        return CGRectNull;
     }
-
-    size_t bytesPerRow = width * 4;
-    NSMutableData *data = [NSMutableData dataWithLength:height * bytesPerRow];
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-    if (!colorSpace) {
-        return nil;
-    }
-
-    CGContextRef context = CGBitmapContextCreate(data.mutableBytes,
-                                                 width,
-                                                 height,
-                                                 8,
-                                                 bytesPerRow,
-                                                 colorSpace,
-                                                 kCGImageAlphaPremultipliedLast | kCGBitmapByteOrderDefault);
-    CGColorSpaceRelease(colorSpace);
-    if (!context) {
-        return nil;
-    }
-
-    CGContextDrawImage(context, CGRectMake(0, 0, width, height), imageRef);
-    CGContextRelease(context);
-
-    if (widthOut) {
-        *widthOut = width;
-    }
-    if (heightOut) {
-        *heightOut = height;
-    }
-    if (bytesPerRowOut) {
-        *bytesPerRowOut = bytesPerRow;
-    }
-    return data;
+    return CGRectStandardize(clippedRect);
 }
 
-+ (NSDictionary *)foregroundMatchInImageRect:(CGRect)imageRect
-                                      inImage:(UIImage *)image
-                                     rgbaData:(NSData *)rgbaData
-                                   pixelWidth:(size_t)pixelWidth
-                                  pixelHeight:(size_t)pixelHeight
-                                 bytesPerRow:(size_t)bytesPerRow {
-    if (!rgbaData || CGRectIsEmpty(imageRect) || pixelWidth == 0 || pixelHeight == 0 || bytesPerRow == 0) {
-        return nil;
++ (BOOL)targetRect:(CGRect)targetRect isSpecificAgainstObservationRect:(CGRect)observationRect target:(NSString *)target recognized:(NSString *)recognized {
+    if (CGRectIsNull(targetRect) || CGRectIsEmpty(targetRect) || CGRectIsNull(observationRect) || CGRectIsEmpty(observationRect)) {
+        return NO;
     }
 
-    CGFloat imageScale = image.scale > 0.0 ? image.scale : UIScreen.mainScreen.scale;
-    NSInteger minX = MAX(0, (NSInteger)floor(CGRectGetMinX(imageRect) * imageScale));
-    NSInteger minY = MAX(0, (NSInteger)floor(CGRectGetMinY(imageRect) * imageScale));
-    NSInteger maxX = MIN((NSInteger)pixelWidth - 1, (NSInteger)ceil(CGRectGetMaxX(imageRect) * imageScale) - 1);
-    NSInteger maxY = MIN((NSInteger)pixelHeight - 1, (NSInteger)ceil(CGRectGetMaxY(imageRect) * imageScale) - 1);
-    if (maxX <= minX || maxY <= minY) {
-        return nil;
+    if ([recognized isEqualToString:target]) {
+        return YES;
     }
 
-    const unsigned char *bytes = (const unsigned char *)rgbaData.bytes;
-    double bgR = 0.0;
-    double bgG = 0.0;
-    double bgB = 0.0;
-    NSUInteger bgCount = 0;
-    for (NSInteger y = minY; y <= maxY; y++) {
-        for (NSInteger x = minX; x <= maxX; x++) {
-            BOOL isBorder = (x == minX || x == maxX || y == minY || y == maxY);
-            if (!isBorder) {
-                continue;
-            }
-            const unsigned char *pixel = bytes + (y * bytesPerRow) + x * 4;
-            if (pixel[3] <= 16) {
-                continue;
-            }
-            bgR += pixel[0];
-            bgG += pixel[1];
-            bgB += pixel[2];
-            bgCount++;
+    CGFloat widthRatio = CGRectGetWidth(observationRect) > 0.0 ? CGRectGetWidth(targetRect) / CGRectGetWidth(observationRect) : 1.0;
+    CGFloat heightRatio = CGRectGetHeight(observationRect) > 0.0 ? CGRectGetHeight(targetRect) / CGRectGetHeight(observationRect) : 1.0;
+    return widthRatio < 0.92 || heightRatio < 0.92;
+}
+
++ (CGRect)imageRectForCharacterBoxesInRange:(NSRange)targetRange
+                                  candidate:(VNRecognizedText *)candidate
+                                      image:(UIImage *)image {
+    if (targetRange.location == NSNotFound || targetRange.length == 0 || NSMaxRange(targetRange) > candidate.string.length) {
+        return CGRectNull;
+    }
+
+    __block CGRect unionBox = CGRectNull;
+    __block NSUInteger usableBoxCount = 0;
+    [candidate.string enumerateSubstringsInRange:targetRange
+                                         options:NSStringEnumerationByComposedCharacterSequences
+                                      usingBlock:^(NSString *substring, NSRange substringRange, __unused NSRange enclosingRange, __unused BOOL *stop) {
+        if ([self normalizedText:substring ?: @""].length == 0) {
+            return;
         }
-    }
-    if (bgCount == 0) {
-        return nil;
-    }
-    bgR /= (double)bgCount;
-    bgG /= (double)bgCount;
-    bgB /= (double)bgCount;
-
-    NSInteger fgMinX = maxX;
-    NSInteger fgMinY = maxY;
-    NSInteger fgMaxX = minX;
-    NSInteger fgMaxY = minY;
-    double sumX = 0.0;
-    double sumY = 0.0;
-    NSUInteger fgCount = 0;
-    const double distanceThresholdSquared = 26.0 * 26.0;
-    for (NSInteger y = minY; y <= maxY; y++) {
-        for (NSInteger x = minX; x <= maxX; x++) {
-            const unsigned char *pixel = bytes + (y * bytesPerRow) + x * 4;
-            if (pixel[3] <= 24) {
-                continue;
-            }
-            double dr = (double)pixel[0] - bgR;
-            double dg = (double)pixel[1] - bgG;
-            double db = (double)pixel[2] - bgB;
-            double distanceSquared = dr * dr + dg * dg + db * db;
-            if (distanceSquared <= distanceThresholdSquared) {
-                continue;
-            }
-            fgMinX = MIN(fgMinX, x);
-            fgMinY = MIN(fgMinY, y);
-            fgMaxX = MAX(fgMaxX, x);
-            fgMaxY = MAX(fgMaxY, y);
-            sumX += x + 0.5;
-            sumY += y + 0.5;
-            fgCount++;
+        NSError *boxError = nil;
+        VNRectangleObservation *characterBox = [candidate boundingBoxForRange:substringRange error:&boxError];
+        if (!characterBox || CGRectIsEmpty(characterBox.boundingBox)) {
+            return;
         }
+        unionBox = CGRectIsNull(unionBox) ? characterBox.boundingBox : CGRectUnion(unionBox, characterBox.boundingBox);
+        usableBoxCount++;
+    }];
+
+    if (usableBoxCount == 0 || CGRectIsNull(unionBox) || CGRectIsEmpty(unionBox)) {
+        return CGRectNull;
     }
 
-    if (fgCount < 6) {
-        return nil;
-    }
-
-    CGFloat cropArea = (CGFloat)(maxX - minX + 1) * (CGFloat)(maxY - minY + 1);
-    CGFloat foregroundArea = (CGFloat)(fgMaxX - fgMinX + 1) * (CGFloat)(fgMaxY - fgMinY + 1);
-    if (foregroundArea >= cropArea * 0.94) {
-        return nil;
-    }
-
-    CGRect refinedRect = CGRectMake((CGFloat)fgMinX / imageScale,
-                                    (CGFloat)fgMinY / imageScale,
-                                    (CGFloat)(fgMaxX - fgMinX + 1) / imageScale,
-                                    (CGFloat)(fgMaxY - fgMinY + 1) / imageScale);
-    CGPoint refinedPoint = CGPointMake((CGFloat)(sumX / (double)fgCount) / imageScale,
-                                       (CGFloat)(sumY / (double)fgCount) / imageScale);
-    return @{
-        @"rect": [NSValue valueWithCGRect:CGRectStandardize(refinedRect)],
-        @"point": [NSValue valueWithCGPoint:refinedPoint],
-    };
+    return [self clippedImageRect:[self imageRectForNormalizedBox:unionBox image:image] image:image];
 }
 
 + (CGRect)imageRectForCandidate:(VNRecognizedText *)candidate
                          target:(NSString *)target
                     observation:(VNRecognizedTextObservation *)observation
                           image:(UIImage *)image {
-    CGRect fallbackRect = [self imageRectForObservation:observation image:image];
+    CGRect fallbackRect = [self clippedImageRect:[self imageRectForObservation:observation image:image] image:image];
     if (!candidate.string.length) {
         return fallbackRect;
     }
@@ -378,22 +286,26 @@
     if (@available(iOS 13.0, *)) {
         NSRange targetRange = [self rangeOfNormalizedTarget:target inRecognizedString:candidate.string];
         if (targetRange.location != NSNotFound && targetRange.length > 0 && NSMaxRange(targetRange) <= candidate.string.length) {
+            NSString *recognized = [self normalizedText:candidate.string];
+            CGRect characterRect = [self imageRectForCharacterBoxesInRange:targetRange candidate:candidate image:image];
+            if ([self targetRect:characterRect isSpecificAgainstObservationRect:fallbackRect target:target recognized:recognized]) {
+                return characterRect;
+            }
+
             NSError *rangeError = nil;
             VNRectangleObservation *targetBox = [candidate boundingBoxForRange:targetRange error:&rangeError];
-            CGRect normalizedBox = targetBox.boundingBox;
-            if (targetBox && !CGRectIsEmpty(normalizedBox)) {
-                CGRect targetRect = [self imageRectForNormalizedBox:normalizedBox image:image];
-                CGFloat widthRatio = CGRectGetWidth(fallbackRect) > 0.0 ? CGRectGetWidth(targetRect) / CGRectGetWidth(fallbackRect) : 1.0;
-                CGFloat heightRatio = CGRectGetHeight(fallbackRect) > 0.0 ? CGRectGetHeight(targetRect) / CGRectGetHeight(fallbackRect) : 1.0;
-                BOOL looksSpecificEnough = widthRatio < 0.92 || heightRatio < 0.92;
-                if (targetRect.size.width > 0.5 && targetRect.size.height > 0.5 && looksSpecificEnough) {
+            if (targetBox && !CGRectIsEmpty(targetBox.boundingBox)) {
+                CGRect targetRect = [self clippedImageRect:[self imageRectForNormalizedBox:targetBox.boundingBox image:image] image:image];
+                if ([self targetRect:targetRect isSpecificAgainstObservationRect:fallbackRect target:target recognized:recognized]) {
                     return targetRect;
                 }
             }
 
-            return [self estimatedImageRectForRange:targetRange
-                                 inRecognizedString:candidate.string
-                                    observationRect:fallbackRect];
+            CGRect estimatedRect = [self estimatedImageRectForRange:targetRange
+                                                inRecognizedString:candidate.string
+                                                   observationRect:fallbackRect];
+            CGRect clippedEstimatedRect = [self clippedImageRect:estimatedRect image:image];
+            return CGRectIsNull(clippedEstimatedRect) ? fallbackRect : clippedEstimatedRect;
         }
     }
 
@@ -453,13 +365,6 @@
     CGFloat bestSpecificity = -1.0;
     CGFloat bestArea = CGFLOAT_MAX;
     NSInteger bestRank = -1;
-    size_t pixelWidth = 0;
-    size_t pixelHeight = 0;
-    size_t bytesPerRow = 0;
-    NSData *rgbaData = [self rgbaPixelDataForImage:image
-                                             width:&pixelWidth
-                                            height:&pixelHeight
-                                       bytesPerRow:&bytesPerRow];
     for (VNRecognizedTextObservation *observation in observations) {
         VNRecognizedText *candidate = [observation topCandidates:1].firstObject;
         if (!candidate.string.length) {
@@ -474,15 +379,11 @@
         CGFloat specificity = target.length > 0 ? (CGFloat)target.length / (CGFloat)MAX((NSUInteger)1, recognized.length) : 0.0;
         CGFloat score = candidate.confidence;
         CGRect imageRect = [self imageRectForCandidate:candidate target:target observation:observation image:image];
-        NSDictionary *foregroundMatch = [self foregroundMatchInImageRect:imageRect
-                                                                 inImage:image
-                                                                rgbaData:rgbaData
-                                                              pixelWidth:pixelWidth
-                                                             pixelHeight:pixelHeight
-                                                            bytesPerRow:bytesPerRow];
-        CGRect clickImageRect = foregroundMatch ? [foregroundMatch[@"rect"] CGRectValue] : imageRect;
-        CGPoint clickImagePoint = foregroundMatch ? [foregroundMatch[@"point"] CGPointValue] : CGPointMake(CGRectGetMidX(clickImageRect), CGRectGetMidY(clickImageRect));
-        CGFloat area = CGRectGetWidth(clickImageRect) * CGRectGetHeight(clickImageRect);
+        if (CGRectIsNull(imageRect) || CGRectIsEmpty(imageRect)) {
+            continue;
+        }
+        CGPoint clickImagePoint = CGPointMake(CGRectGetMidX(imageRect), CGRectGetMidY(imageRect));
+        CGFloat area = CGRectGetWidth(imageRect) * CGRectGetHeight(imageRect);
 
         BOOL shouldReplace = NO;
         if (rank > bestRank) {
@@ -498,15 +399,15 @@
             continue;
         }
 
-        CGRect rect = [self screenRectFromImageRect:clickImageRect image:image sourceWindow:sourceWindow];
+        CGRect rect = [self screenRectFromImageRect:imageRect image:image sourceWindow:sourceWindow];
         CGPoint point = sourceWindow ? [sourceWindow convertPoint:clickImagePoint toWindow:nil] : clickImagePoint;
-        NSLog(@"[AnClick][OCR] target=%@ text=%@ imageRect=(%.1f, %.1f, %.1f, %.1f) screenRect=(%.1f, %.1f, %.1f, %.1f) point=(%.1f, %.1f)",
+        NSLog(@"[AnClick][OCR] target=%@ text=%@ visionRect=(%.1f, %.1f, %.1f, %.1f) screenRect=(%.1f, %.1f, %.1f, %.1f) point=(%.1f, %.1f)",
               target,
               candidate.string,
-              clickImageRect.origin.x,
-              clickImageRect.origin.y,
-              clickImageRect.size.width,
-              clickImageRect.size.height,
+              imageRect.origin.x,
+              imageRect.origin.y,
+              imageRect.size.width,
+              imageRect.size.height,
               rect.origin.x,
               rect.origin.y,
               rect.size.width,
