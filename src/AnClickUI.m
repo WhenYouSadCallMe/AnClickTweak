@@ -63,12 +63,17 @@ static const NSInteger AnClickColorPickRowTagBase = 43200;
 static const NSUInteger AnClickColorPickMaxSamples = 32;
 static CFStringRef const AnClickVolumeShortcutDownNotification = CFSTR("com.anclick.volume.down");
 static CFStringRef const AnClickVolumeShortcutUpNotification = CFSTR("com.anclick.volume.up");
+static CFStringRef const AnClickLauncherShowNotification = CFSTR("com.anclick.launcher.show");
+static CFStringRef const AnClickLauncherExpandNotification = CFSTR("com.anclick.launcher.expand");
+static CFStringRef const AnClickLauncherRunNotification = CFSTR("com.anclick.launcher.run");
+static CFStringRef const AnClickLauncherStopNotification = CFSTR("com.anclick.launcher.stop");
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
 static void (*AnClickOriginalSpringBoardHandlePhysicalButtonEvent)(id self, SEL _cmd, id event);
 
 @class AnClickUI;
 static void AnClickHardwareButtonEventCallback(void *target, void *refcon, IOHIDServiceClientRef service, IOHIDEventRef event);
 static void AnClickVolumeDarwinNotificationCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo);
+static void AnClickLauncherDarwinNotificationCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo);
 static BOOL AnClickProcessIsSpringBoard(void);
 static NSInteger AnClickVolumeShortcutDirectionFromPressesEvent(id event);
 static NSInteger AnClickVolumeShortcutDirectionFromPhysicalButtonEvent(id event);
@@ -126,6 +131,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)handleHardwareButtonHIDEvent:(IOHIDEventRef)event;
 - (void)handleWindowPressesEvent:(UIEvent *)event;
 - (void)handleExternalVolumeShortcutDirection:(NSInteger)direction;
+- (void)handleLauncherCommandNamed:(NSString *)commandName;
 @end
 
 @implementation AnClickUI {
@@ -270,6 +276,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _volumeShortcutRegistered;
     BOOL _volumeKVORegistered;
     BOOL _volumeDarwinObserverRegistered;
+    BOOL _launcherDarwinObserverRegistered;
     BOOL _hardwareVolumeButtonObserverRegistered;
     BOOL _hasObservedSystemVolume;
     BOOL _volumeShortcutRunSuppressToasts;
@@ -575,23 +582,24 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)show {
-    __weak typeof(self) weakSelf = self;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) {
+    void (^showBlock)(void) = ^{
+        if (self->_panelWindow) {
+            [self attachPanelWindowToActiveSceneIfNeeded];
+            [self registerVolumeShortcutObserver];
+            [self registerLauncherDarwinObserverIfNeeded];
+            [self scheduleGlobalTimers];
+            self->_panelWindow.hidden = NO;
+            [self reclampPanelWindowForCurrentScreen];
+            [self refreshCollapsedButtonTitle];
             return;
         }
-        if (strongSelf->_panelWindow) {
-            [strongSelf attachPanelWindowToActiveSceneIfNeeded];
-            [strongSelf registerVolumeShortcutObserver];
-            [strongSelf scheduleGlobalTimers];
-            strongSelf->_panelWindow.hidden = NO;
-            [strongSelf reclampPanelWindowForCurrentScreen];
-            [strongSelf refreshCollapsedButtonTitle];
-            return;
-        }
-        [strongSelf buildPanel];
-    });
+        [self buildPanel];
+    };
+    if (NSThread.isMainThread) {
+        showBlock();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), showBlock);
+    }
 }
 
 - (void)registerVolumeShortcutObserver {
@@ -631,6 +639,39 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                     (__bridge const void *)self,
                                     AnClickVolumeDarwinNotificationCallback,
                                     AnClickVolumeShortcutUpNotification,
+                                    NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
+}
+
+- (void)registerLauncherDarwinObserverIfNeeded {
+    if (_launcherDarwinObserverRegistered) {
+        return;
+    }
+
+    _launcherDarwinObserverRegistered = YES;
+    CFNotificationCenterRef center = CFNotificationCenterGetDarwinNotifyCenter();
+    CFNotificationCenterAddObserver(center,
+                                    (__bridge const void *)self,
+                                    AnClickLauncherDarwinNotificationCallback,
+                                    AnClickLauncherShowNotification,
+                                    NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
+    CFNotificationCenterAddObserver(center,
+                                    (__bridge const void *)self,
+                                    AnClickLauncherDarwinNotificationCallback,
+                                    AnClickLauncherExpandNotification,
+                                    NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
+    CFNotificationCenterAddObserver(center,
+                                    (__bridge const void *)self,
+                                    AnClickLauncherDarwinNotificationCallback,
+                                    AnClickLauncherRunNotification,
+                                    NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
+    CFNotificationCenterAddObserver(center,
+                                    (__bridge const void *)self,
+                                    AnClickLauncherDarwinNotificationCallback,
+                                    AnClickLauncherStopNotification,
                                     NULL,
                                     CFNotificationSuspensionBehaviorDeliverImmediately);
 }
@@ -1072,6 +1113,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _ignoreVolumeEventsUntil = 0;
     [self loadGlobalSettings];
     [self registerVolumeShortcutObserver];
+    [self registerLauncherDarwinObserverIfNeeded];
     if (!_recordedSwipePoints) {
         _recordedSwipePoints = [NSMutableArray array];
     }
@@ -3494,6 +3536,63 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _taskEditorVisible = NO;
         [self expandPanel];
         [self showTaskHome];
+    }
+}
+
+- (void)handleLauncherCommandNamed:(NSString *)commandName {
+    if (commandName.length == 0) {
+        return;
+    }
+
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self handleLauncherCommandNamed:commandName];
+        });
+        return;
+    }
+
+    [self show];
+    if (!_panelWindow) {
+        [self showToast:@"启动器唤起失败"];
+        return;
+    }
+
+    NSString *showCommand = (__bridge NSString *)AnClickLauncherShowNotification;
+    NSString *expandCommand = (__bridge NSString *)AnClickLauncherExpandNotification;
+    NSString *runCommand = (__bridge NSString *)AnClickLauncherRunNotification;
+    NSString *stopCommand = (__bridge NSString *)AnClickLauncherStopNotification;
+
+    if ([commandName isEqualToString:showCommand]) {
+        _panelWindow.hidden = NO;
+        [self collapsePanel];
+        [self showToast:@"启动器已显示悬浮窗"];
+        return;
+    }
+
+    if ([commandName isEqualToString:expandCommand]) {
+        _panelWindow.hidden = NO;
+        _taskEditorVisible = NO;
+        [self expandPanel];
+        [self showTaskHome];
+        [self showToast:@"启动器已展开"];
+        return;
+    }
+
+    if ([commandName isEqualToString:runCommand]) {
+        _panelWindow.hidden = NO;
+        [self showToast:@"启动器播放"];
+        [self runTaskList];
+        return;
+    }
+
+    if ([commandName isEqualToString:stopCommand]) {
+        _panelWindow.hidden = NO;
+        if (_taskRunActive) {
+            [self stopTaskRunWithStatus:@"启动器停止"];
+        } else {
+            [self showToast:@"当前未播放"];
+        }
+        return;
     }
 }
 
@@ -9212,6 +9311,21 @@ static void AnClickVolumeDarwinNotificationCallback(CFNotificationCenterRef cent
     AnClickUI *ui = (__bridge AnClickUI *)observer;
     dispatch_async(dispatch_get_main_queue(), ^{
         [ui handleExternalVolumeShortcutDirection:direction];
+    });
+}
+
+static void AnClickLauncherDarwinNotificationCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    (void)center;
+    (void)object;
+    (void)userInfo;
+    if (!name) {
+        return;
+    }
+
+    AnClickUI *ui = (__bridge AnClickUI *)observer;
+    NSString *commandName = [(__bridge NSString *)name copy];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [ui handleLauncherCommandNamed:commandName];
     });
 }
 

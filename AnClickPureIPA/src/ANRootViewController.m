@@ -1,15 +1,14 @@
 #import "ANRootViewController.h"
-#import "ANTaskRunner.h"
-#import "ANSystemTouch.h"
+#import "ANLauncherInstaller.h"
 
-@interface ANRootViewController () <UITextViewDelegate, UITextFieldDelegate>
-@property (nonatomic, strong) ANTaskRunner *runner;
-@property (nonatomic, strong) UITextView *taskTextView;
-@property (nonatomic, strong) UITextView *logTextView;
-@property (nonatomic, strong) UITextField *delayField;
+static CFStringRef const ANLauncherShowNotification = CFSTR("com.anclick.launcher.show");
+static CFStringRef const ANLauncherExpandNotification = CFSTR("com.anclick.launcher.expand");
+static CFStringRef const ANLauncherRunNotification = CFSTR("com.anclick.launcher.run");
+static CFStringRef const ANLauncherStopNotification = CFSTR("com.anclick.launcher.stop");
+
+@interface ANRootViewController ()
 @property (nonatomic, strong) UILabel *statusLabel;
-@property (nonatomic, strong) UIButton *runButton;
-@property (nonatomic, strong) UIButton *stopButton;
+@property (nonatomic, strong) UITextView *logTextView;
 @end
 
 @implementation ANRootViewController
@@ -18,41 +17,43 @@
     [super viewDidLoad];
     self.title = @"安姐连点器v1.0";
     self.view.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.075 alpha:1.0];
-    self.runner = [[ANTaskRunner alloc] init];
-    __weak typeof(self) weakSelf = self;
-    self.runner.logBlock = ^(NSString *message) {
-        [weakSelf appendLog:message];
-    };
-    self.runner.stateBlock = ^(BOOL running) {
-        [weakSelf updateRunningState:running];
-    };
     [self buildUI];
-    [self loadTasksFromDisk];
-    [self appendLog:[ANSystemTouch systemTouchAvailable] ? @"系统 HID 可用" : @"系统 HID 不可用，请检查 TrollStore 权限"];
+    [self refreshInstallStatus];
+    [self appendLog:@"IPA 内置 AnClick.dylib；安装/更新后请重启目标 App 或 respring。"];
 }
 
-- (UIButton *)buttonWithTitle:(NSString *)title action:(SEL)action {
+- (UIButton *)buttonWithTitle:(NSString *)title action:(SEL)action color:(UIColor *)color {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     [button setTitle:title forState:UIControlStateNormal];
     [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     button.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
-    button.backgroundColor = [UIColor colorWithRed:0.18 green:0.18 blue:0.16 alpha:1.0];
+    button.titleLabel.adjustsFontSizeToFitWidth = YES;
+    button.titleLabel.minimumScaleFactor = 0.72;
+    button.backgroundColor = color ?: [UIColor colorWithRed:0.18 green:0.18 blue:0.16 alpha:1.0];
     button.layer.cornerRadius = 7;
     button.layer.borderWidth = 1;
     button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     button.translatesAutoresizingMaskIntoConstraints = NO;
+    [button.heightAnchor constraintEqualToConstant:44].active = YES;
     return button;
 }
 
-- (void)styleTextView:(UITextView *)textView {
-    textView.backgroundColor = [UIColor colorWithRed:0.045 green:0.045 blue:0.04 alpha:1.0];
-    textView.textColor = UIColor.whiteColor;
-    textView.tintColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:1.0];
-    textView.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
-    textView.layer.cornerRadius = 7;
-    textView.layer.borderWidth = 1;
-    textView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
+- (UILabel *)labelWithText:(NSString *)text font:(UIFont *)font alpha:(CGFloat)alpha {
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
+    label.text = text;
+    label.textColor = [UIColor colorWithWhite:1 alpha:alpha];
+    label.font = font;
+    label.numberOfLines = 0;
+    return label;
+}
+
+- (UIStackView *)buttonRowWithButtons:(NSArray<UIButton *> *)buttons {
+    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:buttons];
+    row.axis = UILayoutConstraintAxisHorizontal;
+    row.spacing = 8;
+    row.distribution = UIStackViewDistributionFillEqually;
+    return row;
 }
 
 - (void)buildUI {
@@ -66,91 +67,58 @@
     stack.translatesAutoresizingMaskIntoConstraints = NO;
     [scrollView addSubview:stack];
 
-    self.statusLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    self.statusLabel.text = @"待机";
-    self.statusLabel.textColor = UIColor.whiteColor;
-    self.statusLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    self.statusLabel.numberOfLines = 0;
+    self.statusLabel = [self labelWithText:@"检查中" font:[UIFont systemFontOfSize:15 weight:UIFontWeightSemibold] alpha:0.95];
+    self.statusLabel.backgroundColor = [UIColor colorWithRed:0.045 green:0.045 blue:0.04 alpha:1.0];
+    self.statusLabel.layer.cornerRadius = 7;
+    self.statusLabel.layer.borderWidth = 1;
+    self.statusLabel.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
+    self.statusLabel.layer.masksToBounds = YES;
     [stack addArrangedSubview:self.statusLabel];
+    [self.statusLabel.heightAnchor constraintGreaterThanOrEqualToConstant:74].active = YES;
 
-    UILabel *hintLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    hintLabel.text = @"纯 IPA 版：点击运行后按延时切到目标 App，任务会按 JSON 执行。";
-    hintLabel.textColor = [UIColor colorWithWhite:1 alpha:0.68];
-    hintLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
-    hintLabel.numberOfLines = 0;
+    UILabel *hintLabel = [self labelWithText:@"安装/更新后，目标 App 重新打开或 respring，悬浮窗会和 dylib 注入版一样自动出现。下面的显示/展开/播放/停止按钮用于控制已注入的 AnClick。"
+                                        font:[UIFont systemFontOfSize:13 weight:UIFontWeightRegular]
+                                       alpha:0.70];
     [stack addArrangedSubview:hintLabel];
 
-    UIStackView *delayRow = [[UIStackView alloc] initWithFrame:CGRectZero];
-    delayRow.axis = UILayoutConstraintAxisHorizontal;
-    delayRow.spacing = 8;
-    delayRow.alignment = UIStackViewAlignmentCenter;
-    [stack addArrangedSubview:delayRow];
+    UIButton *installButton = [self buttonWithTitle:@"安装/更新dylib"
+                                             action:@selector(installBundledDylib)
+                                              color:[UIColor colorWithRed:0.86 green:0.55 blue:0.16 alpha:1.0]];
+    UIButton *refreshButton = [self buttonWithTitle:@"刷新状态"
+                                             action:@selector(refreshInstallStatus)
+                                              color:[UIColor colorWithRed:0.18 green:0.18 blue:0.16 alpha:1.0]];
+    [stack addArrangedSubview:[self buttonRowWithButtons:@[installButton, refreshButton]]];
 
-    UILabel *delayLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    delayLabel.text = @"开始延时";
-    delayLabel.textColor = UIColor.whiteColor;
-    delayLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    [delayRow addArrangedSubview:delayLabel];
+    UIButton *showButton = [self buttonWithTitle:@"显示悬浮窗"
+                                          action:@selector(postShowCommand)
+                                           color:[UIColor colorWithRed:0.12 green:0.55 blue:0.82 alpha:1.0]];
+    UIButton *expandButton = [self buttonWithTitle:@"展开配置"
+                                            action:@selector(postExpandCommand)
+                                             color:[UIColor colorWithRed:0.30 green:0.42 blue:0.86 alpha:1.0]];
+    [stack addArrangedSubview:[self buttonRowWithButtons:@[showButton, expandButton]]];
 
-    self.delayField = [[UITextField alloc] initWithFrame:CGRectZero];
-    self.delayField.text = @"3";
-    self.delayField.keyboardType = UIKeyboardTypeDecimalPad;
-    self.delayField.textColor = UIColor.whiteColor;
-    self.delayField.tintColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:1.0];
-    self.delayField.font = [UIFont monospacedDigitSystemFontOfSize:15 weight:UIFontWeightBold];
-    self.delayField.backgroundColor = [UIColor colorWithRed:0.045 green:0.045 blue:0.04 alpha:1.0];
-    self.delayField.layer.cornerRadius = 6;
-    self.delayField.layer.borderWidth = 1;
-    self.delayField.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
-    self.delayField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 10, 1)];
-    self.delayField.leftViewMode = UITextFieldViewModeAlways;
-    self.delayField.translatesAutoresizingMaskIntoConstraints = NO;
-    [delayRow addArrangedSubview:self.delayField];
-    [self.delayField.widthAnchor constraintEqualToConstant:86].active = YES;
+    UIButton *runButton = [self buttonWithTitle:@"播放任务"
+                                         action:@selector(postRunCommand)
+                                          color:[UIColor colorWithRed:0.12 green:0.62 blue:0.28 alpha:1.0]];
+    UIButton *stopButton = [self buttonWithTitle:@"停止任务"
+                                          action:@selector(postStopCommand)
+                                           color:[UIColor colorWithRed:0.72 green:0.13 blue:0.10 alpha:1.0]];
+    [stack addArrangedSubview:[self buttonRowWithButtons:@[runButton, stopButton]]];
 
-    UILabel *secondLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    secondLabel.text = @"秒";
-    secondLabel.textColor = [UIColor colorWithWhite:1 alpha:0.8];
-    secondLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    [delayRow addArrangedSubview:secondLabel];
-
-    UIStackView *buttonRow = [[UIStackView alloc] initWithFrame:CGRectZero];
-    buttonRow.axis = UILayoutConstraintAxisHorizontal;
-    buttonRow.spacing = 8;
-    buttonRow.distribution = UIStackViewDistributionFillEqually;
-    [stack addArrangedSubview:buttonRow];
-
-    self.runButton = [self buttonWithTitle:@"运行" action:@selector(runTasks)];
-    self.runButton.backgroundColor = [UIColor colorWithRed:0.12 green:0.62 blue:0.28 alpha:1.0];
-    [buttonRow addArrangedSubview:self.runButton];
-    self.stopButton = [self buttonWithTitle:@"停止" action:@selector(stopTasks)];
-    self.stopButton.backgroundColor = [UIColor colorWithRed:0.72 green:0.13 blue:0.10 alpha:1.0];
-    [buttonRow addArrangedSubview:self.stopButton];
-    [buttonRow addArrangedSubview:[self buttonWithTitle:@"保存" action:@selector(saveTasksToDisk)]];
-    [buttonRow addArrangedSubview:[self buttonWithTitle:@"示例" action:@selector(fillSampleTasks)]];
-
-    UILabel *taskLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    taskLabel.text = @"任务 JSON";
-    taskLabel.textColor = UIColor.whiteColor;
-    taskLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
-    [stack addArrangedSubview:taskLabel];
-
-    self.taskTextView = [[UITextView alloc] initWithFrame:CGRectZero];
-    [self styleTextView:self.taskTextView];
-    [stack addArrangedSubview:self.taskTextView];
-    [self.taskTextView.heightAnchor constraintGreaterThanOrEqualToConstant:300].active = YES;
-
-    UILabel *logLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    logLabel.text = @"运行日志";
-    logLabel.textColor = UIColor.whiteColor;
-    logLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
+    UILabel *logLabel = [self labelWithText:@"运行日志" font:[UIFont systemFontOfSize:15 weight:UIFontWeightBold] alpha:0.95];
     [stack addArrangedSubview:logLabel];
 
     self.logTextView = [[UITextView alloc] initWithFrame:CGRectZero];
-    [self styleTextView:self.logTextView];
+    self.logTextView.backgroundColor = [UIColor colorWithRed:0.045 green:0.045 blue:0.04 alpha:1.0];
+    self.logTextView.textColor = UIColor.whiteColor;
+    self.logTextView.tintColor = [UIColor colorWithRed:0.94 green:0.64 blue:0.23 alpha:1.0];
+    self.logTextView.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
+    self.logTextView.layer.cornerRadius = 7;
+    self.logTextView.layer.borderWidth = 1;
+    self.logTextView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
     self.logTextView.editable = NO;
     [stack addArrangedSubview:self.logTextView];
-    [self.logTextView.heightAnchor constraintGreaterThanOrEqualToConstant:180].active = YES;
+    [self.logTextView.heightAnchor constraintGreaterThanOrEqualToConstant:260].active = YES;
 
     UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
@@ -166,93 +134,42 @@
     ]];
 }
 
-- (NSString *)tasksPath {
-    NSURL *documentsURL = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
-    return [[documentsURL path] stringByAppendingPathComponent:@"pure_ipa_tasks.json"];
+- (void)installBundledDylib {
+    __weak typeof(self) weakSelf = self;
+    BOOL installed = [ANLauncherInstaller installBundledDylibWithLog:^(NSString *message) {
+        [weakSelf appendLog:message];
+    }];
+    [self refreshInstallStatus];
+    [self appendLog:installed ? @"安装/更新完成" : @"安装/更新未完成"];
 }
 
-- (void)fillSampleTasks {
-    self.taskTextView.text = [self sampleJSON];
-    [self appendLog:@"已填入示例任务"];
+- (void)refreshInstallStatus {
+    self.statusLabel.text = [NSString stringWithFormat:@" %@ ", [ANLauncherInstaller installedStatusText]];
 }
 
-- (NSString *)sampleJSON {
-    return @"[\n"
-        "  {\n"
-        "    \"mode\": \"network\",\n"
-        "    \"url\": \"http://49.235.153.44:27890/get_status_anclick\",\n"
-        "    \"method\": \"GET\",\n"
-        "    \"contains\": \"true\",\n"
-        "    \"blockContains\": \"false\",\n"
-        "    \"timeout\": 5,\n"
-        "    \"retryLimit\": 1\n"
-        "  },\n"
-        "  {\n"
-        "    \"mode\": \"tap\",\n"
-        "    \"x\": 180,\n"
-        "    \"y\": 420,\n"
-        "    \"delay\": 0.2\n"
-        "  },\n"
-        "  {\n"
-        "    \"mode\": \"ocr\",\n"
-        "    \"text\": \"资金安全\",\n"
-        "    \"action\": \"tap\",\n"
-        "    \"delay\": 0.1\n"
-        "  }\n"
-        "]";
+- (void)postLauncherNotification:(CFStringRef)name title:(NSString *)title {
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         name,
+                                         NULL,
+                                         NULL,
+                                         true);
+    [self appendLog:[NSString stringWithFormat:@"已发送：%@", title]];
 }
 
-- (void)loadTasksFromDisk {
-    NSString *path = [self tasksPath];
-    NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
-    self.taskTextView.text = text.length > 0 ? text : [self sampleJSON];
+- (void)postShowCommand {
+    [self postLauncherNotification:ANLauncherShowNotification title:@"显示悬浮窗"];
 }
 
-- (void)saveTasksToDisk {
-    NSError *error = nil;
-    BOOL ok = [self.taskTextView.text writeToFile:[self tasksPath] atomically:YES encoding:NSUTF8StringEncoding error:&error];
-    [self appendLog:ok ? @"任务已保存" : [NSString stringWithFormat:@"保存失败：%@", error.localizedDescription ?: @"未知错误"]];
+- (void)postExpandCommand {
+    [self postLauncherNotification:ANLauncherExpandNotification title:@"展开配置"];
 }
 
-- (NSArray<NSDictionary *> *)parsedTasks {
-    NSData *data = [self.taskTextView.text dataUsingEncoding:NSUTF8StringEncoding];
-    if (data.length == 0) {
-        [self appendLog:@"任务 JSON 为空"];
-        return @[];
-    }
-    NSError *error = nil;
-    id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
-    if (error || ![object isKindOfClass:NSArray.class]) {
-        [self appendLog:[NSString stringWithFormat:@"JSON 解析失败：%@", error.localizedDescription ?: @"需要数组"]];
-        return @[];
-    }
-    NSMutableArray<NSDictionary *> *tasks = [NSMutableArray array];
-    for (id item in (NSArray *)object) {
-        if ([item isKindOfClass:NSDictionary.class]) {
-            [tasks addObject:item];
-        }
-    }
-    return tasks;
+- (void)postRunCommand {
+    [self postLauncherNotification:ANLauncherRunNotification title:@"播放任务"];
 }
 
-- (void)runTasks {
-    [self.view endEditing:YES];
-    NSArray<NSDictionary *> *tasks = [self parsedTasks];
-    if (tasks.count == 0) {
-        return;
-    }
-    NSTimeInterval delay = MAX(0.0, self.delayField.text.doubleValue);
-    [self.runner startWithTasks:tasks startDelay:delay];
-}
-
-- (void)stopTasks {
-    [self.runner stop];
-}
-
-- (void)updateRunningState:(BOOL)running {
-    self.statusLabel.text = running ? @"运行中" : @"待机";
-    self.runButton.enabled = !running;
-    self.runButton.alpha = running ? 0.5 : 1.0;
+- (void)postStopCommand {
+    [self postLauncherNotification:ANLauncherStopNotification title:@"停止任务"];
 }
 
 - (void)appendLog:(NSString *)message {
@@ -264,7 +181,7 @@
     NSString *line = [NSString stringWithFormat:@"[%@] %@\n", [formatter stringFromDate:NSDate.date], message];
     NSString *oldText = self.logTextView.text ?: @"";
     self.logTextView.text = [oldText stringByAppendingString:line];
-    NSRange bottom = NSMakeRange(MAX((NSUInteger)0, self.logTextView.text.length), 0);
+    NSRange bottom = NSMakeRange(self.logTextView.text.length, 0);
     [self.logTextView scrollRangeToVisible:bottom];
 }
 

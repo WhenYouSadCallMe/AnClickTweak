@@ -84,14 +84,14 @@ jobs:
           otool -L build-artifacts/AnClick.dylib
           ldid -S build-artifacts/AnClick.dylib
 
-      - name: Build pure TrollStore IPA
+      - name: Build launcher TrollStore IPA
         run: |
           set +e
-          make -C AnClickPureIPA clean ipa FINALPACKAGE=1 2>&1 | tee pure-ipa-build.log
+          make -C AnClickPureIPA clean ipa FINALPACKAGE=1 2>&1 | tee launcher-ipa-build.log
           build_status=${PIPESTATUS[0]}
           set -e
           if [ "$build_status" -ne 0 ]; then
-            tail -n 120 pure-ipa-build.log | while IFS= read -r line; do
+            tail -n 120 launcher-ipa-build.log | while IFS= read -r line; do
               echo "::error file=AnClickPureIPA/Makefile,line=1::$line"
             done
             exit "$build_status"
@@ -100,6 +100,8 @@ jobs:
           mkdir -p build-artifacts
           cp AnClickPureIPA/build/AnClickPureIPA.ipa build-artifacts/AnClickPureIPA.ipa
           unzip -l build-artifacts/AnClickPureIPA.ipa | head -n 40
+          unzip -l build-artifacts/AnClickPureIPA.ipa | grep 'Payload/AnClickPureIPA.app/AnClick.dylib'
+          unzip -l build-artifacts/AnClickPureIPA.ipa | grep 'Payload/AnClickPureIPA.app/Filter.plist'
 
       - name: Upload build diagnostics
         if: failure()
@@ -109,7 +111,7 @@ jobs:
           path: |
             .theos/**
             AnClickPureIPA/.theos/**
-            pure-ipa-build.log
+            launcher-ipa-build.log
             opencv-ios/**
             opencv-ios-headers/**
             opencv-ios-lib/**
@@ -121,8 +123,8 @@ jobs:
           name: AnClick-dylib
           path: build-artifacts/AnClick.dylib
 
-      - name: Upload pure IPA
+      - name: Upload launcher IPA
         uses: actions/upload-artifact@v4
         with:
-          name: AnClick-pure-ipa
+          name: AnClick-launcher-ipa
           path: build-artifacts/AnClickPureIPA.ipa

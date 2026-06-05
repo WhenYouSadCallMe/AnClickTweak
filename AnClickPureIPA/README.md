@@ -1,89 +1,51 @@
-# AnClickPureIPA
+# AnClick Launcher IPA
 
-这是安姐连点器的纯 TrollStore IPA 方向工程，和当前 `AnClick.dylib` 分开构建。
+这是安姐连点器的 TrollStore 启动器/安装器 IPA。
 
-它不依赖注入目标 App，核心执行方式是：
+它的作用是把当前构建出来的 `AnClick.dylib` 内置到 IPA 里，并提供按钮把 dylib 与注入规则安装到设备上的常见注入目录。真正的跨 App 悬浮窗、识图、识色、识字、点击、音量键播放/停止，仍然由 `AnClick.dylib` 执行，所以界面和功能与注入版保持一致。
 
-- 使用 `UIGetScreenImage` 尝试获取当前屏幕。
-- 复用现有 OpenCV 识图、识色逻辑。
-- 复用现有 Vision 识字逻辑。
-- 使用 `IOHIDEventSystemClientDispatchEvent` 尝试发送系统级触摸。
-- 任务使用 JSON 保存，方便 IPA 内导入、导出、编辑。
+## 使用方式
+
+1. 安装 GitHub Actions 产出的 `AnClick-launcher-ipa`。
+2. 打开安姐连点器 IPA。
+3. 点击 `安装/更新dylib`。
+4. 重启目标 App，或 respring。
+5. 打开目标 App，AnClick 悬浮窗会自动出现。
+
+IPA 里的 `显示悬浮窗`、`展开配置`、`播放任务`、`停止任务` 会通过 Darwin 通知控制已经注入并正在运行的 AnClick。
 
 ## 重要边界
 
-纯 IPA 没有 tweak 的进程内窗口能力，所以不能保证像 dylib 一样长期在任意 App 上显示悬浮窗。运行时建议设置 2 到 5 秒开始延时，点击运行后切到目标 App。
+TrollStore IPA 可以携带和复制 dylib，但**仍然需要设备上有可加载 dylib 的注入环境**，例如 MobileSubstrate、Substitute、ElleKit、TweakInject 等。
 
-iOS 对后台 App 有挂起机制，纯 IPA 版已经申请后台模式并在运行时申请 background task，但长时间脚本是否能一直运行，仍然取决于设备系统版本、TrollStore 权限和系统后台策略。短流程任务会更稳，长时间循环需要实机日志继续校准。
+如果设备没有这些注入环境，IPA 可以安装，但无法让任意 App 显示悬浮窗。这个不是 UI 问题，而是系统没有加载 dylib 的入口。
 
-如果设备/系统不允许 `IOHIDEventSystemClientDispatchEvent` 派发触摸，日志会显示 HID 不可用，需要继续按设备实际权限调整 entitlements 或触摸派发实现。
+## 内置文件
+
+GitHub Actions 构建 IPA 时会把这些文件放进 `.app`：
+
+- `AnClick.dylib`
+- `Filter.plist`
+
+安装器会尝试写入：
+
+- `/var/jb/Library/MobileSubstrate/DynamicLibraries`
+- `/var/jb/Library/TweakInject`
+- `/var/jb/usr/lib/TweakInject`
+- `/Library/MobileSubstrate/DynamicLibraries`
+- `/Library/TweakInject`
+- `/usr/lib/TweakInject`
+
+安装成功后会生成：
+
+- `AnClick.dylib`
+- `AnClick.plist`
 
 ## 构建
 
-在 macOS + Theos 环境中：
+在仓库根目录的 GitHub Actions 里构建即可。手动本地构建需要先构建根目录 `AnClick.dylib`，再构建 IPA：
 
 ```sh
-cd AnClickPureIPA
-make clean ipa FINALPACKAGE=1
+make clean all FINALPACKAGE=1
+make -C AnClickPureIPA clean ipa FINALPACKAGE=1
 ```
-
-产物：
-
-```text
-AnClickPureIPA/build/AnClickPureIPA.ipa
-```
-
-## 任务 JSON 示例
-
-```json
-[
-  {
-    "mode": "network",
-    "url": "http://49.235.153.44:27890/get_status_anclick",
-    "method": "GET",
-    "contains": "true",
-    "blockContains": "false",
-    "timeout": 5,
-    "retryLimit": 1
-  },
-  {
-    "mode": "tap",
-    "x": 180,
-    "y": 420,
-    "delay": 0.2
-  },
-  {
-    "mode": "ocr",
-    "text": "资金安全",
-    "action": "tap",
-    "delay": 0.1
-  }
-]
-```
-
-常用 `mode`：
-
-- `tap`
-- `doubleTap`
-- `longPress`
-- `swipe`
-- `image`
-- `ocr`
-- `color`
-- `network`
-
-识图模板可以配置 `templatePath`、`templateName` 或 `templateBase64`。`templateName` 会从 Documents 目录读取。
-
-识别成功后的动作可以用：
-
-- `"action": "tap"`
-- `"action": "doubleTap"`
-- `"action": "longPress"`
-- `"action": "network"`
-
-网络判断必须至少填写一个条件：
-
-- `contains`：返回包含这个内容就继续运行。
-- `blockContains`：返回包含这个内容就不运行。
-
-如果后端返回 `{"status":true}` 或 `{"status":false}`，会自动按 `status` 判断。
