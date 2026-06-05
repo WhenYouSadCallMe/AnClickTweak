@@ -126,6 +126,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)handleHardwareButtonHIDEvent:(IOHIDEventRef)event;
 - (void)handleWindowPressesEvent:(UIEvent *)event;
 - (void)handleExternalVolumeShortcutDirection:(NSInteger)direction;
+- (void)handleApplicationDidBecomeActive;
+- (void)handleApplicationWillLeaveForeground;
 @end
 
 @implementation AnClickUI {
@@ -267,6 +269,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _networkRetryForever;
     BOOL _globalTimePickerEditingStartTime;
     BOOL _taskRunActive;
+    BOOL _taskRunPausedForForeground;
+    BOOL _taskRunResumeInGlobalNetworkGate;
+    BOOL _taskRunResumeScheduled;
     BOOL _volumeShortcutRegistered;
     BOOL _volumeKVORegistered;
     BOOL _volumeDarwinObserverRegistered;
@@ -290,6 +295,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSInteger _globalStopMinute;
     NSInteger _globalStopSecond;
     NSInteger _currentGlobalRunCycle;
+    NSInteger _taskRunResumeCycle;
+    NSUInteger _taskRunResumeIndex;
     NSInteger _targetColorRed;
     NSInteger _targetColorGreen;
     NSInteger _targetColorBlue;
@@ -798,7 +805,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self refreshCollapsedButtonTitle];
         return;
     }
-    if (_taskRunActive) {
+    if (_taskRunActive || _taskRunPausedForForeground) {
         [self showVolumeShortcutToast:@"音量+ 停止"];
         [self stopTaskRunWithStatus:@"音量停止" showToast:NO];
         _volumeShortcutRunSuppressToasts = NO;
@@ -1066,6 +1073,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalStopSecond = 0;
     _currentGlobalRunCycle = 0;
     _taskRunActive = NO;
+    _taskRunPausedForForeground = NO;
+    _taskRunResumeInGlobalNetworkGate = NO;
+    _taskRunResumeScheduled = NO;
+    _taskRunResumeCycle = 0;
+    _taskRunResumeIndex = 0;
     _volumeShortcutRegistered = NO;
     _hasObservedSystemVolume = NO;
     _volumeShortcutRunSuppressToasts = NO;
@@ -2675,7 +2687,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)handleGlobalStartTimer:(__unused NSTimer *)timer {
     _globalStartTimer = nil;
     [self scheduleGlobalTimers];
-    if (!_taskRunActive) {
+    if (!_taskRunActive && !_taskRunPausedForForeground) {
         [self startTaskListRunScheduled:YES];
     }
 }
@@ -2683,7 +2695,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)handleGlobalStopTimer:(__unused NSTimer *)timer {
     _globalStopTimer = nil;
     [self scheduleGlobalTimers];
-    if (_taskRunActive) {
+    if (_taskRunActive || _taskRunPausedForForeground) {
         [self stopTaskRunWithStatus:@"定时停止"];
     }
 }
@@ -4651,6 +4663,307 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
     }
     return nil;
+}
+
+- (BOOL)applicationIsActiveForTaskRun {
+    return UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
+}
+
+- (BOOL)hostWindowIsUsableForTaskRun:(UIWindow *)window {
+    if (!window ||
+        window == _panelWindow ||
+        window == _toastWindow ||
+        window == _pointPickWindow ||
+        window == _colorPickWindow ||
+        window.hidden ||
+        window.alpha <= 0.01 ||
+        window.windowLevel >= UIWindowLevelAlert ||
+        CGRectIsEmpty(window.bounds)) {
+        return NO;
+    }
+
+    if (@available(iOS 13.0, *)) {
+        if (window.windowScene && window.windowScene.activationState != UISceneActivationStateForegroundActive) {
+            return NO;
+        }
+    }
+    return YES;
+}
+
+- (UIWindow *)currentUsableHostWindowForTaskRunFallback:(UIWindow *)fallbackWindow {
+    (void)fallbackWindow;
+    if (![self applicationIsActiveForTaskRun]) {
+        return nil;
+    }
+
+    UIWindow *currentWindow = [self hostWindow];
+    if ([self hostWindowIsUsableForTaskRun:currentWindow]) {
+        return currentWindow;
+    }
+    return nil;
+}
+
+- (void)clearTaskRunPauseState {
+    _taskRunPausedForForeground = NO;
+    _taskRunResumeInGlobalNetworkGate = NO;
+    _taskRunResumeScheduled = NO;
+    _taskRunResumeCycle = 0;
+    _taskRunResumeIndex = 0;
+}
+
+- (void)rememberTaskRunResumePointAtIndex:(NSUInteger)index inGlobalNetworkGate:(BOOL)inGlobalNetworkGate scheduled:(BOOL)scheduled {
+    _taskRunResumeIndex = index;
+    _taskRunResumeCycle = _currentGlobalRunCycle;
+    _taskRunResumeInGlobalNetworkGate = inGlobalNetworkGate;
+    _taskRunResumeScheduled = scheduled;
+}
+
+- (void)pauseTaskRunForForegroundLoss {
+    if (!_taskRunActive) {
+        return;
+    }
+
+    _taskRunActive = NO;
+    _taskRunPausedForForeground = YES;
+    _taskRunResumeCycle = _currentGlobalRunCycle;
+    _taskRunGeneration++;
+    _statusLabel.text = @"应用切出暂停";
+    _volumeShortcutRunSuppressToasts = NO;
+    [self refreshCollapsedButtonTitle];
+    [self refreshTaskList];
+}
+
+- (void)cleanupScreenInteractionStateRestoringPanel:(BOOL)restorePanel {
+    [self invalidatePendingPanelRestore];
+
+    [_captureOverlay removeFromSuperview];
+    _captureOverlay = nil;
+    _captureScrollView = nil;
+    _captureImageView = nil;
+    _selectionView = nil;
+    _captureSnapshot = nil;
+    _captureDrawingSelection = NO;
+
+    [_pointPickOverlay removeFromSuperview];
+    _pointPickOverlay = nil;
+    _pointPickWindow.hidden = YES;
+    _pointPickWindow = nil;
+    _pointPickScrollView = nil;
+    _pointPickImageView = nil;
+    _pointCursorView = nil;
+    _pointPickToolbar = nil;
+    _pointCoordinateLabel = nil;
+    _pointPickSnapshot = nil;
+    _pointPickHostWindow = nil;
+    _hasPendingPointPickPoint = NO;
+    _pickingSwipeEndPoint = NO;
+    _pointPickPanStartedOnToolbar = NO;
+
+    _colorPickWindow.hidden = YES;
+    _colorPickWindow = nil;
+    _colorPickScrollView = nil;
+    _colorPickImageView = nil;
+    _colorPickCursorView = nil;
+    _colorPickToolbar = nil;
+    _colorPickListView = nil;
+    _colorPickInfoLabel = nil;
+    _colorPickSwatchView = nil;
+    _colorPickDeleteButton = nil;
+    _colorPickImage = nil;
+    _pendingColorPickSamples = [NSMutableArray array];
+    _selectedColorPickSampleIndex = -1;
+    _hasPendingColorPickPoint = NO;
+    [self clearColorPickPixelData];
+
+    [_tapMarkerView removeFromSuperview];
+    _tapMarkerView = nil;
+    [_recognitionBoxView removeFromSuperview];
+    _recognitionBoxView = nil;
+    [_operationTraceView removeFromSuperview];
+    _operationTraceView = nil;
+    [_trajectoryView removeFromSuperview];
+    _trajectoryView = nil;
+    _trajectoryLayer = nil;
+    _liveSwipePoints = nil;
+
+    [_hostToastView removeFromSuperview];
+    _hostToastView = nil;
+    _hostToastLabel = nil;
+    _toastWindow.hidden = YES;
+    _toastGeneration++;
+
+    if ([AnClickFakeTouch isHolding]) {
+        [AnClickFakeTouch cancelHold];
+    }
+    _longPressHolding = NO;
+    _templateSearchInProgress = NO;
+
+    if (restorePanel && [self applicationIsActiveForTaskRun]) {
+        [self restorePanelAfterExternalTap];
+    }
+}
+
+- (BOOL)taskRunIsStillValidWithGeneration:(NSUInteger)runGeneration
+                            fallbackWindow:(UIWindow *)fallbackWindow
+                                    status:(NSString *)status {
+    if (!_taskRunActive || runGeneration != _taskRunGeneration) {
+        return NO;
+    }
+
+    if (![self applicationIsActiveForTaskRun]) {
+        [self pauseTaskRunForForegroundLoss];
+        [self cleanupScreenInteractionStateRestoringPanel:NO];
+        return NO;
+    }
+
+    if (![self currentUsableHostWindowForTaskRunFallback:fallbackWindow]) {
+        [self stopTaskRunWithStatus:status.length > 0 ? status : @"窗口变化停止" showToast:YES];
+        [self cleanupScreenInteractionStateRestoringPanel:YES];
+        return NO;
+    }
+    return YES;
+}
+
+- (UIWindow *)hostWindowForCallbackWithFallback:(UIWindow *)fallbackWindow
+                                  runGeneration:(NSUInteger)runGeneration
+                                         status:(NSString *)status {
+    if (![self applicationIsActiveForTaskRun]) {
+        if (runGeneration != 0) {
+            [self pauseTaskRunForForegroundLoss];
+            [self cleanupScreenInteractionStateRestoringPanel:NO];
+        }
+        return nil;
+    }
+
+    if (runGeneration != 0) {
+        if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:fallbackWindow status:status]) {
+            return nil;
+        }
+        return [self currentUsableHostWindowForTaskRunFallback:fallbackWindow];
+    }
+
+    UIWindow *currentWindow = [self hostWindow];
+    if ([self hostWindowIsUsableForTaskRun:currentWindow]) {
+        return currentWindow;
+    }
+    if ([self hostWindowIsUsableForTaskRun:fallbackWindow]) {
+        return fallbackWindow;
+    }
+    return nil;
+}
+
+- (void)resumePausedTaskRunAttempt:(NSInteger)attempt {
+    if (!_taskRunPausedForForeground || _taskRunActive) {
+        return;
+    }
+    if (![self applicationIsActiveForTaskRun]) {
+        return;
+    }
+
+    UIWindow *hostWindow = [self currentUsableHostWindowForTaskRunFallback:nil];
+    if (!hostWindow) {
+        if (attempt < 10) {
+            __weak typeof(self) weakSelf = self;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                [strongSelf resumePausedTaskRunAttempt:attempt + 1];
+            });
+            return;
+        }
+
+        [self clearTaskRunPauseState];
+        _currentGlobalRunCycle = 0;
+        _statusLabel.text = @"恢复无窗口";
+        [self showToast:_statusLabel.text];
+        [self refreshCollapsedButtonTitle];
+        [self refreshTaskList];
+        return;
+    }
+
+    if (_taskItems.count == 0) {
+        [self clearTaskRunPauseState];
+        _currentGlobalRunCycle = 0;
+        _statusLabel.text = @"恢复无任务";
+        [self showToast:_statusLabel.text];
+        [self refreshCollapsedButtonTitle];
+        [self refreshTaskList];
+        return;
+    }
+
+    if ([AnClickRecorder shared].isRecording) {
+        [self clearTaskRunPauseState];
+        _currentGlobalRunCycle = 0;
+        _statusLabel.text = @"录制中无法恢复";
+        [self showToast:_statusLabel.text];
+        [self refreshCollapsedButtonTitle];
+        [self refreshTaskList];
+        return;
+    }
+
+    BOOL resumeInGlobalNetworkGate = _taskRunResumeInGlobalNetworkGate;
+    BOOL scheduled = _taskRunResumeScheduled;
+    NSUInteger resumeIndex = MIN(_taskRunResumeIndex, _taskItems.count);
+    NSInteger resumeCycle = MAX(0, _taskRunResumeCycle);
+
+    if (resumeInGlobalNetworkGate) {
+        NSString *networkValidationMessage = [self globalNetworkGateValidationMessage];
+        if (networkValidationMessage.length > 0) {
+            [self clearTaskRunPauseState];
+            _currentGlobalRunCycle = 0;
+            _statusLabel.text = networkValidationMessage;
+            [self showToast:_statusLabel.text];
+            [self refreshCollapsedButtonTitle];
+            [self refreshTaskList];
+            return;
+        }
+    }
+
+    _taskRunPausedForForeground = NO;
+    _taskRunActive = YES;
+    _currentGlobalRunCycle = resumeCycle;
+    NSUInteger runGeneration = ++_taskRunGeneration;
+    _statusLabel.text = resumeInGlobalNetworkGate ? @"恢复网络监控" : @"恢复播放";
+    [self showToast:_statusLabel.text];
+    [self refreshTaskList];
+    [self collapsePanel];
+
+    if (resumeInGlobalNetworkGate) {
+        [self rememberTaskRunResumePointAtIndex:0 inGlobalNetworkGate:YES scheduled:scheduled];
+        [self monitorGlobalNetworkGateWithHostWindow:hostWindow scheduled:scheduled generation:runGeneration];
+        return;
+    }
+
+    [self rememberTaskRunResumePointAtIndex:resumeIndex inGlobalNetworkGate:NO scheduled:scheduled];
+    [self runTaskAtIndex:resumeIndex inWindow:hostWindow generation:runGeneration];
+}
+
+- (void)handleApplicationDidBecomeActive {
+    [self show];
+    if (!_taskRunPausedForForeground) {
+        return;
+    }
+
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.20 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        [strongSelf resumePausedTaskRunAttempt:0];
+    });
+}
+
+- (void)handleApplicationWillLeaveForeground {
+    BOOL wasRunning = _taskRunActive;
+    if (wasRunning) {
+        [self pauseTaskRunForForegroundLoss];
+    } else if (!_taskRunPausedForForeground) {
+        _taskRunGeneration++;
+    }
+    [self cleanupScreenInteractionStateRestoringPanel:NO];
+    if (wasRunning) {
+        _statusLabel.text = @"应用切出暂停";
+    }
+    _volumeShortcutRunSuppressToasts = NO;
+    [self refreshCollapsedButtonTitle];
+    [self refreshTaskList];
 }
 
 - (void)beginTemplateCapture {
@@ -6628,6 +6941,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (runGeneration != 0 && (!self->_taskRunActive || runGeneration != self->_taskRunGeneration)) {
             return;
         }
+        if (runGeneration != 0 && ![self applicationIsActiveForTaskRun]) {
+            [self pauseTaskRunForForegroundLoss];
+            [self cleanupScreenInteractionStateRestoringPanel:NO];
+            return;
+        }
         BOOL blocked = !oneShot && requestSucceeded && [self networkBody:body matchesBlockText:falseText defaultExpectedTrue:NO];
         self->_statusLabel.text = oneShot
             ? (requestSucceeded ? @"网络请求完成" : [self networkStatusTextWithMatched:NO requestSucceeded:requestSucceeded statusCode:statusCode error:error])
@@ -6647,12 +6965,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (!strongSelf) {
             return;
         }
-        [strongSelf runTaskAtIndex:index + 1 inWindow:hostWindow generation:runGeneration];
+        if (![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+            return;
+        }
+        UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
+        [strongSelf runTaskAtIndex:index + 1 inWindow:currentHostWindow generation:runGeneration];
     });
 }
 
 - (void)pollNetworkTask:(NSDictionary *)task atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration attempt:(NSInteger)attempt {
-    if (!_taskRunActive || runGeneration != _taskRunGeneration) {
+    if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
         return;
     }
 
@@ -6660,18 +6982,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL retryForever = [self networkRetryForeverForTask:task];
     NSInteger retryLimit = [self networkRetryLimitForTask:task];
     [self performNetworkRequestTask:task runGeneration:runGeneration completion:^(BOOL matched, BOOL requestSucceeded, BOOL blocked) {
-        if (!self->_taskRunActive || runGeneration != self->_taskRunGeneration) {
+        if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
             return;
         }
+        UIWindow *currentHostWindow = [self currentUsableHostWindowForTaskRunFallback:hostWindow];
         if (!waitsForCondition) {
-            [self continueTaskRunAfterIndex:index inWindow:hostWindow generation:runGeneration];
+            [self continueTaskRunAfterIndex:index inWindow:currentHostWindow generation:runGeneration];
             return;
         }
 
         NSString *runRule = [self trimmedActionDescription:task[@"networkContains"]];
         BOOL shouldContinue = runRule.length > 0 ? (matched && !blocked) : (requestSucceeded && !blocked);
         if (shouldContinue) {
-            [self continueTaskRunAfterIndex:index inWindow:hostWindow generation:runGeneration];
+            [self continueTaskRunAfterIndex:index inWindow:currentHostWindow generation:runGeneration];
             return;
         }
 
@@ -6685,18 +7008,35 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             ? [NSString stringWithFormat:@"%@ 继续判断", stateText]
             : [NSString stringWithFormat:@"%@ %ld/%ld", stateText, (long)attempt, (long)retryLimit];
         [self showToast:self->_statusLabel.text];
+        __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self pollNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration attempt:attempt + 1];
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf ||
+                ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"]) {
+                return;
+            }
+            UIWindow *retryHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:currentHostWindow];
+            [strongSelf pollNetworkTask:task atIndex:index inWindow:retryHostWindow generation:runGeneration attempt:attempt + 1];
         });
     }];
 }
 
 - (void)runNetworkTask:(NSDictionary *)task atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
+    if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+        return;
+    }
     NSTimeInterval delay = [self delayForTask:task];
     _statusLabel.text = @"网络请求";
     [self showToast:[self toastTextForTask:task index:index]];
+    __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self pollNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration attempt:1];
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf ||
+            ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+            return;
+        }
+        UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
+        [strongSelf pollNetworkTask:task atIndex:index inWindow:currentHostWindow generation:runGeneration attempt:1];
     });
 }
 
@@ -6730,7 +7070,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                          inWindow:(UIWindow *)hostWindow
                        generation:(NSUInteger)runGeneration
                       repeatIndex:(NSInteger)repeatIndex {
-    if (!_taskRunActive || runGeneration != _taskRunGeneration) {
+    if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
         return;
     }
 
@@ -6741,20 +7081,38 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     [self performRecognitionNetworkTask:task inWindow:hostWindow generation:runGeneration completion:^{
-        if (!self->_taskRunActive || runGeneration != self->_taskRunGeneration) {
+        if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
             return;
         }
+        UIWindow *currentHostWindow = [self currentUsableHostWindowForTaskRunFallback:hostWindow];
+        __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self runRecognitionNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration repeatIndex:repeatIndex + 1];
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf ||
+                ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"]) {
+                return;
+            }
+            UIWindow *nextHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:currentHostWindow];
+            [strongSelf runRecognitionNetworkTask:task atIndex:index inWindow:nextHostWindow generation:runGeneration repeatIndex:repeatIndex + 1];
         });
     }];
 }
 
 - (void)runRecognitionNetworkTask:(NSDictionary *)task atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
+    if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+        return;
+    }
     NSTimeInterval delay = [self delayForTask:task];
     [self showToast:[self toastTextForTask:task index:index]];
+    __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self runRecognitionNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration repeatIndex:0];
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf ||
+            ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+            return;
+        }
+        UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
+        [strongSelf runRecognitionNetworkTask:task atIndex:index inWindow:currentHostWindow generation:runGeneration repeatIndex:0];
     });
 }
 
@@ -6858,7 +7216,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 return;
             }
             strongSelf->_templateSearchInProgress = NO;
-            if (runGeneration != 0 && (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration)) {
+            UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
+                                                                          runGeneration:runGeneration
+                                                                                 status:@"窗口变化停止"];
+            if (!currentHostWindow) {
                 return;
             }
             if (!match) {
@@ -6880,7 +7241,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 }
                 return;
             }
-            UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
             CGRect rect = rectValue.CGRectValue;
             [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.2];
             if (imageActionMode == AnClickActionModeNetwork) {
@@ -6947,7 +7307,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 return;
             }
             strongSelf->_templateSearchInProgress = NO;
-            if (runGeneration != 0 && (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration)) {
+            UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
+                                                                          runGeneration:runGeneration
+                                                                                 status:@"窗口变化停止"];
+            if (!currentHostWindow) {
                 return;
             }
             NSString *error = [match[@"error"] isKindOfClass:NSString.class] ? match[@"error"] : nil;
@@ -6971,7 +7334,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 }
                 return;
             }
-            UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
             [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
             if (actionMode == AnClickActionModeNetwork) {
                 [strongSelf performRecognitionNetworkActionForTask:task runGeneration:runGeneration completion:completion];
@@ -7029,7 +7391,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 return;
             }
             strongSelf->_templateSearchInProgress = NO;
-            if (runGeneration != 0 && (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration)) {
+            UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
+                                                                          runGeneration:runGeneration
+                                                                                 status:@"窗口变化停止"];
+            if (!currentHostWindow) {
                 return;
             }
             if (!match) {
@@ -7051,7 +7416,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 }
                 return;
             }
-            UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
             [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
             if (actionMode == AnClickActionModeNetwork) {
                 [strongSelf performRecognitionNetworkActionForTask:task runGeneration:runGeneration completion:completion];
@@ -7213,10 +7577,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             if (!strongSelf) {
                 return;
             }
-            if (runGeneration != 0 && (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration)) {
+            UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
+                                                                          runGeneration:runGeneration
+                                                                                 status:@"窗口变化停止"];
+            if (!currentHostWindow) {
                 return;
             }
-            UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
             if (mode == AnClickActionModeSwipe) {
                 NSArray<NSValue *> *path = task[@"path"];
                 [strongSelf showTrajectoryForScreenPoints:path inWindow:currentHostWindow duration:0.75];
@@ -7249,19 +7615,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)runTaskList {
-    if (_taskRunActive) {
+    if (_taskRunActive || _taskRunPausedForForeground) {
         _volumeShortcutRunSuppressToasts = NO;
         [self stopTaskRunWithStatus:@"已停止"];
         return;
     }
+    [self clearTaskRunPauseState];
     _volumeShortcutRunSuppressToasts = NO;
     [self startTaskListRunScheduled:NO];
 }
 
 - (void)monitorGlobalNetworkGateWithHostWindow:(UIWindow *)hostWindow scheduled:(BOOL)scheduled generation:(NSUInteger)runGeneration {
-    if (!_taskRunActive || runGeneration != _taskRunGeneration) {
+    if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
         return;
     }
+    [self rememberTaskRunResumePointAtIndex:0 inGlobalNetworkGate:YES scheduled:scheduled];
 
     NSString *url = _globalNetworkURL;
     NSString *contains = _globalNetworkContainsText;
@@ -7269,9 +7637,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     __weak typeof(self) weakSelf = self;
     [self performNetworkRequestWithURLString:url method:@"GET" postBody:nil trueText:contains falseText:falseText defaultExpectedTrue:NO timeout:8.0 completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf || !strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration) {
+        if (!strongSelf ||
+            ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
             return;
         }
+        UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
         NSString *runRule = [strongSelf trimmedActionDescription:contains];
         BOOL blocked = requestSucceeded && [strongSelf networkBody:body matchesBlockText:falseText defaultExpectedTrue:NO];
         BOOL shouldRun = runRule.length > 0 ? matched : (requestSucceeded && !blocked);
@@ -7279,7 +7649,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             strongSelf->_statusLabel.text = scheduled ? @"定时命中运行" : @"命中运行";
             [strongSelf showToast:strongSelf->_statusLabel.text];
             [strongSelf refreshCollapsedButtonTitle];
-            [strongSelf runTaskAtIndex:0 inWindow:hostWindow generation:runGeneration];
+            [strongSelf runTaskAtIndex:0 inWindow:currentHostWindow generation:runGeneration];
             return;
         }
 
@@ -7292,10 +7662,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [strongSelf refreshCollapsedButtonTitle];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) retrySelf = weakSelf;
-            if (!retrySelf || !retrySelf->_taskRunActive || runGeneration != retrySelf->_taskRunGeneration) {
+            if (!retrySelf ||
+                ![retrySelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"]) {
                 return;
             }
-            [retrySelf monitorGlobalNetworkGateWithHostWindow:hostWindow scheduled:scheduled generation:runGeneration];
+            UIWindow *retryHostWindow = [retrySelf currentUsableHostWindowForTaskRunFallback:currentHostWindow];
+            [retrySelf monitorGlobalNetworkGateWithHostWindow:retryHostWindow scheduled:scheduled generation:runGeneration];
         });
     }];
 }
@@ -7332,6 +7704,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     _taskRunActive = YES;
+    [self clearTaskRunPauseState];
     _currentGlobalRunCycle = 0;
     NSUInteger runGeneration = ++_taskRunGeneration;
     _statusLabel.text = _globalNetworkGateEnabled ? @"网络监控中" : (scheduled ? @"定时启动" : @"播放中");
@@ -7339,9 +7712,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self refreshTaskList];
     [self collapsePanel];
     if (_globalNetworkGateEnabled) {
+        [self rememberTaskRunResumePointAtIndex:0 inGlobalNetworkGate:YES scheduled:scheduled];
         [self monitorGlobalNetworkGateWithHostWindow:hostWindow scheduled:scheduled generation:runGeneration];
         return;
     }
+    [self rememberTaskRunResumePointAtIndex:0 inGlobalNetworkGate:NO scheduled:scheduled];
     [self runTaskAtIndex:0 inWindow:hostWindow generation:runGeneration];
 }
 
@@ -7350,11 +7725,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)stopTaskRunWithStatus:(NSString *)status showToast:(BOOL)showToast {
-    if (!_taskRunActive) {
+    if (!_taskRunActive && !_taskRunPausedForForeground) {
         return;
     }
 
     _taskRunActive = NO;
+    [self clearTaskRunPauseState];
     _currentGlobalRunCycle = 0;
     _taskRunGeneration++;
     _statusLabel.text = status.length > 0 ? status : @"已停止";
@@ -7371,19 +7747,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)runTaskAtIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
-    if (!_taskRunActive || runGeneration != _taskRunGeneration) {
+    if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
         return;
     }
+    UIWindow *currentHostWindow = [self currentUsableHostWindowForTaskRunFallback:hostWindow];
+    [self rememberTaskRunResumePointAtIndex:index inGlobalNetworkGate:NO scheduled:_taskRunResumeScheduled];
 
     if (index >= _taskItems.count) {
         _currentGlobalRunCycle++;
         NSInteger repeatLimit = MAX(0, _globalRunRepeatCount);
         if (repeatLimit == 0 || _currentGlobalRunCycle < repeatLimit) {
-            [self runTaskAtIndex:0 inWindow:hostWindow generation:runGeneration];
+            [self rememberTaskRunResumePointAtIndex:0 inGlobalNetworkGate:NO scheduled:_taskRunResumeScheduled];
+            [self runTaskAtIndex:0 inWindow:currentHostWindow generation:runGeneration];
             return;
         }
 
         _taskRunActive = NO;
+        [self clearTaskRunPauseState];
         _statusLabel.text = @"任务完成";
         [self showToast:@"任务完成"];
         _volumeShortcutRunSuppressToasts = NO;
@@ -7392,11 +7772,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    UIWindow *currentHostWindow = [self hostWindow] ?: hostWindow;
     [self showToast:[self toastTextForTask:_taskItems[index] index:index]];
     if ([self modeForTask:_taskItems[index]] == AnClickActionModeNetwork) {
         if (![self taskIsComplete:_taskItems[index]]) {
             _taskRunActive = NO;
+            [self clearTaskRunPauseState];
             [self expandPanel];
             [self showToast:_statusLabel.text];
             _volumeShortcutRunSuppressToasts = NO;
@@ -7410,6 +7790,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if ([self taskUsesRecognitionNetworkAction:_taskItems[index]]) {
         if (![self taskIsComplete:_taskItems[index]]) {
             _taskRunActive = NO;
+            [self clearTaskRunPauseState];
             [self expandPanel];
             [self showToast:_statusLabel.text];
             _volumeShortcutRunSuppressToasts = NO;
@@ -7423,6 +7804,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSTimeInterval duration = [self performTask:_taskItems[index] inWindow:currentHostWindow runGeneration:runGeneration];
     if (duration <= 0) {
         _taskRunActive = NO;
+        [self clearTaskRunPauseState];
         [self expandPanel];
         [self showToast:_statusLabel.text];
         _volumeShortcutRunSuppressToasts = NO;
@@ -7434,15 +7816,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration + 0.12) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         __strong typeof(weakSelf) delaySelf = weakSelf;
-        if (!delaySelf) {
+        if (!delaySelf ||
+            ![delaySelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"]) {
             return;
         }
+        UIWindow *delayedHostWindow = [delaySelf currentUsableHostWindowForTaskRunFallback:currentHostWindow];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(globalDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (!strongSelf) {
+            if (!strongSelf ||
+                ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:delayedHostWindow status:@"窗口变化停止"]) {
                 return;
             }
-            [strongSelf runTaskAtIndex:index + 1 inWindow:currentHostWindow generation:runGeneration];
+            UIWindow *nextHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:delayedHostWindow];
+            [strongSelf runTaskAtIndex:index + 1 inWindow:nextHostWindow generation:runGeneration];
         });
     });
 }
@@ -9152,7 +9538,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             }
             CGPoint point = pointValue.CGPointValue;
             CGRect rect = rectValue.CGRectValue;
-            UIWindow *currentHostWindow = [strongSelf hostWindow] ?: hostWindow;
+            UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
+                                                                          runGeneration:0
+                                                                                 status:nil];
+            if (!currentHostWindow) {
+                [strongSelf restorePanelAfterExternalTap];
+                strongSelf->_statusLabel.text = @"无窗口";
+                return;
+            }
             [strongSelf preparePanelForExternalTapWithHostWindow:currentHostWindow];
             [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.6];
             [strongSelf performSelectedActionAtPoint:point inWindow:currentHostWindow];
@@ -9473,7 +9866,16 @@ __attribute__((constructor)) static void AnClickUIInit(void) {
         [[AnClickUI shared] show];
     });
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
-        [[AnClickUI shared] show];
+        [[AnClickUI shared] handleApplicationDidBecomeActive];
+    }];
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
+        [[AnClickUI shared] handleApplicationWillLeaveForeground];
+    }];
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
+        [[AnClickUI shared] handleApplicationWillLeaveForeground];
+    }];
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillTerminateNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
+        [[AnClickUI shared] handleApplicationWillLeaveForeground];
     }];
     [UIDevice.currentDevice beginGeneratingDeviceOrientationNotifications];
     [[NSNotificationCenter defaultCenter] addObserverForName:UIDeviceOrientationDidChangeNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
