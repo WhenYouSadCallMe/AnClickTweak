@@ -1,6 +1,9 @@
 #import "ANLauncherInstaller.h"
 #import <dlfcn.h>
 #import <sys/stat.h>
+#import <spawn.h>
+
+extern char **environ;
 
 @implementation ANLauncherInstaller
 
@@ -35,15 +38,18 @@ static void *ANLauncherLoadedDylibHandle = NULL;
     [parts addObject:bundleState];
     NSString *processState = NSClassFromString(@"AnClickUI") ? @"当前进程悬浮窗: 可用" : @"当前进程悬浮窗: 未加载";
     [parts addObject:processState];
+    NSUInteger installedCount = 0;
     for (NSString *directory in [self candidateInjectionDirectories]) {
         NSString *dylibPath = [directory stringByAppendingPathComponent:@"AnClick.dylib"];
         NSString *filterPath = [directory stringByAppendingPathComponent:@"AnClick.plist"];
         if ([self fileExistsAtPath:dylibPath] && [self fileExistsAtPath:filterPath]) {
+            installedCount++;
             [parts addObject:[NSString stringWithFormat:@"已安装: %@", directory]];
-            return [parts componentsJoinedByString:@"\n"];
         }
     }
-    [parts addObject:@"未发现已安装注入文件"];
+    if (installedCount == 0) {
+        [parts addObject:@"未发现已安装注入文件"];
+    }
     return [parts componentsJoinedByString:@"\n"];
 }
 
@@ -213,6 +219,7 @@ static void *ANLauncherLoadedDylibHandle = NULL;
         return NO;
     }
 
+    NSUInteger installCount = 0;
     for (NSString *directory in [self candidateInjectionDirectories]) {
         if (![self directoryLooksInstallable:directory log:logBlock]) {
             continue;
@@ -225,16 +232,65 @@ static void *ANLauncherLoadedDylibHandle = NULL;
         BOOL copiedDylib = [self copyItemAtPath:sourceDylib toPath:targetDylib permissions:dylibPermissions log:logBlock];
         BOOL copiedFilter = copiedDylib && [self copyItemAtPath:sourceFilter toPath:targetFilter permissions:filterPermissions log:logBlock];
         if (copiedDylib && copiedFilter) {
+            installCount++;
             if (logBlock) {
                 logBlock([NSString stringWithFormat:@"已安装到: %@", directory]);
-                logBlock(@"请注销/重启目标 App 或 respring，让注入环境重新加载 AnClick.dylib");
             }
-            return YES;
         }
+    }
+
+    if (installCount > 0) {
+        if (logBlock) {
+            logBlock([NSString stringWithFormat:@"安装完成，共 %lu 个注入目录", (unsigned long)installCount]);
+            logBlock(@"请重启界面或 respring，让 SpringBoard 和目标 App 重新加载 AnClick.dylib");
+        }
+        return YES;
     }
 
     if (logBlock) {
         logBlock(@"安装失败：没有可写注入目录。纯 TrollStore 只能内置文件，仍需要设备有可加载 dylib 的注入环境。");
+    }
+    return NO;
+}
+
++ (BOOL)restartSpringBoardWithLog:(void (^ _Nullable)(NSString *message))logBlock {
+    NSArray<NSString *> *commands = @[
+        @"/usr/bin/sbreload",
+        @"/var/jb/usr/bin/sbreload",
+        @"/usr/bin/killall",
+        @"/var/jb/usr/bin/killall",
+    ];
+
+    NSFileManager *fileManager = NSFileManager.defaultManager;
+    for (NSString *command in commands) {
+        if (![fileManager fileExistsAtPath:command]) {
+            continue;
+        }
+
+        pid_t pid = 0;
+        int status = 0;
+        if ([command hasSuffix:@"sbreload"]) {
+            char *argv[] = {(char *)command.UTF8String, NULL};
+            status = posix_spawn(&pid, command.UTF8String, NULL, NULL, argv, environ);
+        } else {
+            char *argv[] = {(char *)command.UTF8String, "SpringBoard", NULL};
+            status = posix_spawn(&pid, command.UTF8String, NULL, NULL, argv, environ);
+        }
+
+        if (status == 0) {
+            if (logBlock) {
+                logBlock([NSString stringWithFormat:@"已请求重启界面: %@", command]);
+            }
+            return YES;
+        }
+
+        if (logBlock) {
+            logBlock([NSString stringWithFormat:@"重启命令失败: %@ (%d)", command, status]);
+        }
+    }
+
+    if (logBlock) {
+        logBlock(@"未找到 sbreload/killall，请手动 respring 或重启目标 App");
     }
     return NO;
 }

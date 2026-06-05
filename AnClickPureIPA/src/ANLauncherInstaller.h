@@ -9,6 +9,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (BOOL)loadBundledDylibWithLog:(void (^ _Nullable)(NSString *message))logBlock;
 + (BOOL)showLoadedPanelWithLog:(void (^ _Nullable)(NSString *message))logBlock;
 + (BOOL)installBundledDylibWithLog:(void (^ _Nullable)(NSString *message))logBlock;
++ (BOOL)restartSpringBoardWithLog:(void (^ _Nullable)(NSString *message))logBlock;
 
 @end
 

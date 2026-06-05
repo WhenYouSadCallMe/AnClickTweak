@@ -20,7 +20,7 @@ static CFStringRef const ANLauncherStopNotification = CFSTR("com.anclick.launche
     self.view.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.075 alpha:1.0];
     [self buildUI];
     [self refreshInstallStatus];
-    [self appendLog:@"IPA 会加载内置 AnClick.dylib 并显示同款悬浮窗；要在其他 App 界面使用，还需要目标 App 成功加载这个 dylib。"];
+    [self appendLog:@"IPA 会加载内置 AnClick.dylib 并显示同款悬浮窗；要在任意界面使用，需要安装到注入目录并重启界面。"];
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -88,7 +88,7 @@ static CFStringRef const ANLauncherStopNotification = CFSTR("com.anclick.launche
     [stack addArrangedSubview:self.statusLabel];
     [self.statusLabel.heightAnchor constraintGreaterThanOrEqualToConstant:74].active = YES;
 
-    UILabel *hintLabel = [self labelWithText:@"打开 IPA 会加载内置 dylib，并显示同款悬浮窗。要在其他 App 界面使用，需要先安装/更新 dylib，然后重启目标 App 或 respring。"
+    UILabel *hintLabel = [self labelWithText:@"打开 IPA 会先显示当前进程同款悬浮窗。要去任意 App 或系统界面使用，需要先安装/更新 dylib，再重启界面，让 SpringBoard 和目标 App 重新加载。"
                                         font:[UIFont systemFontOfSize:13 weight:UIFontWeightRegular]
                                        alpha:0.70];
     [stack addArrangedSubview:hintLabel];
@@ -100,6 +100,11 @@ static CFStringRef const ANLauncherStopNotification = CFSTR("com.anclick.launche
                                              action:@selector(installBundledDylib)
                                               color:[UIColor colorWithRed:0.86 green:0.55 blue:0.16 alpha:1.0]];
     [stack addArrangedSubview:[self buttonRowWithButtons:@[loadButton, installButton]]];
+
+    UIButton *restartButton = [self buttonWithTitle:@"重启界面"
+                                             action:@selector(restartSpringBoard)
+                                              color:[UIColor colorWithRed:0.72 green:0.13 blue:0.10 alpha:1.0]];
+    [stack addArrangedSubview:restartButton];
 
     UIButton *refreshButton = [self buttonWithTitle:@"刷新状态"
                                              action:@selector(refreshInstallStatus)
@@ -167,7 +172,15 @@ static CFStringRef const ANLauncherStopNotification = CFSTR("com.anclick.launche
         [weakSelf appendLog:message];
     }];
     [self refreshInstallStatus];
-    [self appendLog:installed ? @"安装/更新完成" : @"安装/更新未完成"];
+    [self appendLog:installed ? @"安装/更新完成，请点击重启界面后去目标 App 使用" : @"安装/更新未完成"];
+}
+
+- (void)restartSpringBoard {
+    __weak typeof(self) weakSelf = self;
+    BOOL restarted = [ANLauncherInstaller restartSpringBoardWithLog:^(NSString *message) {
+        [weakSelf appendLog:message];
+    }];
+    [self appendLog:restarted ? @"已发送重启界面请求，稍等系统界面重载" : @"重启界面未执行，请手动 respring 或重启目标 App"];
 }
 
 - (void)refreshInstallStatus {

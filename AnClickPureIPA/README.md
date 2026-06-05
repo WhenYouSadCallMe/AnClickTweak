@@ -10,20 +10,20 @@
 
 1. 安装 GitHub Actions 产出的 `AnClick-launcher-ipa`。
 2. 打开安姐连点器 IPA。
-3. IPA 会自动加载内置 `AnClick.dylib`，并显示同款悬浮窗。
-4. 点击 `安装/更新dylib`，把同一份 dylib 安装到注入目录。
-5. 重启目标 App，或 respring。
-6. 打开目标 App，AnClick 悬浮窗会自动出现。
+3. 点击 `安装/更新dylib`，把同一份 dylib 安装到注入目录。
+4. 点击 IPA 里的 `重启界面`，或者手动 respring。
+5. 去任意目标 App 或系统界面，AnClick 悬浮窗会由 `SpringBoard` 或当前 App 里加载的 `AnClick.dylib` 显示。
+6. 如果某个目标 App 没出现悬浮窗，退出并重新打开该 App，让注入环境重新加载 `AnClick.dylib`。
 
-IPA 里的 `显示同款` 会直接调用内置 dylib 的悬浮窗入口。`展开配置`、`播放任务`、`停止任务` 会先确保当前 IPA 进程里的悬浮窗已加载，再通过 Darwin 通知控制已经注入并正在运行的 AnClick。
+IPA 里的 `显示同款` 会直接调用内置 dylib 的悬浮窗入口，也会通过 Darwin 通知唤起已经注入并正在运行的 AnClick。`展开配置`、`播放任务`、`停止任务` 会控制已经注入的全局悬浮框。
 
 ## 重要边界
 
 TrollStore IPA 可以在自己的进程里加载内置 dylib，但普通 IPA 不能把自己的 `UIWindow` 放进别的 App 进程里。
 
-所以，要在其他 App 当前界面像 dylib 注入版一样显示悬浮窗，**仍然需要设备上有可加载 dylib 的注入环境**，例如 MobileSubstrate、Substitute、ElleKit、TweakInject 等。
+所以，要在其他 App 当前界面像 dylib 注入版一样显示悬浮窗并录制/点击，**仍然需要设备上有可加载 dylib 的注入环境**，例如 MobileSubstrate、Substitute、ElleKit、TweakInject 等。安装后必须让 `SpringBoard` 和目标 App 重新加载，第一次安装通常需要 respring。
 
-如果设备没有这些注入环境，IPA 只能在安姐连点器自己的进程里显示同款悬浮窗，无法让任意 App 显示悬浮窗。这个不是 UI 问题，而是系统没有加载 dylib 到目标 App 的入口。
+如果设备没有这些注入环境，IPA 只能在安姐连点器自己的进程里显示同款悬浮窗，无法让任意 App 显示悬浮窗，也无法在任意 App 里录制当前界面触摸。这个不是 UI 问题，而是系统没有加载 dylib 到目标 App 的入口。
 
 ## 内置文件
 
