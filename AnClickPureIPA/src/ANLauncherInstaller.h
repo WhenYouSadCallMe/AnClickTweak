@@ -6,7 +6,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (NSArray<NSString *> *)candidateInjectionDirectories;
 + (NSString *)installedStatusText;
-+ (BOOL)installBundledDylibWithLog:(void (^)(NSString *message))logBlock;
++ (BOOL)loadBundledDylibWithLog:(void (^ _Nullable)(NSString *message))logBlock;
++ (BOOL)showLoadedPanelWithLog:(void (^ _Nullable)(NSString *message))logBlock;
++ (BOOL)installBundledDylibWithLog:(void (^ _Nullable)(NSString *message))logBlock;
 
 @end
 

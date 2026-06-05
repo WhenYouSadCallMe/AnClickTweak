@@ -1,7 +1,10 @@
 #import "ANLauncherInstaller.h"
+#import <dlfcn.h>
 #import <sys/stat.h>
 
 @implementation ANLauncherInstaller
+
+static void *ANLauncherLoadedDylibHandle = NULL;
 
 + (NSArray<NSString *> *)candidateInjectionDirectories {
     return @[
@@ -30,6 +33,8 @@
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
     NSString *bundleState = [self fileExistsAtPath:[self bundledDylibPath]] ? @"IPA内置dylib: 有" : @"IPA内置dylib: 无";
     [parts addObject:bundleState];
+    NSString *processState = NSClassFromString(@"AnClickUI") ? @"当前进程悬浮窗: 可用" : @"当前进程悬浮窗: 未加载";
+    [parts addObject:processState];
     for (NSString *directory in [self candidateInjectionDirectories]) {
         NSString *dylibPath = [directory stringByAppendingPathComponent:@"AnClick.dylib"];
         NSString *filterPath = [directory stringByAppendingPathComponent:@"AnClick.plist"];
@@ -114,7 +119,85 @@
     return YES;
 }
 
-+ (BOOL)installBundledDylibWithLog:(void (^)(NSString *message))logBlock {
++ (BOOL)loadBundledDylibWithLog:(void (^ _Nullable)(NSString *message))logBlock {
+    if (NSClassFromString(@"AnClickUI")) {
+        if (logBlock) {
+            logBlock(@"AnClickUI 已存在，直接使用当前进程里的悬浮窗");
+        }
+        return YES;
+    }
+
+    if (ANLauncherLoadedDylibHandle) {
+        if (logBlock) {
+            logBlock(@"内置 dylib 已加载");
+        }
+        return YES;
+    }
+
+    NSString *sourceDylib = [self bundledDylibPath];
+    if (![self fileExistsAtPath:sourceDylib]) {
+        if (logBlock) {
+            logBlock(@"IPA 内没有 AnClick.dylib，无法显示同款悬浮窗");
+        }
+        return NO;
+    }
+
+    ANLauncherLoadedDylibHandle = dlopen(sourceDylib.UTF8String, RTLD_NOW | RTLD_GLOBAL);
+    if (!ANLauncherLoadedDylibHandle) {
+        if (logBlock) {
+            const char *error = dlerror();
+            NSString *errorText = error ? [NSString stringWithUTF8String:error] : @"未知错误";
+            logBlock([NSString stringWithFormat:@"加载内置 dylib 失败: %@", errorText]);
+        }
+        return NO;
+    }
+
+    if (logBlock) {
+        logBlock(@"已加载内置 dylib，悬浮窗会按注入版逻辑显示");
+    }
+    return YES;
+}
+
++ (BOOL)showLoadedPanelWithLog:(void (^ _Nullable)(NSString *message))logBlock {
+    if (![self loadBundledDylibWithLog:logBlock]) {
+        return NO;
+    }
+
+    Class uiClass = NSClassFromString(@"AnClickUI");
+    SEL sharedSelector = NSSelectorFromString(@"shared");
+    if (!uiClass || ![uiClass respondsToSelector:sharedSelector]) {
+        if (logBlock) {
+            logBlock(@"内置 dylib 已加载，但没有找到 AnClickUI");
+        }
+        return NO;
+    }
+
+    id (*sharedIMP)(id, SEL) = (id (*)(id, SEL))[uiClass methodForSelector:sharedSelector];
+    id ui = sharedIMP ? sharedIMP(uiClass, sharedSelector) : nil;
+    SEL showSelector = NSSelectorFromString(@"show");
+    if (!ui || ![ui respondsToSelector:showSelector]) {
+        if (logBlock) {
+            logBlock(@"内置 dylib 已加载，但无法调用悬浮窗");
+        }
+        return NO;
+    }
+
+    void (*showIMP)(id, SEL) = (void (*)(id, SEL))[ui methodForSelector:showSelector];
+    if (!showIMP) {
+        if (logBlock) {
+            logBlock(@"内置 dylib 已加载，但悬浮窗入口不可用");
+        }
+        return NO;
+    }
+
+    showIMP(ui, showSelector);
+    if (logBlock) {
+        logBlock(@"已调用同款悬浮窗");
+    }
+    return YES;
+}
+
++ (BOOL)installBundledDylibWithLog:(void (^ _Nullable)(NSString *message))logBlock {
     NSString *sourceDylib = [self bundledDylibPath];
     NSString *sourceFilter = [self bundledFilterPath];
     if (![self fileExistsAtPath:sourceDylib]) {

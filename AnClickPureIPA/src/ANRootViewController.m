@@ -9,6 +9,7 @@ static CFStringRef const ANLauncherStopNotification = CFSTR("com.anclick.launche
 @interface ANRootViewController ()
 @property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, strong) UITextView *logTextView;
+@property (nonatomic, assign) BOOL didAutoLoadPanel;
 @end
 
 @implementation ANRootViewController
@@ -19,7 +20,18 @@ static CFStringRef const ANLauncherStopNotification = CFSTR("com.anclick.launche
     self.view.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.075 alpha:1.0];
     [self buildUI];
     [self refreshInstallStatus];
-    [self appendLog:@"IPA 内置 AnClick.dylib；安装/更新后请重启目标 App 或 respring。"];
+    [self appendLog:@"IPA 会加载内置 AnClick.dylib 并显示同款悬浮窗；要在其他 App 界面使用，还需要目标 App 成功加载这个 dylib。"];
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    if (self.didAutoLoadPanel) {
+        return;
+    }
+    self.didAutoLoadPanel = YES;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self loadBundledDylib];
+    });
 }
 
 - (UIButton *)buttonWithTitle:(NSString *)title action:(SEL)action color:(UIColor *)color {
@@ -76,26 +88,30 @@ static CFStringRef const ANLauncherStopNotification = CFSTR("com.anclick.launche
     [stack addArrangedSubview:self.statusLabel];
     [self.statusLabel.heightAnchor constraintGreaterThanOrEqualToConstant:74].active = YES;
 
-    UILabel *hintLabel = [self labelWithText:@"安装/更新后，目标 App 重新打开或 respring，悬浮窗会和 dylib 注入版一样自动出现。下面的显示/展开/播放/停止按钮用于控制已注入的 AnClick。"
+    UILabel *hintLabel = [self labelWithText:@"打开 IPA 会加载内置 dylib，并显示同款悬浮窗。要在其他 App 界面使用，需要先安装/更新 dylib，然后重启目标 App 或 respring。"
                                         font:[UIFont systemFontOfSize:13 weight:UIFontWeightRegular]
                                        alpha:0.70];
     [stack addArrangedSubview:hintLabel];
 
+    UIButton *loadButton = [self buttonWithTitle:@"加载悬浮窗"
+                                          action:@selector(loadBundledDylib)
+                                           color:[UIColor colorWithRed:0.12 green:0.55 blue:0.82 alpha:1.0]];
     UIButton *installButton = [self buttonWithTitle:@"安装/更新dylib"
                                              action:@selector(installBundledDylib)
                                               color:[UIColor colorWithRed:0.86 green:0.55 blue:0.16 alpha:1.0]];
+    [stack addArrangedSubview:[self buttonRowWithButtons:@[loadButton, installButton]]];
+
     UIButton *refreshButton = [self buttonWithTitle:@"刷新状态"
                                              action:@selector(refreshInstallStatus)
                                               color:[UIColor colorWithRed:0.18 green:0.18 blue:0.16 alpha:1.0]];
-    [stack addArrangedSubview:[self buttonRowWithButtons:@[installButton, refreshButton]]];
 
-    UIButton *showButton = [self buttonWithTitle:@"显示悬浮窗"
-                                          action:@selector(postShowCommand)
+    UIButton *showButton = [self buttonWithTitle:@"显示同款"
+                                          action:@selector(showFloatingPanel)
                                            color:[UIColor colorWithRed:0.12 green:0.55 blue:0.82 alpha:1.0]];
     UIButton *expandButton = [self buttonWithTitle:@"展开配置"
                                             action:@selector(postExpandCommand)
                                              color:[UIColor colorWithRed:0.30 green:0.42 blue:0.86 alpha:1.0]];
-    [stack addArrangedSubview:[self buttonRowWithButtons:@[showButton, expandButton]]];
+    [stack addArrangedSubview:[self buttonRowWithButtons:@[refreshButton, showButton, expandButton]]];
 
     UIButton *runButton = [self buttonWithTitle:@"播放任务"
                                          action:@selector(postRunCommand)
@@ -134,6 +150,17 @@ static CFStringRef const ANLauncherStopNotification = CFSTR("com.anclick.launche
     ]];
 }
 
+- (void)loadBundledDylib {
+    __weak typeof(self) weakSelf = self;
+    BOOL loaded = [ANLauncherInstaller showLoadedPanelWithLog:^(NSString *message) {
+        [weakSelf appendLog:message];
+    }];
+    [self refreshInstallStatus];
+    if (loaded) {
+        [self appendLog:@"IPA 内同款悬浮窗已唤起"];
+    }
+}
+
 - (void)installBundledDylib {
     __weak typeof(self) weakSelf = self;
     BOOL installed = [ANLauncherInstaller installBundledDylibWithLog:^(NSString *message) {
@@ -156,19 +183,28 @@ static CFStringRef const ANLauncherStopNotification = CFSTR("com.anclick.launche
     [self appendLog:[NSString stringWithFormat:@"已发送：%@", title]];
 }
 
+- (void)showFloatingPanel {
+    [self loadBundledDylib];
+    [self postShowCommand];
+}
+
 - (void)postShowCommand {
+    [ANLauncherInstaller showLoadedPanelWithLog:nil];
     [self postLauncherNotification:ANLauncherShowNotification title:@"显示悬浮窗"];
 }
 
 - (void)postExpandCommand {
+    [ANLauncherInstaller showLoadedPanelWithLog:nil];
     [self postLauncherNotification:ANLauncherExpandNotification title:@"展开配置"];
 }
 
 - (void)postRunCommand {
+    [ANLauncherInstaller showLoadedPanelWithLog:nil];
     [self postLauncherNotification:ANLauncherRunNotification title:@"播放任务"];
 }
 
 - (void)postStopCommand {
+    [ANLauncherInstaller showLoadedPanelWithLog:nil];
     [self postLauncherNotification:ANLauncherStopNotification title:@"停止任务"];
 }
 
