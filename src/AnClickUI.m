@@ -66,6 +66,7 @@ static const NSInteger AnClickSpringBoardVolumeDownButtonType = 103;
 static const NSInteger AnClickColorPickMarkerTagBase = 43100;
 static const NSInteger AnClickColorPickRowTagBase = 43200;
 static const NSUInteger AnClickColorPickMaxSamples = 32;
+static const NSUInteger AnClickNetworkPostMaxPairs = 8;
 static CFStringRef const AnClickVolumeShortcutDownNotification = CFSTR("com.anclick.volume.down");
 static CFStringRef const AnClickVolumeShortcutUpNotification = CFSTR("com.anclick.volume.up");
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
@@ -166,6 +167,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_networkRetryModeButton;
     UIButton *_networkPostCustomButton;
     UIButton *_networkPostOCRResultButton;
+    UIButton *_networkPostAddPairButton;
     UIButton *_previewActionButton;
     UIButton *_swipeRecordButton;
     UIButton *_macroRecordButton;
@@ -196,7 +198,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UITextField *_networkContainsField;
     UITextField *_networkFalseField;
     UITextField *_networkPostBodyField;
-    UITextField *_networkPostExtraFieldsField;
     UIView *_captureOverlay;
     UIScrollView *_captureScrollView;
     UIImageView *_captureImageView;
@@ -242,6 +243,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIView *_globalTimePickerView;
     UIPickerView *_globalTimePicker;
     UIScrollView *_configListView;
+    NSMutableArray<UITextField *> *_networkPostKeyFields;
+    NSMutableArray<UITextField *> *_networkPostValueFields;
+    NSMutableArray<UIButton *> *_networkPostValueModeButtons;
+    NSMutableArray<NSMutableDictionary *> *_networkPostPairs;
     NSMutableArray<NSValue *> *_recordedSwipePoints;
     NSMutableArray<NSValue *> *_liveSwipePoints;
     NSArray<NSDictionary *> *_recordedMacroEvents;
@@ -340,7 +345,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *_networkContainsText;
     NSString *_networkFalseText;
     NSString *_networkPostBody;
-    NSString *_networkPostExtraFields;
     NSString *_globalNetworkURL;
     NSString *_globalNetworkContainsText;
     NSString *_globalNetworkFalseText;
@@ -1034,6 +1038,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     dispatch_async(dispatch_get_main_queue(), ^{
         [self attachPanelWindowToActiveSceneIfNeeded];
         [self installVolumeShortcutControl];
+        if (self->_toastWindow) {
+            [self ensureToastWindow];
+        }
         [self reclampPanelWindowForCurrentScreen];
         [self relayoutScreenInteractionOverlays];
         NSString *toastText = self->_toastLabel.text;
@@ -1048,6 +1055,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.28 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self attachPanelWindowToActiveSceneIfNeeded];
         [self installVolumeShortcutControl];
+        if (self->_toastWindow) {
+            [self ensureToastWindow];
+        }
         [self reclampPanelWindowForCurrentScreen];
         [self relayoutScreenInteractionOverlays];
     });
@@ -1079,7 +1089,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkRequestOnly = NO;
     _networkUsesPost = NO;
     _networkPostBodyUsesOCRResult = NO;
-    _networkPostExtraFields = nil;
     _networkRetryForever = YES;
     _networkTimeout = 8.0;
     _globalStartHour = 8;
@@ -1273,10 +1282,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkPostCustomButton.frame = CGRectMake(gap, 234, buttonWidth, 32);
     [_panelView addSubview:_networkPostCustomButton];
 
-    _networkPostOCRResultButton = [self panelButtonWithTitle:@"键值JSON" action:@selector(selectNetworkPostBodySource:)];
+    _networkPostOCRResultButton = [self panelButtonWithTitle:@"键值" action:@selector(selectNetworkPostBodySource:)];
     _networkPostOCRResultButton.tag = 1;
     _networkPostOCRResultButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 234, buttonWidth, 32);
     [_panelView addSubview:_networkPostOCRResultButton];
+
+    _networkPostAddPairButton = [self panelButtonWithTitle:@"添加键值" action:@selector(addNetworkPostPair)];
+    _networkPostAddPairButton.frame = CGRectMake(gap, 272, buttonWidth, 32);
+    [_panelView addSubview:_networkPostAddPairButton];
 
     _networkRetryModeButton = [self panelButtonWithTitle:@"一直判断" action:@selector(toggleNetworkRetryMode)];
     _networkRetryModeButton.frame = CGRectMake(gap, 234, buttonWidth, 32);
@@ -1435,15 +1448,38 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_networkPostBodyField addTarget:self action:@selector(networkFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_networkPostBodyField];
 
-    _networkPostExtraFieldsField = [[UITextField alloc] initWithFrame:CGRectZero];
-    _networkPostExtraFieldsField.keyboardType = UIKeyboardTypeDefault;
-    _networkPostExtraFieldsField.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    _networkPostExtraFieldsField.autocorrectionType = UITextAutocorrectionTypeNo;
-    [self applyObsidianInputStyleToField:_networkPostExtraFieldsField placeholder:@"键=值 例content={{result}}&to_user=@all" monospaced:NO];
-    [self configureConfigTextField:_networkPostExtraFieldsField];
-    [_networkPostExtraFieldsField addTarget:self action:@selector(networkFieldChanged:) forControlEvents:UIControlEventEditingChanged];
-    [_networkPostExtraFieldsField addTarget:self action:@selector(networkFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
-    [_panelView addSubview:_networkPostExtraFieldsField];
+    _networkPostKeyFields = [NSMutableArray array];
+    _networkPostValueFields = [NSMutableArray array];
+    _networkPostValueModeButtons = [NSMutableArray array];
+    _networkPostPairs = [NSMutableArray array];
+    for (NSUInteger i = 0; i < AnClickNetworkPostMaxPairs; i++) {
+        UITextField *keyField = [[UITextField alloc] initWithFrame:CGRectZero];
+        keyField.keyboardType = UIKeyboardTypeDefault;
+        keyField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+        keyField.autocorrectionType = UITextAutocorrectionTypeNo;
+        [self applyObsidianInputStyleToField:keyField placeholder:@"键" monospaced:NO];
+        [self configureConfigTextField:keyField];
+        [keyField addTarget:self action:@selector(networkFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+        [keyField addTarget:self action:@selector(networkFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+        [_panelView addSubview:keyField];
+        [_networkPostKeyFields addObject:keyField];
+
+        UITextField *valueField = [[UITextField alloc] initWithFrame:CGRectZero];
+        valueField.keyboardType = UIKeyboardTypeDefault;
+        valueField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+        valueField.autocorrectionType = UITextAutocorrectionTypeNo;
+        [self applyObsidianInputStyleToField:valueField placeholder:@"值" monospaced:NO];
+        [self configureConfigTextField:valueField];
+        [valueField addTarget:self action:@selector(networkFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+        [valueField addTarget:self action:@selector(networkFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+        [_panelView addSubview:valueField];
+        [_networkPostValueFields addObject:valueField];
+
+        UIButton *modeButton = [self panelButtonWithTitle:@"自填" action:@selector(toggleNetworkPostPairValueMode:)];
+        modeButton.tag = (NSInteger)i;
+        [_panelView addSubview:modeButton];
+        [_networkPostValueModeButtons addObject:modeButton];
+    }
 
     _taskListView = [[UIScrollView alloc] initWithFrame:CGRectMake(8, 84, panelWidth - 16, panelHeight - 92)];
     _taskListView.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.92];
@@ -1622,8 +1658,30 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return nil;
 }
 
+- (CGRect)currentScreenBounds {
+    CGRect bounds = CGRectZero;
+    if (@available(iOS 13.0, *)) {
+        UIWindowScene *scene = _panelWindow.windowScene;
+        if (!scene) {
+            UIWindow *hostWindow = [self hostWindow];
+            scene = hostWindow.windowScene;
+        }
+        if (!scene) {
+            scene = [self activeWindowScene];
+        }
+        if (scene) {
+            bounds = scene.coordinateSpace.bounds;
+        }
+    }
+    if (CGRectIsEmpty(bounds)) {
+        bounds = UIScreen.mainScreen.bounds;
+    }
+    bounds.origin = CGPointZero;
+    return CGRectStandardize(bounds);
+}
+
 - (void)ensureToastWindow {
-    CGRect bounds = UIScreen.mainScreen.bounds;
+    CGRect bounds = [self currentScreenBounds];
     if (!_toastWindow) {
         _toastWindow = [[UIWindow alloc] initWithFrame:bounds];
         if (@available(iOS 13.0, *)) {
@@ -1861,7 +1919,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (CGSize)expandedPanelSizeForEditorVisible:(BOOL)editorVisible {
-    CGSize screenSize = UIScreen.mainScreen.bounds.size;
+    CGSize screenSize = [self currentScreenBounds].size;
     BOOL landscape = screenSize.width > screenSize.height;
     CGFloat widthLimit = landscape ? (editorVisible ? 430.0 : 380.0) : 340.0;
     CGFloat width = MIN(widthLimit, screenSize.width - 10.0);
@@ -1875,7 +1933,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (CGRect)clampedPanelFrame:(CGRect)frame {
-    CGRect bounds = UIScreen.mainScreen.bounds;
+    CGRect bounds = [self currentScreenBounds];
     UIEdgeInsets safeInsets = [self panelSafeAreaInsets];
     CGFloat minX = MAX(4.0, safeInsets.left + 4.0);
     CGFloat minY = MAX(24.0, safeInsets.top + 4.0);
@@ -1887,7 +1945,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (CGRect)clampedFloatingFrame:(CGRect)frame {
-    CGRect bounds = UIScreen.mainScreen.bounds;
+    CGRect bounds = [self currentScreenBounds];
     UIEdgeInsets safeInsets = [self panelSafeAreaInsets];
     CGFloat minX = MAX(6.0, safeInsets.left + 6.0);
     CGFloat minY = MAX(6.0, safeInsets.top + 8.0);
@@ -1960,9 +2018,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
     }
 
-    CGSize screenSize = view ? view.bounds.size : UIScreen.mainScreen.bounds.size;
+    CGSize screenSize = view ? view.bounds.size : [self currentScreenBounds].size;
     if (screenSize.width <= 0.0 || screenSize.height <= 0.0) {
-        screenSize = UIScreen.mainScreen.bounds.size;
+        screenSize = [self currentScreenBounds].size;
     }
     CGFloat shortSide = MIN(screenSize.width, screenSize.height);
     CGFloat longSide = MAX(screenSize.width, screenSize.height);
@@ -2060,7 +2118,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)relayoutScreenInteractionOverlays {
-    CGRect screenBounds = UIScreen.mainScreen.bounds;
+    CGRect screenBounds = [self currentScreenBounds];
     if (_captureOverlay) {
         _captureOverlay.frame = screenBounds;
         _captureScrollView.frame = _captureOverlay.bounds;
@@ -2172,6 +2230,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkRetryModeButton.hidden = YES;
     _networkPostCustomButton.hidden = YES;
     _networkPostOCRResultButton.hidden = YES;
+    _networkPostAddPairButton.hidden = YES;
     _previewActionButton.hidden = YES;
     _swipeRecordButton.hidden = YES;
     _macroRecordButton.hidden = YES;
@@ -2185,7 +2244,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkContainsField.hidden = YES;
     _networkFalseField.hidden = YES;
     _networkPostBodyField.hidden = YES;
-    _networkPostExtraFieldsField.hidden = YES;
+    [self hideNetworkPostPairControls];
     _previewView.hidden = YES;
     _colorPreviewView.hidden = YES;
     _editorContentScrollView.hidden = !visible;
@@ -2237,6 +2296,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _networkRetryModeButton,
         _networkPostCustomButton,
         _networkPostOCRResultButton,
+        _networkPostAddPairButton,
         _previewActionButton,
         _swipeRecordButton,
         _macroRecordButton,
@@ -2249,7 +2309,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _networkContainsField,
         _networkFalseField,
         _networkPostBodyField,
-        _networkPostExtraFieldsField,
         _previewView,
         _colorPreviewView,
     };
@@ -2260,6 +2319,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [result addObject:views[i]];
         }
     }
+    [result addObjectsFromArray:_networkPostKeyFields ?: @[]];
+    [result addObjectsFromArray:_networkPostValueFields ?: @[]];
+    [result addObjectsFromArray:_networkPostValueModeButtons ?: @[]];
     return result;
 }
 
@@ -3480,7 +3542,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkContainsText = nil;
     _networkFalseText = nil;
     _networkPostBody = nil;
-    _networkPostExtraFields = nil;
+    _networkPostPairs = [NSMutableArray arrayWithObject:[self blankNetworkPostPair]];
     _networkRequestOnly = NO;
     _networkUsesPost = NO;
     _networkPostBodyUsesOCRResult = NO;
@@ -3802,7 +3864,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _thresholdField, _ocrTargetField, _networkURLField, _networkContainsField, _networkFalseField, _networkPostBodyField, _networkPostExtraFieldsField, nil];
+    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _thresholdField, _ocrTargetField, _networkURLField, _networkContainsField, _networkFalseField, _networkPostBodyField, nil];
+    [fields addObjectsFromArray:_networkPostKeyFields ?: @[]];
+    [fields addObjectsFromArray:_networkPostValueFields ?: @[]];
     if (_globalDelayField) {
         [fields addObject:_globalDelayField];
     }
@@ -3978,9 +4042,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_networkPostBodyField) {
         _networkPostBody = [self trimmedActionDescription:_networkPostBodyField.text];
     }
-    if (_networkPostExtraFieldsField) {
-        _networkPostExtraFields = [self trimmedActionDescription:_networkPostExtraFieldsField.text];
-    }
+    [self syncNetworkPostPairsFromFields];
 }
 
 - (void)refreshTimingFieldsIfNeeded {
@@ -4065,6 +4127,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     [self syncNetworkFieldsFromEditor];
     _networkUsesPost = !_networkUsesPost;
+    if (_networkUsesPost && _actionMode == AnClickActionModeOCR && _imageActionMode == AnClickActionModeNetwork) {
+        _networkPostBodyUsesOCRResult = YES;
+        [self ensureNetworkPostPairs];
+    }
     [self autosaveSelectedTaskIfPossible];
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
@@ -4078,6 +4144,47 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     [self syncNetworkFieldsFromEditor];
     _networkPostBodyUsesOCRResult = sender.tag == 1;
+    [self autosaveSelectedTaskIfPossible];
+    [self refreshEditorConfigControls];
+    [self updateStatusForCurrentConfig];
+}
+
+- (void)addNetworkPostPair {
+    if (_actionMode != AnClickActionModeOCR ||
+        _imageActionMode != AnClickActionModeNetwork ||
+        !_networkUsesPost) {
+        return;
+    }
+    [self syncNetworkFieldsFromEditor];
+    [self ensureNetworkPostPairs];
+    if (_networkPostPairs.count >= AnClickNetworkPostMaxPairs) {
+        _statusLabel.text = @"最多8组键值";
+        [self showToast:_statusLabel.text];
+        return;
+    }
+    [_networkPostPairs addObject:[self blankNetworkPostPair]];
+    _networkPostBodyUsesOCRResult = YES;
+    [self autosaveSelectedTaskIfPossible];
+    [self refreshEditorConfigControls];
+    [self updateStatusForCurrentConfig];
+}
+
+- (void)toggleNetworkPostPairValueMode:(UIButton *)sender {
+    if (_actionMode != AnClickActionModeOCR ||
+        _imageActionMode != AnClickActionModeNetwork ||
+        !_networkUsesPost) {
+        return;
+    }
+    [self syncNetworkFieldsFromEditor];
+    [self ensureNetworkPostPairs];
+    NSUInteger index = (NSUInteger)sender.tag;
+    if (index >= _networkPostPairs.count) {
+        return;
+    }
+    NSMutableDictionary *pair = _networkPostPairs[index];
+    BOOL usesResult = ![self networkPostPairValueUsesResult:pair];
+    pair[@"useResult"] = @(usesResult);
+    _networkPostBodyUsesOCRResult = YES;
     [self autosaveSelectedTaskIfPossible];
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
@@ -4144,7 +4251,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkContainsField.hidden = YES;
     _networkFalseField.hidden = YES;
     _networkPostBodyField.hidden = YES;
-    _networkPostExtraFieldsField.hidden = YES;
+    [self hideNetworkPostPairControls];
     _colorPreviewView.hidden = YES;
     _saveTaskButton.hidden = YES;
     _editorBackButton.hidden = YES;
@@ -4251,37 +4358,253 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_networkUsesPost) {
         BOOL canUseOCRResult = _actionMode == AnClickActionModeOCR;
         if (canUseOCRResult) {
-            _networkPostCustomButton.hidden = NO;
-            _networkPostOCRResultButton.hidden = NO;
-            [_networkPostCustomButton setTitle:@"原始内容" forState:UIControlStateNormal];
-            [_networkPostOCRResultButton setTitle:@"键值JSON" forState:UIControlStateNormal];
-            [self layoutButtons:@[_networkPostCustomButton, _networkPostOCRResultButton]
-                              x:side
-                              y:nextY
-                          width:width
-                         height:34.0
-                            gap:10.0];
-            [self styleSegmentButton:_networkPostCustomButton selected:!_networkPostBodyUsesOCRResult];
-            [self styleSegmentButton:_networkPostOCRResultButton selected:_networkPostBodyUsesOCRResult];
-            nextY += 42.0;
-        }
-        if (!(canUseOCRResult && _networkPostBodyUsesOCRResult)) {
-            _networkPostBodyField.hidden = NO;
-            NSString *postPlaceholder = @"POST参数 JSON/表单";
-            if (canUseOCRResult) {
-                postPlaceholder = @"原始POST 可用{{result}}";
-            }
-            [self setStyledPlaceholder:postPlaceholder forField:_networkPostBodyField alpha:0.25];
-            _networkPostBodyField.frame = CGRectMake(side, nextY, width, 40.0);
-            nextY += 50.0;
+            _networkPostBodyUsesOCRResult = YES;
+            nextY = [self layoutNetworkPostPairFieldsAtY:nextY side:side width:width];
         } else {
-            _networkPostExtraFieldsField.hidden = NO;
-            [self setStyledPlaceholder:@"键=值 例content={{result}}&to_user=@all" forField:_networkPostExtraFieldsField alpha:0.25];
-            _networkPostExtraFieldsField.frame = CGRectMake(side, nextY, width, 40.0);
+            _networkPostBodyField.hidden = NO;
+            [self setStyledPlaceholder:@"POST参数 JSON/表单" forField:_networkPostBodyField alpha:0.25];
+            _networkPostBodyField.frame = CGRectMake(side, nextY, width, 40.0);
             nextY += 50.0;
         }
     }
     return nextY;
+}
+
+- (NSMutableDictionary *)blankNetworkPostPair {
+    return [@{
+        @"key": @"",
+        @"value": @"",
+        @"useResult": @NO,
+    } mutableCopy];
+}
+
+- (void)ensureNetworkPostPairs {
+    if (!_networkPostPairs) {
+        _networkPostPairs = [NSMutableArray array];
+    }
+    while (_networkPostPairs.count > AnClickNetworkPostMaxPairs) {
+        [_networkPostPairs removeLastObject];
+    }
+    if (_networkPostPairs.count == 0) {
+        [_networkPostPairs addObject:[self blankNetworkPostPair]];
+    }
+}
+
+- (void)hideNetworkPostPairControls {
+    _networkPostAddPairButton.hidden = YES;
+    for (UITextField *field in _networkPostKeyFields) {
+        field.hidden = YES;
+    }
+    for (UITextField *field in _networkPostValueFields) {
+        field.hidden = YES;
+    }
+    for (UIButton *button in _networkPostValueModeButtons) {
+        button.hidden = YES;
+    }
+}
+
+- (BOOL)networkPostPairValueUsesResult:(NSDictionary *)pair {
+    return [pair[@"useResult"] boolValue];
+}
+
+- (BOOL)networkPostValueTextMeansResult:(NSString *)value {
+    NSString *text = [self trimmedActionDescription:value];
+    NSArray<NSString *> *tokens = @[@"{{result}}", @"{{识别结果}}", @"{{识字结果}}", @"{{正则结果}}", @"{{正则识别结果}}"];
+    for (NSString *token in tokens) {
+        if ([text isEqualToString:token]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (NSString *)unquotedNetworkPostText:(NSString *)text {
+    NSString *trimmed = [self trimmedActionDescription:text];
+    if (trimmed.length >= 2) {
+        unichar first = [trimmed characterAtIndex:0];
+        unichar last = [trimmed characterAtIndex:trimmed.length - 1];
+        if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+            return [trimmed substringWithRange:NSMakeRange(1, trimmed.length - 2)];
+        }
+    }
+    return trimmed;
+}
+
+- (void)syncNetworkPostPairsFromFields {
+    if (_networkPostKeyFields.count == 0 || _networkPostValueFields.count == 0) {
+        return;
+    }
+    [self ensureNetworkPostPairs];
+    NSUInteger count = MIN(_networkPostPairs.count, MIN(_networkPostKeyFields.count, _networkPostValueFields.count));
+    for (NSUInteger i = 0; i < count; i++) {
+        NSMutableDictionary *pair = _networkPostPairs[i];
+        UITextField *keyField = _networkPostKeyFields[i];
+        UITextField *valueField = _networkPostValueFields[i];
+        pair[@"key"] = [self trimmedActionDescription:keyField.text] ?: @"";
+        if (![self networkPostPairValueUsesResult:pair]) {
+            pair[@"value"] = [self trimmedActionDescription:valueField.text] ?: @"";
+        }
+    }
+}
+
+- (NSArray<NSDictionary *> *)configuredNetworkPostPairs {
+    [self ensureNetworkPostPairs];
+    NSMutableArray<NSDictionary *> *pairs = [NSMutableArray array];
+    for (NSDictionary *pair in _networkPostPairs) {
+        NSString *key = [self trimmedActionDescription:pair[@"key"]];
+        NSString *value = [self trimmedActionDescription:pair[@"value"]];
+        BOOL usesResult = [self networkPostPairValueUsesResult:pair];
+        if (key.length == 0 && value.length == 0 && !usesResult) {
+            continue;
+        }
+        if (key.length == 0) {
+            continue;
+        }
+        [pairs addObject:@{
+            @"key": key,
+            @"value": value ?: @"",
+            @"useResult": @(usesResult),
+        }];
+    }
+    return pairs;
+}
+
+- (NSArray<NSDictionary *> *)networkPostPairsFromKeyValueText:(NSString *)text {
+    NSString *rule = [self trimmedActionDescription:text];
+    if (rule.length == 0) {
+        return @[];
+    }
+
+    NSMutableArray<NSDictionary *> *pairs = [NSMutableArray array];
+    NSCharacterSet *pairSeparators = [NSCharacterSet characterSetWithCharactersInString:@"&;\n；"];
+    for (NSString *rawPair in [rule componentsSeparatedByCharactersInSet:pairSeparators]) {
+        NSString *pairText = [self trimmedActionDescription:rawPair];
+        if (pairText.length == 0) {
+            continue;
+        }
+        NSRange separatorRange = [pairText rangeOfString:@"="];
+        if (separatorRange.location == NSNotFound) {
+            separatorRange = [pairText rangeOfString:@":"];
+        }
+        if (separatorRange.location == NSNotFound) {
+            continue;
+        }
+        NSString *key = [self unquotedNetworkPostText:[pairText substringToIndex:separatorRange.location]];
+        NSString *value = [self unquotedNetworkPostText:[pairText substringFromIndex:NSMaxRange(separatorRange)]];
+        if (key.length == 0) {
+            continue;
+        }
+        BOOL usesResult = [self networkPostValueTextMeansResult:value];
+        [pairs addObject:@{
+            @"key": key,
+            @"value": usesResult ? @"" : (value ?: @""),
+            @"useResult": @(usesResult),
+        }];
+        if (pairs.count >= AnClickNetworkPostMaxPairs) {
+            break;
+        }
+    }
+    return pairs;
+}
+
+- (NSMutableArray<NSMutableDictionary *> *)mutableNetworkPostPairsFromTask:(NSDictionary *)task {
+    NSMutableArray<NSMutableDictionary *> *pairs = [NSMutableArray array];
+    id savedPairs = task[@"networkPostPairs"];
+    if ([savedPairs isKindOfClass:NSArray.class]) {
+        for (NSDictionary *pair in (NSArray *)savedPairs) {
+            if (![pair isKindOfClass:NSDictionary.class]) {
+                continue;
+            }
+            NSString *key = [self trimmedActionDescription:pair[@"key"]];
+            NSString *value = [self trimmedActionDescription:pair[@"value"]];
+            BOOL usesResult = [pair[@"useResult"] boolValue] || [self networkPostValueTextMeansResult:value];
+            [pairs addObject:[@{
+                @"key": key ?: @"",
+                @"value": usesResult ? @"" : (value ?: @""),
+                @"useResult": @(usesResult),
+            } mutableCopy]];
+            if (pairs.count >= AnClickNetworkPostMaxPairs) {
+                break;
+            }
+        }
+    }
+    if (pairs.count == 0) {
+        for (NSDictionary *pair in [self networkPostPairsFromKeyValueText:task[@"networkPostExtraFields"]]) {
+            [pairs addObject:[pair mutableCopy]];
+        }
+    }
+    if (pairs.count == 0) {
+        [pairs addObject:[self blankNetworkPostPair]];
+    }
+    return pairs;
+}
+
+- (void)refreshNetworkPostPairFieldValues {
+    [self ensureNetworkPostPairs];
+    NSUInteger count = MIN(_networkPostPairs.count, MIN(_networkPostKeyFields.count, _networkPostValueFields.count));
+    for (NSUInteger i = 0; i < _networkPostKeyFields.count; i++) {
+        BOOL visible = i < count;
+        UITextField *keyField = _networkPostKeyFields[i];
+        UITextField *valueField = _networkPostValueFields[i];
+        UIButton *modeButton = _networkPostValueModeButtons[i];
+        keyField.hidden = !visible;
+        valueField.hidden = !visible;
+        modeButton.hidden = !visible;
+        if (!visible) {
+            continue;
+        }
+
+        NSDictionary *pair = _networkPostPairs[i];
+        BOOL usesResult = [self networkPostPairValueUsesResult:pair];
+        if (!keyField.isFirstResponder) {
+            keyField.text = [self trimmedActionDescription:pair[@"key"]] ?: @"";
+        }
+        if (usesResult) {
+            valueField.enabled = NO;
+            valueField.alpha = 0.62;
+            valueField.text = @"识别结果";
+        } else {
+            valueField.enabled = YES;
+            valueField.alpha = 1.0;
+            if (!valueField.isFirstResponder) {
+                valueField.text = [self trimmedActionDescription:pair[@"value"]] ?: @"";
+            }
+        }
+        [modeButton setTitle:(usesResult ? @"结果" : @"自填") forState:UIControlStateNormal];
+        [self styleSegmentButton:modeButton selected:usesResult];
+    }
+}
+
+- (CGFloat)layoutNetworkPostPairFieldsAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
+    [self ensureNetworkPostPairs];
+    [self refreshNetworkPostPairFieldValues];
+
+    CGFloat gap = 7.0;
+    CGFloat rowHeight = 36.0;
+    CGFloat modeWidth = width >= 330.0 ? 62.0 : 54.0;
+    CGFloat fieldWidth = floor((width - modeWidth - gap * 2.0) / 2.0);
+    NSUInteger count = MIN(_networkPostPairs.count, MIN(_networkPostKeyFields.count, _networkPostValueFields.count));
+    for (NSUInteger i = 0; i < count; i++) {
+        CGFloat rowY = y + (rowHeight + 8.0) * i;
+        UITextField *keyField = _networkPostKeyFields[i];
+        UITextField *valueField = _networkPostValueFields[i];
+        UIButton *modeButton = _networkPostValueModeButtons[i];
+        keyField.frame = CGRectMake(side, rowY, fieldWidth, rowHeight);
+        valueField.frame = CGRectMake(side + fieldWidth + gap, rowY, fieldWidth, rowHeight);
+        modeButton.frame = CGRectMake(side + fieldWidth * 2.0 + gap * 2.0, rowY, modeWidth, rowHeight);
+        [self updateButtonShadowPath:modeButton];
+    }
+
+    CGFloat nextY = y + (rowHeight + 8.0) * count;
+    _networkPostAddPairButton.hidden = count >= AnClickNetworkPostMaxPairs;
+    if (!_networkPostAddPairButton.hidden) {
+        [_networkPostAddPairButton setTitle:@"添加键值" forState:UIControlStateNormal];
+        [self styleNormalButton:_networkPostAddPairButton];
+        _networkPostAddPairButton.frame = CGRectMake(side, nextY, width, 34.0);
+        [self updateButtonShadowPath:_networkPostAddPairButton];
+        nextY += 42.0;
+    }
+    return nextY + 4.0;
 }
 
 - (NSString *)pointSummaryForMode:(AnClickActionMode)mode emptyTitle:(NSString *)emptyTitle {
@@ -4444,9 +4767,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (!_networkPostBodyField.isFirstResponder) {
         _networkPostBodyField.text = _networkPostBody ?: @"";
     }
-    if (!_networkPostExtraFieldsField.isFirstResponder) {
-        _networkPostExtraFieldsField.text = _networkPostExtraFields ?: @"";
-    }
+    [self refreshNetworkPostPairFieldValues];
     [self refreshTimingFieldsIfNeeded];
     CGFloat configTopY = [self editorConfigTopY];
 
@@ -6048,18 +6369,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     task[@"networkMethod"] = [self normalizedNetworkMethodFromPostFlag:_networkUsesPost];
     task[@"networkUsesPost"] = @(_networkUsesPost);
     BOOL canUseOCRResult = _actionMode == AnClickActionModeOCR && _networkUsesPost;
-    task[@"networkPostBodyUsesOCRResult"] = @(canUseOCRResult && _networkPostBodyUsesOCRResult);
-    if (canUseOCRResult && _networkPostBodyUsesOCRResult && _networkPostExtraFields.length == 0) {
-        if (requireComplete) {
-            _statusLabel.text = @"先填POST键值";
+    task[@"networkPostBodyUsesOCRResult"] = @(canUseOCRResult);
+    if (canUseOCRResult) {
+        NSArray<NSDictionary *> *pairs = [self configuredNetworkPostPairs];
+        if (pairs.count == 0) {
+            if (requireComplete) {
+                _statusLabel.text = @"先填POST键值";
+            }
+            return !requireComplete;
         }
-        return !requireComplete;
+        task[@"networkPostPairs"] = pairs;
     }
-    if (_networkPostBody.length > 0) {
+    if (!canUseOCRResult && _networkPostBody.length > 0) {
         task[@"networkPostBody"] = _networkPostBody;
-    }
-    if (_networkPostExtraFields.length > 0) {
-        task[@"networkPostExtraFields"] = _networkPostExtraFields;
     }
     return YES;
 }
@@ -6076,11 +6398,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)loadNetworkRequestConfigFromTask:(NSDictionary *)task {
     _networkURL = [self trimmedActionDescription:task[@"networkURL"]];
     _networkPostBody = [self trimmedActionDescription:task[@"networkPostBody"]];
-    _networkPostExtraFields = [self trimmedActionDescription:task[@"networkPostExtraFields"]];
     _networkUsesPost = [[self networkMethodForTask:task] isEqualToString:@"POST"];
+    _networkPostPairs = [self mutableNetworkPostPairsFromTask:task];
     _networkPostBodyUsesOCRResult = _networkUsesPost &&
         [self modeForTask:task] == AnClickActionModeOCR &&
-        [task[@"networkPostBodyUsesOCRResult"] boolValue];
+        ([task[@"networkPostBodyUsesOCRResult"] boolValue] || [task[@"networkPostPairs"] isKindOfClass:NSArray.class]);
 }
 
 - (NSMutableDictionary *)taskDictionaryFromCurrentConfigRequireComplete:(BOOL)requireComplete {
@@ -6974,18 +7296,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [self trimmedActionDescription:task[@"networkPostExtraFields"]];
 }
 
-- (NSString *)unquotedNetworkPostText:(NSString *)text {
-    NSString *trimmed = [self trimmedActionDescription:text];
-    if (trimmed.length >= 2) {
-        unichar first = [trimmed characterAtIndex:0];
-        unichar last = [trimmed characterAtIndex:trimmed.length - 1];
-        if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
-            return [trimmed substringWithRange:NSMakeRange(1, trimmed.length - 2)];
-        }
-    }
-    return trimmed;
-}
-
 - (id)networkPostJSONValueFromText:(NSString *)text recognitionText:(NSString *)recognitionText {
     NSString *value = [self postBody:[self unquotedNetworkPostText:text] applyingRecognitionText:recognitionText];
     NSString *lower = [[self trimmedActionDescription:value] lowercaseString];
@@ -7066,6 +7376,26 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return dictionary.count > 0 ? dictionary : nil;
 }
 
+- (NSDictionary *)networkPostDictionaryFromPairs:(NSArray *)pairs recognitionText:(NSString *)recognitionText {
+    if (![pairs isKindOfClass:NSArray.class]) {
+        return nil;
+    }
+    NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+    for (NSDictionary *pair in pairs) {
+        if (![pair isKindOfClass:NSDictionary.class]) {
+            continue;
+        }
+        NSString *key = [self trimmedActionDescription:pair[@"key"]];
+        if (key.length == 0) {
+            continue;
+        }
+        BOOL usesResult = [pair[@"useResult"] boolValue];
+        NSString *valueText = usesResult ? (recognitionText ?: @"") : [self trimmedActionDescription:pair[@"value"]];
+        dictionary[key] = [self networkPostJSONValueFromText:valueText recognitionText:recognitionText];
+    }
+    return dictionary.count > 0 ? dictionary : nil;
+}
+
 - (NSString *)networkPostJSONStringFromDictionary:(NSDictionary *)dictionary {
     if (![NSJSONSerialization isValidJSONObject:dictionary]) {
         return nil;
@@ -7081,8 +7411,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (NSString *)networkPostBodyForTask:(NSDictionary *)task recognitionText:(NSString *)recognitionText {
     if ([self modeForTask:task] == AnClickActionModeOCR &&
         [task[@"networkPostBodyUsesOCRResult"] boolValue]) {
-        NSDictionary *postDictionary = [self networkPostDictionaryFromKeyValueText:[self networkPostKeyValueTextForTask:task]
-                                                                   recognitionText:recognitionText];
+        NSDictionary *postDictionary = [self networkPostDictionaryFromPairs:task[@"networkPostPairs"]
+                                                            recognitionText:recognitionText];
+        if (!postDictionary) {
+            postDictionary = [self networkPostDictionaryFromKeyValueText:[self networkPostKeyValueTextForTask:task]
+                                                         recognitionText:recognitionText];
+        }
         NSString *jsonBody = postDictionary ? [self networkPostJSONStringFromDictionary:postDictionary] : nil;
         if (jsonBody.length > 0) {
             return jsonBody;
@@ -7955,6 +8289,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             }
             if ([[self networkMethodForTask:task] isEqualToString:@"POST"] &&
                 [task[@"networkPostBodyUsesOCRResult"] boolValue] &&
+                [self networkPostDictionaryFromPairs:task[@"networkPostPairs"] recognitionText:@""].count == 0 &&
                 [self networkPostKeyValueTextForTask:task].length == 0) {
                 _statusLabel.text = @"任务POST键值未填写";
                 return NO;
@@ -8790,7 +9125,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    _colorPickWindow = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    _colorPickWindow = [[UIWindow alloc] initWithFrame:[self currentScreenBounds]];
     if (@available(iOS 13.0, *)) {
         _colorPickWindow.windowScene = hostWindow.windowScene ?: [self activeWindowScene];
     }
@@ -9202,7 +9537,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _pointPickSnapshot = image;
     _pointPickHostWindow = hostWindow;
 
-    _pointPickWindow = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    _pointPickWindow = [[UIWindow alloc] initWithFrame:[self currentScreenBounds]];
     if (@available(iOS 13.0, *)) {
         _pointPickWindow.windowScene = hostWindow.windowScene ?: [self activeWindowScene];
     }
