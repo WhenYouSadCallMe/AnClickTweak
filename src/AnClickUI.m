@@ -164,6 +164,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_networkRequestModeButton;
     UIButton *_networkMethodButton;
     UIButton *_networkRetryModeButton;
+    UIButton *_networkPostCustomButton;
+    UIButton *_networkPostOCRResultButton;
     UIButton *_previewActionButton;
     UIButton *_swipeRecordButton;
     UIButton *_macroRecordButton;
@@ -274,6 +276,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _globalNetworkGateEnabled;
     BOOL _networkRequestOnly;
     BOOL _networkUsesPost;
+    BOOL _networkPostBodyUsesOCRResult;
     BOOL _networkRetryForever;
     BOOL _globalTimePickerEditingStartTime;
     BOOL _taskRunActive;
@@ -1073,6 +1076,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalNetworkGateEnabled = NO;
     _networkRequestOnly = NO;
     _networkUsesPost = NO;
+    _networkPostBodyUsesOCRResult = NO;
     _networkRetryForever = YES;
     _networkTimeout = 8.0;
     _globalStartHour = 8;
@@ -1260,6 +1264,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkMethodButton = [self panelButtonWithTitle:@"GET" action:@selector(toggleNetworkMethod)];
     _networkMethodButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 196, buttonWidth, 32);
     [_panelView addSubview:_networkMethodButton];
+
+    _networkPostCustomButton = [self panelButtonWithTitle:@"自定义内容" action:@selector(selectNetworkPostBodySource:)];
+    _networkPostCustomButton.tag = 0;
+    _networkPostCustomButton.frame = CGRectMake(gap, 234, buttonWidth, 32);
+    [_panelView addSubview:_networkPostCustomButton];
+
+    _networkPostOCRResultButton = [self panelButtonWithTitle:@"识字结果" action:@selector(selectNetworkPostBodySource:)];
+    _networkPostOCRResultButton.tag = 1;
+    _networkPostOCRResultButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 234, buttonWidth, 32);
+    [_panelView addSubview:_networkPostOCRResultButton];
 
     _networkRetryModeButton = [self panelButtonWithTitle:@"一直判断" action:@selector(toggleNetworkRetryMode)];
     _networkRetryModeButton.frame = CGRectMake(gap, 234, buttonWidth, 32);
@@ -1488,6 +1502,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self updateButtonShadowPath:button];
 }
 
+- (void)setStyledPlaceholder:(NSString *)placeholder forField:(UITextField *)field alpha:(CGFloat)alpha {
+    if (!field) {
+        return;
+    }
+    field.placeholder = placeholder;
+    field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:placeholder ?: @""
+                                                                  attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:alpha]}];
+}
+
 - (void)applyObsidianInputStyleToField:(UITextField *)field placeholder:(NSString *)placeholder monospaced:(BOOL)monospaced {
     field.textColor = monospaced ? [self themeHighlightColor] : UIColor.whiteColor;
     field.tintColor = [self themeHighlightColor];
@@ -1505,8 +1528,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     field.clearButtonMode = UITextFieldViewModeWhileEditing;
     field.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 10, 1)];
     field.leftViewMode = UITextFieldViewModeAlways;
-    field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:placeholder
-                                                                   attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.25]}];
+    [self setStyledPlaceholder:placeholder forField:field alpha:0.25];
 }
 
 - (void)setCenteredIconForButton:(UIButton *)button systemName:(NSString *)systemName fallbackTitle:(NSString *)fallbackTitle fontSize:(CGFloat)fontSize {
@@ -2135,6 +2157,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkRequestModeButton.hidden = YES;
     _networkMethodButton.hidden = YES;
     _networkRetryModeButton.hidden = YES;
+    _networkPostCustomButton.hidden = YES;
+    _networkPostOCRResultButton.hidden = YES;
     _previewActionButton.hidden = YES;
     _swipeRecordButton.hidden = YES;
     _macroRecordButton.hidden = YES;
@@ -2197,6 +2221,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _networkRequestModeButton,
         _networkMethodButton,
         _networkRetryModeButton,
+        _networkPostCustomButton,
+        _networkPostOCRResultButton,
         _previewActionButton,
         _swipeRecordButton,
         _macroRecordButton,
@@ -2758,8 +2784,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     field.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
     field.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 22, 1)];
     field.leftViewMode = UITextFieldViewModeAlways;
-    field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:placeholder
-                                                                   attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.72]}];
+    [self setStyledPlaceholder:placeholder forField:field alpha:0.72];
     [field addTarget:self action:@selector(globalSettingsFieldChanged:) forControlEvents:UIControlEventEditingChanged];
     [field addTarget:self action:@selector(globalSettingsFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     return field;
@@ -3442,6 +3467,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkPostBody = nil;
     _networkRequestOnly = NO;
     _networkUsesPost = NO;
+    _networkPostBodyUsesOCRResult = NO;
     _networkRetryForever = YES;
     _networkTimeout = 8.0;
     _hasTargetColor = NO;
@@ -3661,7 +3687,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (matchMode == AnClickOCRMatchModeRegex) {
         targetText = [self ocrTextByRemovingRegexPrefix:targetText];
     }
-    return targetText.length > 0 ? targetText : @"先填文字";
+    return targetText.length > 0 ? targetText : (matchMode == AnClickOCRMatchModeRegex ? @"先填正则表达式" : @"先填文字");
 }
 
 - (AnClickOCRMatchMode)ocrMatchModeForTask:(NSDictionary *)task {
@@ -4025,6 +4051,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self updateStatusForCurrentConfig];
 }
 
+- (void)selectNetworkPostBodySource:(UIButton *)sender {
+    if (_actionMode != AnClickActionModeOCR ||
+        _imageActionMode != AnClickActionModeNetwork ||
+        !_networkUsesPost) {
+        return;
+    }
+    [self syncNetworkFieldsFromEditor];
+    _networkPostBodyUsesOCRResult = sender.tag == 1;
+    [self autosaveSelectedTaskIfPossible];
+    [self refreshEditorConfigControls];
+    [self updateStatusForCurrentConfig];
+}
+
 - (void)actionTimingChanged:(__unused UITextField *)textField {
     [self syncActionTimingFromFields];
     [self autosaveSelectedTaskIfPossible];
@@ -4072,6 +4111,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkRequestModeButton.hidden = YES;
     _networkMethodButton.hidden = YES;
     _networkRetryModeButton.hidden = YES;
+    _networkPostCustomButton.hidden = YES;
+    _networkPostOCRResultButton.hidden = YES;
     _previewActionButton.hidden = YES;
     _swipeRecordButton.hidden = YES;
     _macroRecordButton.hidden = YES;
@@ -4188,9 +4229,37 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     CGFloat nextY = y + 88.0;
     if (_networkUsesPost) {
-        _networkPostBodyField.hidden = NO;
-        _networkPostBodyField.frame = CGRectMake(side, nextY, width, 40.0);
-        nextY += 50.0;
+        BOOL canUseOCRResult = _actionMode == AnClickActionModeOCR;
+        AnClickOCRMatchMode ocrMatchMode = canUseOCRResult
+            ? [self effectiveOCRMatchModeForText:_ocrTargetText ?: @""]
+            : AnClickOCRMatchModeContains;
+        if (canUseOCRResult) {
+            _networkPostCustomButton.hidden = NO;
+            _networkPostOCRResultButton.hidden = NO;
+            [_networkPostCustomButton setTitle:@"自定义内容" forState:UIControlStateNormal];
+            [_networkPostOCRResultButton setTitle:(ocrMatchMode == AnClickOCRMatchModeRegex ? @"正则结果" : @"识字结果") forState:UIControlStateNormal];
+            [self layoutButtons:@[_networkPostCustomButton, _networkPostOCRResultButton]
+                              x:side
+                              y:nextY
+                          width:width
+                         height:34.0
+                            gap:10.0];
+            [self styleSegmentButton:_networkPostCustomButton selected:!_networkPostBodyUsesOCRResult];
+            [self styleSegmentButton:_networkPostOCRResultButton selected:_networkPostBodyUsesOCRResult];
+            nextY += 42.0;
+        }
+        if (!(canUseOCRResult && _networkPostBodyUsesOCRResult)) {
+            _networkPostBodyField.hidden = NO;
+            NSString *postPlaceholder = @"POST参数 JSON/表单";
+            if (canUseOCRResult) {
+                postPlaceholder = ocrMatchMode == AnClickOCRMatchModeRegex
+                    ? @"POST参数 可用{{正则结果}}"
+                    : @"POST参数 可用{{识字结果}}";
+            }
+            [self setStyledPlaceholder:postPlaceholder forField:_networkPostBodyField alpha:0.25];
+            _networkPostBodyField.frame = CGRectMake(side, nextY, width, 40.0);
+            nextY += 50.0;
+        }
     }
     return nextY;
 }
@@ -4417,13 +4486,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         CGFloat side = 18.0;
         CGFloat width = _panelView.bounds.size.width;
         CGFloat contentWidth = width - side * 2.0;
-        _primaryConfigLabel.text = @"目标文字";
+        AnClickOCRMatchMode effectiveMatchMode = [self effectiveOCRMatchModeForText:_ocrTargetText ?: @""];
+        _primaryConfigLabel.text = effectiveMatchMode == AnClickOCRMatchModeRegex ? @"正则表达式" : @"目标文字";
         _primaryConfigLabel.hidden = NO;
         _primaryConfigLabel.frame = CGRectMake(side, configTopY, contentWidth, 20);
+        [self setStyledPlaceholder:(effectiveMatchMode == AnClickOCRMatchModeRegex ? @"输入正则表达式" : @"目标文字")
+                           forField:_ocrTargetField
+                              alpha:0.25];
         _ocrTargetField.hidden = NO;
         _ocrTargetField.frame = CGRectMake(side, configTopY + 22.0, contentWidth, 40);
 
-        AnClickOCRMatchMode effectiveMatchMode = [self effectiveOCRMatchModeForText:_ocrTargetText ?: @""];
         _ocrContainsMatchModeButton.hidden = NO;
         _ocrRegexMatchModeButton.hidden = NO;
         [_ocrContainsMatchModeButton setTitle:@"包含匹配" forState:UIControlStateNormal];
@@ -4510,6 +4582,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         CGFloat networkModeY = configTopY + 118.0;
         if (_networkUsesPost) {
             _networkPostBodyField.hidden = NO;
+            [self setStyledPlaceholder:@"POST参数 JSON/表单" forField:_networkPostBodyField alpha:0.25];
             _networkPostBodyField.frame = CGRectMake(side, networkModeY, contentWidth, 40);
             networkModeY += 50.0;
         }
@@ -4649,17 +4722,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (matchMode == AnClickOCRMatchModeRegex &&
             _ocrTargetText.length > 0 &&
             ![self ocrRegexPatternIsValid:_ocrTargetText]) {
-            _statusLabel.text = @"识字 正则格式错误";
+            _statusLabel.text = @"正则表达式格式错误";
             return;
         }
         NSString *targetState = [self ocrDisplayTextForText:_ocrTargetText matchMode:matchMode];
         NSString *pointState = _ocrUsesMatchPoint ? @"识别点" : ([self hasManualPointForMode:AnClickActionModeOCR] ? @"自定义点" : @"先取点击点");
+        NSString *networkActionName = [self normalizedNetworkMethodFromPostFlag:_networkUsesPost];
+        if (_networkUsesPost && _networkPostBodyUsesOCRResult) {
+            networkActionName = matchMode == AnClickOCRMatchModeRegex ? @"POST正则结果" : @"POST识字结果";
+        }
         _statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ %@ 后%@",
                              [self ocrMatchModeTitleForMode:matchMode],
                              targetState,
                              pointState,
                              _imageActionMode == AnClickActionModeNetwork
-                                ? [NSString stringWithFormat:@"%@网络", [self normalizedNetworkMethodFromPostFlag:_networkUsesPost]]
+                                ? [NSString stringWithFormat:@"%@网络", networkActionName]
                                 : [self actionNameForMode:_imageActionMode]];
         return;
     }
@@ -5947,6 +6024,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     task[@"networkMethod"] = [self normalizedNetworkMethodFromPostFlag:_networkUsesPost];
     task[@"networkUsesPost"] = @(_networkUsesPost);
+    BOOL canUseOCRResult = _actionMode == AnClickActionModeOCR && _networkUsesPost;
+    task[@"networkPostBodyUsesOCRResult"] = @(canUseOCRResult && _networkPostBodyUsesOCRResult);
     if (_networkPostBody.length > 0) {
         task[@"networkPostBody"] = _networkPostBody;
     }
@@ -5966,6 +6045,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkURL = [self trimmedActionDescription:task[@"networkURL"]];
     _networkPostBody = [self trimmedActionDescription:task[@"networkPostBody"]];
     _networkUsesPost = [[self networkMethodForTask:task] isEqualToString:@"POST"];
+    _networkPostBodyUsesOCRResult = _networkUsesPost &&
+        [self modeForTask:task] == AnClickActionModeOCR &&
+        [task[@"networkPostBodyUsesOCRResult"] boolValue];
 }
 
 - (NSMutableDictionary *)taskDictionaryFromCurrentConfigRequireComplete:(BOOL)requireComplete {
@@ -6014,17 +6096,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     if (_actionMode == AnClickActionModeOCR) {
         [self syncOCRTargetFromField];
+        AnClickOCRMatchMode matchMode = [self effectiveOCRMatchModeForText:_ocrTargetText ?: @""];
         if (_ocrTargetText.length > 0) {
             task[@"ocrText"] = _ocrTargetText;
         } else if (requireComplete) {
-            _statusLabel.text = @"先填目标文字";
+            _statusLabel.text = matchMode == AnClickOCRMatchModeRegex ? @"先填正则表达式" : @"先填目标文字";
             return nil;
         }
-        AnClickOCRMatchMode matchMode = [self effectiveOCRMatchModeForText:_ocrTargetText ?: @""];
         if (matchMode == AnClickOCRMatchModeRegex &&
             requireComplete &&
             ![self ocrRegexPatternIsValid:_ocrTargetText]) {
-            _statusLabel.text = @"正则格式错误";
+            _statusLabel.text = @"正则表达式格式错误";
             return nil;
         }
         task[@"ocrMode"] = @(_ocrMode);
@@ -6143,7 +6225,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             : @"未设置文字";
         if ([self taskUsesRecognitionNetworkAction:task]) {
             NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
-            subtitle = [subtitle stringByAppendingFormat:@" · 成功后%@请求%@", [self networkMethodForTask:task], url.length > 0 ? @"" : @"未设置"];
+            NSString *method = [self networkMethodForTask:task];
+            if ([method isEqualToString:@"POST"] &&
+                [self modeForTask:task] == AnClickActionModeOCR &&
+                [task[@"networkPostBodyUsesOCRResult"] boolValue]) {
+                method = matchMode == AnClickOCRMatchModeRegex ? @"POST正则结果" : @"POST识字结果";
+            }
+            subtitle = [subtitle stringByAppendingFormat:@" · 成功后%@请求%@", method, url.length > 0 ? @"" : @"未设置"];
         }
     } else if (desc.length == 0 && mode == AnClickActionModeColor) {
         subtitle = [self colorPatternSummaryForTask:task];
@@ -6826,6 +6914,38 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [self trimmedActionDescription:task[@"networkPostBody"]];
 }
 
+- (NSString *)postBody:(NSString *)postBody applyingRecognitionText:(NSString *)recognitionText {
+    NSString *body = postBody ?: @"";
+    NSString *value = recognitionText ?: @"";
+    NSArray<NSString *> *tokens = @[
+        @"{{ocr}}",
+        @"{{result}}",
+        @"{{识字结果}}",
+        @"{{正则结果}}",
+        @"${ocr}",
+        @"${result}",
+        @"{识字结果}",
+        @"{正则结果}",
+    ];
+    for (NSString *token in tokens) {
+        body = [body stringByReplacingOccurrencesOfString:token withString:value];
+    }
+    return body;
+}
+
+- (NSString *)networkPostBodyForTask:(NSDictionary *)task recognitionText:(NSString *)recognitionText {
+    if ([self modeForTask:task] == AnClickActionModeOCR &&
+        [task[@"networkPostBodyUsesOCRResult"] boolValue]) {
+        return [self trimmedActionDescription:recognitionText] ?: @"";
+    }
+
+    NSString *postBody = [self networkPostBodyForTask:task];
+    if (postBody.length == 0 || recognitionText.length == 0) {
+        return postBody;
+    }
+    return [self postBody:postBody applyingRecognitionText:recognitionText];
+}
+
 - (NSString *)normalizedNetworkURLString:(NSString *)urlText {
     NSString *trimmed = [self trimmedActionDescription:urlText];
     if (trimmed.length == 0) {
@@ -7310,6 +7430,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)performRecognitionNetworkActionForTask:(NSDictionary *)task
+                               recognitionText:(NSString *)recognitionText
                                  runGeneration:(NSUInteger)runGeneration
                                     completion:(void (^)(void))completion {
     NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
@@ -7328,7 +7449,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @"networkRequestOnly": @YES,
         @"networkTimeout": @([self networkTimeoutForTask:task]),
     } mutableCopy];
-    NSString *postBody = [self networkPostBodyForTask:task];
+    NSString *postBody = [self networkPostBodyForTask:task recognitionText:recognitionText];
     if (postBody.length > 0) {
         networkTask[@"networkPostBody"] = postBody;
     }
@@ -7408,7 +7529,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             CGRect rect = rectValue.CGRectValue;
             [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.2];
             if (imageActionMode == AnClickActionModeNetwork) {
-                [strongSelf performRecognitionNetworkActionForTask:task runGeneration:runGeneration completion:completion];
+                [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:completion];
                 strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f 网络请求",
                                                  scoreNumber.doubleValue];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
@@ -7442,8 +7563,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
          runGeneration:(NSUInteger)runGeneration
             completion:(void (^)(void))completion {
     NSString *targetText = [self trimmedActionDescription:task[@"ocrText"]];
+    BOOL useRegex = [self ocrTaskUsesRegexMatching:task];
     if (targetText.length == 0) {
-        _statusLabel.text = @"识字未填写";
+        _statusLabel.text = useRegex ? @"正则表达式未填写" : @"识字未填写";
+        [self showToast:_statusLabel.text];
         if (completion) {
             completion();
         }
@@ -7451,10 +7574,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     AnClickOCRMode ocrMode = [self ocrModeForTask:task];
-    BOOL useRegex = [self ocrTaskUsesRegexMatching:task];
     if (useRegex && ![self ocrRegexPatternIsValid:targetText]) {
-        _statusLabel.text = @"识字正则无效";
-        [self showToast:@"识字正则无效"];
+        _statusLabel.text = @"正则表达式无效";
+        [self showToast:_statusLabel.text];
         if (completion) {
             completion();
         }
@@ -7524,7 +7646,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 }
                 [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
                 if (actionMode == AnClickActionModeNetwork) {
-                    [strongSelf performRecognitionNetworkActionForTask:task runGeneration:runGeneration completion:completion];
+                    [strongSelf performRecognitionNetworkActionForTask:task recognitionText:text runGeneration:runGeneration completion:completion];
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ 网络请求", matchSummary, text];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     return;
@@ -7608,7 +7730,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             }
             [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
             if (actionMode == AnClickActionModeNetwork) {
-                [strongSelf performRecognitionNetworkActionForTask:task runGeneration:runGeneration completion:completion];
+                [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:completion];
                 strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ 网络请求", patternSummary];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 return;
@@ -7663,12 +7785,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     if (mode == AnClickActionModeOCR) {
         NSString *targetText = [self trimmedActionDescription:task[@"ocrText"]];
+        BOOL usesRegex = [self ocrTaskUsesRegexMatching:task];
         if (targetText.length == 0) {
-            _statusLabel.text = @"任务识字未填写";
+            _statusLabel.text = usesRegex ? @"任务正则表达式未填写" : @"任务识字未填写";
             return NO;
         }
-        if ([self ocrTaskUsesRegexMatching:task] && ![self ocrRegexPatternIsValid:targetText]) {
-            _statusLabel.text = @"任务识字正则无效";
+        if (usesRegex && ![self ocrRegexPatternIsValid:targetText]) {
+            _statusLabel.text = @"任务正则表达式无效";
             return NO;
         }
         BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
@@ -9420,7 +9543,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return;
         }
         if (_ocrUsesMatchPoint) {
-            _statusLabel.text = _ocrTargetText.length > 0 ? @"识字点随识别结果" : @"先填目标文字";
+            AnClickOCRMatchMode matchMode = [self effectiveOCRMatchModeForText:_ocrTargetText ?: @""];
+            _statusLabel.text = _ocrTargetText.length > 0
+                ? @"识字点随识别结果"
+                : (matchMode == AnClickOCRMatchModeRegex ? @"先填正则表达式" : @"先填目标文字");
             return;
         }
         if (![self hasManualPointForMode:AnClickActionModeOCR]) {

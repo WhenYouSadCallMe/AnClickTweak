@@ -427,7 +427,7 @@
                                                           options:NSRegularExpressionCaseInsensitive
                                                             error:&regexError];
         if (!regex || regexError) {
-            return @{@"error": @"识字正则无效"};
+            return @{@"error": @"正则表达式无效"};
         }
     }
     for (VNRecognizedTextObservation *observation in observations) {
