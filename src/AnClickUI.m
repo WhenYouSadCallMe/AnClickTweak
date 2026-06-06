@@ -1667,6 +1667,33 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return nil;
 }
 
+- (UIEdgeInsets)verticalIndicatorInsetsForScrollView:(UIScrollView *)scrollView {
+    if (!scrollView) {
+        return UIEdgeInsetsZero;
+    }
+    if (@available(iOS 13.0, *)) {
+        return scrollView.verticalScrollIndicatorInsets;
+    }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return scrollView.scrollIndicatorInsets;
+#pragma clang diagnostic pop
+}
+
+- (void)setVerticalIndicatorInsets:(UIEdgeInsets)insets forScrollView:(UIScrollView *)scrollView {
+    if (!scrollView) {
+        return;
+    }
+    if (@available(iOS 13.0, *)) {
+        scrollView.verticalScrollIndicatorInsets = insets;
+        return;
+    }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    scrollView.scrollIndicatorInsets = insets;
+#pragma clang diagnostic pop
+}
+
 - (void)setKeyboardAvoidanceBottomInset:(CGFloat)bottomInset forScrollView:(UIScrollView *)scrollView {
     if (!scrollView) {
         return;
@@ -1675,9 +1702,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     contentInset.bottom = bottomInset;
     scrollView.contentInset = contentInset;
 
-    UIEdgeInsets indicatorInsets = scrollView.scrollIndicatorInsets;
+    UIEdgeInsets indicatorInsets = [self verticalIndicatorInsetsForScrollView:scrollView];
     indicatorInsets.bottom = bottomInset;
-    scrollView.scrollIndicatorInsets = indicatorInsets;
+    [self setVerticalIndicatorInsets:indicatorInsets forScrollView:scrollView];
 }
 
 - (void)resetKeyboardAvoidanceInsetsExceptScrollView:(UIScrollView *)activeScrollView {
@@ -2745,7 +2772,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     CGFloat scrollHeight = MAX(52.0, scrollBottom - scrollTop);
     _editorContentScrollView.frame = CGRectMake(0, scrollTop, width, scrollHeight);
-    _editorContentScrollView.scrollIndicatorInsets = UIEdgeInsetsMake(0, 0, 0, 3.0);
+    UIEdgeInsets editorIndicatorInsets = [self verticalIndicatorInsetsForScrollView:_editorContentScrollView];
+    editorIndicatorInsets.right = 3.0;
+    [self setVerticalIndicatorInsets:editorIndicatorInsets forScrollView:_editorContentScrollView];
 
     CGFloat descriptionCaptionHeight = compactHeight ? 18.0 : 20.0;
     CGFloat descriptionFieldHeight = compactHeight ? 36.0 : 40.0;
