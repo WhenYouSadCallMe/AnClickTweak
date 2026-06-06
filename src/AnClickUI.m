@@ -4250,9 +4250,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat nextY = y + 88.0;
     if (_networkUsesPost) {
         BOOL canUseOCRResult = _actionMode == AnClickActionModeOCR;
-        AnClickOCRMatchMode ocrMatchMode = canUseOCRResult
-            ? [self effectiveOCRMatchModeForText:_ocrTargetText ?: @""]
-            : AnClickOCRMatchModeContains;
         if (canUseOCRResult) {
             _networkPostCustomButton.hidden = NO;
             _networkPostOCRResultButton.hidden = NO;
