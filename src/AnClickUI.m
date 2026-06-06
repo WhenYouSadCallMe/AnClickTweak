@@ -4184,6 +4184,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSMutableDictionary *pair = _networkPostPairs[index];
     BOOL usesResult = ![self networkPostPairValueUsesResult:pair];
     pair[@"useResult"] = @(usesResult);
+    pair[@"value"] = @"";
+    if (index < _networkPostValueFields.count) {
+        UITextField *valueField = _networkPostValueFields[index];
+        valueField.text = @"";
+        if (usesResult && valueField.isFirstResponder) {
+            [valueField resignFirstResponder];
+        }
+    }
     _networkPostBodyUsesOCRResult = YES;
     [self autosaveSelectedTaskIfPossible];
     [self refreshEditorConfigControls];
@@ -4562,15 +4570,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (usesResult) {
             valueField.enabled = NO;
             valueField.alpha = 0.62;
-            valueField.text = @"识别结果";
+            valueField.text = @"";
+            [self setStyledPlaceholder:@"识别结果" forField:valueField alpha:0.42];
         } else {
             valueField.enabled = YES;
             valueField.alpha = 1.0;
+            [self setStyledPlaceholder:@"值" forField:valueField alpha:0.25];
             if (!valueField.isFirstResponder) {
                 valueField.text = [self trimmedActionDescription:pair[@"value"]] ?: @"";
             }
         }
-        [modeButton setTitle:(usesResult ? @"结果" : @"自填") forState:UIControlStateNormal];
+        [modeButton setTitle:(usesResult ? @"识别结果" : @"自填") forState:UIControlStateNormal];
         [self styleSegmentButton:modeButton selected:usesResult];
     }
 }
@@ -4581,7 +4591,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     CGFloat gap = 7.0;
     CGFloat rowHeight = 36.0;
-    CGFloat modeWidth = width >= 330.0 ? 62.0 : 54.0;
+    CGFloat modeWidth = width >= 330.0 ? 78.0 : 70.0;
     CGFloat fieldWidth = floor((width - modeWidth - gap * 2.0) / 2.0);
     NSUInteger count = MIN(_networkPostPairs.count, MIN(_networkPostKeyFields.count, _networkPostValueFields.count));
     for (NSUInteger i = 0; i < count; i++) {
