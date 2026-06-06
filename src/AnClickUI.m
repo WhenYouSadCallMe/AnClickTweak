@@ -1473,7 +1473,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [_panelView addSubview:valueField];
         [_networkPostValueFields addObject:valueField];
 
-        UIButton *modeButton = [self panelButtonWithTitle:@"自填" action:@selector(toggleNetworkPostPairValueMode:)];
+        UIButton *modeButton = [self panelButtonWithTitle:@"结果" action:@selector(toggleNetworkPostPairValueMode:)];
         modeButton.tag = (NSInteger)i;
         [_panelView addSubview:modeButton];
         [_networkPostValueModeButtons addObject:modeButton];
@@ -1969,8 +1969,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (CGRect)clampedPanelFrame:(CGRect)frame {
     CGRect bounds = [self currentScreenBounds];
     UIEdgeInsets safeInsets = [self panelSafeAreaInsets];
+    BOOL landscape = bounds.size.width > bounds.size.height;
     CGFloat minX = MAX(4.0, safeInsets.left + 4.0);
-    CGFloat minY = MAX(24.0, safeInsets.top + 4.0);
+    CGFloat minY = landscape ? MAX(4.0, safeInsets.top + 4.0) : MAX(24.0, safeInsets.top + 4.0);
     CGFloat maxX = bounds.size.width - frame.size.width - MAX(4.0, safeInsets.right + 4.0);
     CGFloat maxY = bounds.size.height - frame.size.height - MAX(4.0, safeInsets.bottom + 4.0);
     frame.origin.x = MIN(MAX(frame.origin.x, minX), MAX(minX, maxX));
@@ -1981,8 +1982,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (CGRect)clampedFloatingFrame:(CGRect)frame {
     CGRect bounds = [self currentScreenBounds];
     UIEdgeInsets safeInsets = [self panelSafeAreaInsets];
+    BOOL landscape = bounds.size.width > bounds.size.height;
     CGFloat minX = MAX(6.0, safeInsets.left + 6.0);
-    CGFloat minY = MAX(6.0, safeInsets.top + 8.0);
+    CGFloat minY = landscape ? MAX(4.0, safeInsets.top + 4.0) : MAX(6.0, safeInsets.top + 8.0);
     CGFloat maxX = bounds.size.width - frame.size.width - MAX(6.0, safeInsets.right + 6.0);
     CGFloat maxY = bounds.size.height - frame.size.height - MAX(6.0, safeInsets.bottom + 8.0);
     frame.origin.x = MIN(MAX(frame.origin.x, minX), MAX(minX, maxX));
@@ -1992,6 +1994,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (UIEdgeInsets)panelSafeAreaInsets {
     UIEdgeInsets insets = UIEdgeInsetsZero;
+    CGSize screenSize = [self currentScreenBounds].size;
+    BOOL landscape = screenSize.width > screenSize.height;
     UIWindow *hostWindow = [self hostWindow];
     if (@available(iOS 11.0, *)) {
         if (hostWindow) {
@@ -2022,9 +2026,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         statusHeight = UIApplication.sharedApplication.statusBarFrame.size.height;
 #pragma clang diagnostic pop
     }
-    insets.top = MAX(insets.top, statusHeight);
-    if (insets.top > 0.0) {
-        insets.top += 6.0;
+
+    if (landscape) {
+        insets.top = 0.0;
+    } else {
+        insets.top = MAX(insets.top, statusHeight);
+        if (insets.top > 0.0) {
+            insets.top += 6.0;
+        }
     }
     return insets;
 }
@@ -4492,6 +4501,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return NO;
 }
 
+- (NSString *)networkPostSelfFilledValueFromText:(NSString *)text {
+    NSString *value = [self trimmedActionDescription:text];
+    NSArray<NSString *> *staleDisplayLabels = @[@"识别结果", @"使用识别结果"];
+    for (NSString *label in staleDisplayLabels) {
+        if ([value isEqualToString:label]) {
+            return @"";
+        }
+    }
+    return value ?: @"";
+}
+
 - (NSString *)unquotedNetworkPostText:(NSString *)text {
     NSString *trimmed = [self trimmedActionDescription:text];
     if (trimmed.length >= 2) {
@@ -4516,7 +4536,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         UITextField *valueField = _networkPostValueFields[i];
         pair[@"key"] = [self trimmedActionDescription:keyField.text] ?: @"";
         if (![self networkPostPairValueUsesResult:pair]) {
-            pair[@"value"] = [self trimmedActionDescription:valueField.text] ?: @"";
+            pair[@"value"] = [self networkPostSelfFilledValueFromText:valueField.text];
         }
     }
 }
@@ -4526,8 +4546,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSMutableArray<NSDictionary *> *pairs = [NSMutableArray array];
     for (NSDictionary *pair in _networkPostPairs) {
         NSString *key = [self trimmedActionDescription:pair[@"key"]];
-        NSString *value = [self trimmedActionDescription:pair[@"value"]];
         BOOL usesResult = [self networkPostPairValueUsesResult:pair];
+        NSString *value = usesResult ? @"" : [self networkPostSelfFilledValueFromText:pair[@"value"]];
         if (key.length == 0 && value.length == 0 && !usesResult) {
             continue;
         }
@@ -4594,7 +4614,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             BOOL usesResult = [pair[@"useResult"] boolValue] || [self networkPostValueTextMeansResult:value];
             [pairs addObject:[@{
                 @"key": key ?: @"",
-                @"value": usesResult ? @"" : (value ?: @""),
+                @"value": usesResult ? @"" : [self networkPostSelfFilledValueFromText:value],
                 @"useResult": @(usesResult),
             } mutableCopy]];
             if (pairs.count >= AnClickNetworkPostMaxPairs) {
@@ -4652,11 +4672,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             valueField.alpha = 1.0;
             [self setStyledPlaceholder:@"值" forField:valueField alpha:0.25];
             if (!valueField.isFirstResponder) {
-                valueField.text = [self trimmedActionDescription:pair[@"value"]] ?: @"";
+                NSString *value = [self networkPostSelfFilledValueFromText:pair[@"value"]];
+                if ([pair isKindOfClass:NSMutableDictionary.class]) {
+                    ((NSMutableDictionary *)pair)[@"value"] = value ?: @"";
+                }
+                valueField.text = value ?: @"";
             }
         }
-        [modeButton setTitle:(usesResult ? @"识别结果" : @"自填") forState:UIControlStateNormal];
-        [self styleSegmentButton:modeButton selected:usesResult];
+        [modeButton setTitle:(usesResult ? @"自填" : @"结果") forState:UIControlStateNormal];
+        [self styleNormalButton:modeButton];
     }
 }
 
@@ -4666,7 +4690,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     CGFloat gap = 7.0;
     CGFloat rowHeight = 36.0;
-    CGFloat modeWidth = width >= 330.0 ? 78.0 : 70.0;
+    CGFloat modeWidth = width >= 330.0 ? 62.0 : 54.0;
     CGFloat fieldWidth = floor((width - modeWidth - gap * 2.0) / 2.0);
     NSUInteger count = MIN(_networkPostPairs.count, MIN(_networkPostKeyFields.count, _networkPostValueFields.count));
     for (NSUInteger i = 0; i < count; i++) {
@@ -7479,7 +7503,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             continue;
         }
         BOOL usesResult = [pair[@"useResult"] boolValue];
-        NSString *valueText = usesResult ? (recognitionText ?: @"") : [self trimmedActionDescription:pair[@"value"]];
+        NSString *valueText = usesResult ? (recognitionText ?: @"") : [self networkPostSelfFilledValueFromText:pair[@"value"]];
         dictionary[key] = [self networkPostJSONValueFromText:valueText recognitionText:recognitionText];
     }
     return dictionary.count > 0 ? dictionary : nil;
