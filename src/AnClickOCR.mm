@@ -10,6 +10,7 @@
 
 @interface AnClickOCR : NSObject
 + (NSDictionary *)findText:(NSString *)targetText mode:(NSInteger)mode;
++ (NSDictionary *)findText:(NSString *)targetText mode:(NSInteger)mode useRegex:(BOOL)useRegex;
 + (NSString *)backendNameForMode:(NSInteger)mode;
 @end
 
@@ -21,8 +22,62 @@
 
 + (NSString *)normalizedText:(NSString *)text {
     NSString *trimmed = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    trimmed = [[trimmed stringByFoldingWithOptions:(NSWidthInsensitiveSearch | NSDiacriticInsensitiveSearch)
+                                           locale:nil] lowercaseString];
     NSArray<NSString *> *parts = [trimmed componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    return [[parts componentsJoinedByString:@""] lowercaseString];
+    return [parts componentsJoinedByString:@""];
+}
+
++ (NSString *)normalizedRegexPattern:(NSString *)pattern {
+    NSString *trimmed = [pattern stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return [trimmed stringByFoldingWithOptions:NSWidthInsensitiveSearch locale:nil];
+}
+
++ (NSString *)targetTextByRemovingRegexPrefix:(NSString *)targetText detectedRegex:(BOOL *)detectedRegex {
+    NSString *trimmed = [targetText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSArray<NSString *> *prefixes = @[@"re:", @"regex:", @"正则:", @"re：", @"regex：", @"正则："];
+    for (NSString *prefix in prefixes) {
+        if ([trimmed rangeOfString:prefix options:NSCaseInsensitiveSearch].location == 0) {
+            if (detectedRegex) {
+                *detectedRegex = YES;
+            }
+            return [[trimmed substringFromIndex:prefix.length] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        }
+    }
+    return trimmed;
+}
+
++ (NSDictionary *)normalizedTextMapForString:(NSString *)string {
+    NSMutableString *normalized = [NSMutableString string];
+    NSMutableArray<NSValue *> *sourceRanges = [NSMutableArray array];
+    [string enumerateSubstringsInRange:NSMakeRange(0, string.length)
+                               options:NSStringEnumerationByComposedCharacterSequences
+                            usingBlock:^(NSString *substring, NSRange substringRange, __unused NSRange enclosingRange, __unused BOOL *stop) {
+        NSString *piece = [self normalizedText:substring ?: @""];
+        if (piece.length == 0) {
+            return;
+        }
+        [normalized appendString:piece];
+        for (NSUInteger i = 0; i < piece.length; i++) {
+            [sourceRanges addObject:[NSValue valueWithRange:substringRange]];
+        }
+    }];
+    return @{
+        @"text": normalized,
+        @"ranges": sourceRanges,
+    };
+}
+
++ (NSRange)sourceRangeForNormalizedRange:(NSRange)normalizedRange sourceRanges:(NSArray<NSValue *> *)sourceRanges {
+    if (normalizedRange.location == NSNotFound ||
+        normalizedRange.length == 0 ||
+        NSMaxRange(normalizedRange) > sourceRanges.count) {
+        return NSMakeRange(NSNotFound, 0);
+    }
+
+    NSRange startRange = sourceRanges[normalizedRange.location].rangeValue;
+    NSRange endRange = sourceRanges[NSMaxRange(normalizedRange) - 1].rangeValue;
+    return NSMakeRange(startRange.location, NSMaxRange(endRange) - startRange.location);
 }
 
 + (CGImagePropertyOrientation)cgImageOrientationForUIImage:(UIImage *)image {
@@ -87,29 +142,16 @@
         return directRange;
     }
 
-    NSMutableString *normalized = [NSMutableString string];
-    NSMutableArray<NSValue *> *sourceRanges = [NSMutableArray array];
-    [recognizedString enumerateSubstringsInRange:NSMakeRange(0, recognizedString.length)
-                                         options:NSStringEnumerationByComposedCharacterSequences
-                                      usingBlock:^(NSString *substring, NSRange substringRange, __unused NSRange enclosingRange, __unused BOOL *stop) {
-        NSString *piece = [self normalizedText:substring ?: @""];
-        if (piece.length == 0) {
-            return;
-        }
-        [normalized appendString:piece];
-        for (NSUInteger i = 0; i < piece.length; i++) {
-            [sourceRanges addObject:[NSValue valueWithRange:substringRange]];
-        }
-    }];
+    NSDictionary *map = [self normalizedTextMapForString:recognizedString];
+    NSString *normalized = map[@"text"];
+    NSArray<NSValue *> *sourceRanges = map[@"ranges"];
 
     NSRange normalizedRange = [normalized rangeOfString:target options:options];
     if (normalizedRange.location == NSNotFound || NSMaxRange(normalizedRange) > sourceRanges.count) {
         return NSMakeRange(NSNotFound, 0);
     }
 
-    NSRange startRange = sourceRanges[normalizedRange.location].rangeValue;
-    NSRange endRange = sourceRanges[NSMaxRange(normalizedRange) - 1].rangeValue;
-    return NSMakeRange(startRange.location, NSMaxRange(endRange) - startRange.location);
+    return [self sourceRangeForNormalizedRange:normalizedRange sourceRanges:sourceRanges];
 }
 
 + (CGFloat)layoutWeightForSubstring:(NSString *)substring {
@@ -275,41 +317,50 @@
 }
 
 + (CGRect)imageRectForCandidate:(VNRecognizedText *)candidate
-                         target:(NSString *)target
+                      textRange:(NSRange)targetRange
+                    exactTarget:(NSString *)target
                     observation:(VNRecognizedTextObservation *)observation
                           image:(UIImage *)image {
     CGRect fallbackRect = [self clippedImageRect:[self imageRectForObservation:observation image:image] image:image];
-    if (!candidate.string.length) {
+    if (!candidate.string.length ||
+        targetRange.location == NSNotFound ||
+        targetRange.length == 0 ||
+        NSMaxRange(targetRange) > candidate.string.length) {
         return fallbackRect;
     }
 
     if (@available(iOS 13.0, *)) {
-        NSRange targetRange = [self rangeOfNormalizedTarget:target inRecognizedString:candidate.string];
-        if (targetRange.location != NSNotFound && targetRange.length > 0 && NSMaxRange(targetRange) <= candidate.string.length) {
-            NSString *recognized = [self normalizedText:candidate.string];
-            CGRect characterRect = [self imageRectForCharacterBoxesInRange:targetRange candidate:candidate image:image];
-            if ([self targetRect:characterRect isSpecificAgainstObservationRect:fallbackRect target:target recognized:recognized]) {
-                return characterRect;
-            }
-
-            NSError *rangeError = nil;
-            VNRectangleObservation *targetBox = [candidate boundingBoxForRange:targetRange error:&rangeError];
-            if (targetBox && !CGRectIsEmpty(targetBox.boundingBox)) {
-                CGRect targetRect = [self clippedImageRect:[self imageRectForNormalizedBox:targetBox.boundingBox image:image] image:image];
-                if ([self targetRect:targetRect isSpecificAgainstObservationRect:fallbackRect target:target recognized:recognized]) {
-                    return targetRect;
-                }
-            }
-
-            CGRect estimatedRect = [self estimatedImageRectForRange:targetRange
-                                                inRecognizedString:candidate.string
-                                                   observationRect:fallbackRect];
-            CGRect clippedEstimatedRect = [self clippedImageRect:estimatedRect image:image];
-            return CGRectIsNull(clippedEstimatedRect) ? fallbackRect : clippedEstimatedRect;
+        NSString *recognized = [self normalizedText:candidate.string];
+        CGRect characterRect = [self imageRectForCharacterBoxesInRange:targetRange candidate:candidate image:image];
+        if ([self targetRect:characterRect isSpecificAgainstObservationRect:fallbackRect target:target recognized:recognized]) {
+            return characterRect;
         }
+
+        NSError *rangeError = nil;
+        VNRectangleObservation *targetBox = [candidate boundingBoxForRange:targetRange error:&rangeError];
+        if (targetBox && !CGRectIsEmpty(targetBox.boundingBox)) {
+            CGRect targetRect = [self clippedImageRect:[self imageRectForNormalizedBox:targetBox.boundingBox image:image] image:image];
+            if ([self targetRect:targetRect isSpecificAgainstObservationRect:fallbackRect target:target recognized:recognized]) {
+                return targetRect;
+            }
+        }
+
+        CGRect estimatedRect = [self estimatedImageRectForRange:targetRange
+                                            inRecognizedString:candidate.string
+                                               observationRect:fallbackRect];
+        CGRect clippedEstimatedRect = [self clippedImageRect:estimatedRect image:image];
+        return CGRectIsNull(clippedEstimatedRect) ? fallbackRect : clippedEstimatedRect;
     }
 
     return fallbackRect;
+}
+
++ (CGRect)imageRectForCandidate:(VNRecognizedText *)candidate
+                         target:(NSString *)target
+                    observation:(VNRecognizedTextObservation *)observation
+                          image:(UIImage *)image {
+    NSRange targetRange = [self rangeOfNormalizedTarget:target inRecognizedString:candidate.string];
+    return [self imageRectForCandidate:candidate textRange:targetRange exactTarget:target observation:observation image:image];
 }
 
 + (void)configureRecognitionLanguagesForRequest:(VNRecognizeTextRequest *)request level:(VNRequestTextRecognitionLevel)level {
@@ -338,7 +389,8 @@
                            sourceWindow:(UIWindow *)sourceWindow
                                  level:(VNRequestTextRecognitionLevel)level
                     languageCorrection:(BOOL)languageCorrection
-                              fallback:(BOOL)fallback {
+                              fallback:(BOOL)fallback
+                              useRegex:(BOOL)useRegex {
     __block NSArray<VNRecognizedTextObservation *> *observations = @[];
     VNRecognizeTextRequest *request = [[VNRecognizeTextRequest alloc] initWithCompletionHandler:^(VNRequest *finishedRequest, NSError *requestError) {
         if (requestError) {
@@ -365,73 +417,202 @@
     CGFloat bestSpecificity = -1.0;
     CGFloat bestArea = CGFLOAT_MAX;
     NSInteger bestRank = -1;
+    CGFloat bestY = CGFLOAT_MAX;
+    CGFloat bestX = CGFLOAT_MAX;
+    NSInteger validMatchCount = 0;
+    NSRegularExpression *regex = nil;
+    if (useRegex) {
+        NSError *regexError = nil;
+        regex = [NSRegularExpression regularExpressionWithPattern:target
+                                                          options:NSRegularExpressionCaseInsensitive
+                                                            error:&regexError];
+        if (!regex || regexError) {
+            return @{@"error": @"识字正则无效"};
+        }
+    }
     for (VNRecognizedTextObservation *observation in observations) {
         VNRecognizedText *candidate = [observation topCandidates:1].firstObject;
         if (!candidate.string.length) {
             continue;
         }
         NSString *recognized = [self normalizedText:candidate.string];
-        if ([recognized rangeOfString:target options:NSCaseInsensitiveSearch].location == NSNotFound) {
+        NSMutableArray<NSDictionary *> *candidateMatches = [NSMutableArray array];
+        if (useRegex) {
+            NSDictionary *map = [self normalizedTextMapForString:candidate.string];
+            NSString *normalizedCandidate = map[@"text"];
+            NSArray<NSValue *> *sourceRanges = map[@"ranges"];
+            if (normalizedCandidate.length == 0) {
+                continue;
+            }
+            NSArray<NSTextCheckingResult *> *regexMatches = [regex matchesInString:normalizedCandidate
+                                                                            options:0
+                                                                              range:NSMakeRange(0, normalizedCandidate.length)];
+            for (NSTextCheckingResult *regexMatch in regexMatches) {
+                if (!regexMatch || regexMatch.range.location == NSNotFound || regexMatch.range.length == 0) {
+                    continue;
+                }
+                NSRange normalizedMatchRange = regexMatch.range;
+                NSRange sourceRange = [self sourceRangeForNormalizedRange:normalizedMatchRange sourceRanges:sourceRanges];
+                if (sourceRange.location == NSNotFound || sourceRange.length == 0 || NSMaxRange(sourceRange) > candidate.string.length) {
+                    continue;
+                }
+                NSString *matchedText = [candidate.string substringWithRange:sourceRange];
+                NSString *matchedNormalizedText = [normalizedCandidate substringWithRange:normalizedMatchRange];
+                NSInteger rank = 2;
+                if (normalizedMatchRange.location == 0 && NSMaxRange(normalizedMatchRange) == normalizedCandidate.length) {
+                    rank = 4;
+                } else if (normalizedMatchRange.location == 0 || NSMaxRange(normalizedMatchRange) == normalizedCandidate.length) {
+                    rank = 3;
+                }
+                CGFloat specificity = (CGFloat)normalizedMatchRange.length / (CGFloat)MAX((NSUInteger)1, normalizedCandidate.length);
+                [candidateMatches addObject:@{
+                    @"range": [NSValue valueWithRange:sourceRange],
+                    @"text": matchedText,
+                    @"normalized": matchedNormalizedText,
+                    @"rank": @(rank),
+                    @"specificity": @(specificity),
+                }];
+            }
+        } else {
+            NSDictionary *map = [self normalizedTextMapForString:candidate.string];
+            NSString *normalizedCandidate = map[@"text"];
+            NSArray<NSValue *> *sourceRanges = map[@"ranges"];
+            if (normalizedCandidate.length == 0) {
+                continue;
+            }
+            NSRange searchRange = NSMakeRange(0, normalizedCandidate.length);
+            while (searchRange.length > 0) {
+                NSRange normalizedMatchRange = [normalizedCandidate rangeOfString:target
+                                                                           options:NSCaseInsensitiveSearch
+                                                                             range:searchRange];
+                if (normalizedMatchRange.location == NSNotFound || normalizedMatchRange.length == 0) {
+                    break;
+                }
+                NSRange sourceRange = [self sourceRangeForNormalizedRange:normalizedMatchRange sourceRanges:sourceRanges];
+                if (sourceRange.location != NSNotFound &&
+                    sourceRange.length > 0 &&
+                    NSMaxRange(sourceRange) <= candidate.string.length) {
+                    NSInteger rank = [self matchRankForRecognizedText:recognized target:target];
+                    [candidateMatches addObject:@{
+                        @"range": [NSValue valueWithRange:sourceRange],
+                        @"text": [candidate.string substringWithRange:sourceRange],
+                        @"normalized": target,
+                        @"rank": @(rank),
+                        @"specificity": @(target.length > 0 ? (CGFloat)target.length / (CGFloat)MAX((NSUInteger)1, normalizedCandidate.length) : 0.0),
+                    }];
+                }
+
+                NSUInteger nextLocation = NSMaxRange(normalizedMatchRange);
+                if (nextLocation >= normalizedCandidate.length) {
+                    break;
+                }
+                searchRange = NSMakeRange(nextLocation, normalizedCandidate.length - nextLocation);
+            }
+            if (candidateMatches.count == 0) {
+                continue;
+            }
+        }
+
+        if (candidateMatches.count == 0) {
             continue;
         }
 
-        NSInteger rank = [self matchRankForRecognizedText:recognized target:target];
-        CGFloat specificity = target.length > 0 ? (CGFloat)target.length / (CGFloat)MAX((NSUInteger)1, recognized.length) : 0.0;
-        CGFloat score = candidate.confidence;
-        CGRect imageRect = [self imageRectForCandidate:candidate target:target observation:observation image:image];
-        if (CGRectIsNull(imageRect) || CGRectIsEmpty(imageRect)) {
-            continue;
-        }
-        CGPoint clickImagePoint = CGPointMake(CGRectGetMidX(imageRect), CGRectGetMidY(imageRect));
-        CGFloat area = CGRectGetWidth(imageRect) * CGRectGetHeight(imageRect);
+        for (NSDictionary *matchInfo in candidateMatches) {
+            NSValue *rangeValue = matchInfo[@"range"];
+            NSRange targetRange = rangeValue.rangeValue;
+            NSString *matchedText = matchInfo[@"text"];
+            NSString *matchedNormalizedText = matchInfo[@"normalized"];
+            NSInteger rank = [matchInfo[@"rank"] integerValue];
+            CGFloat specificity = [matchInfo[@"specificity"] doubleValue];
 
-        BOOL shouldReplace = NO;
-        if (rank > bestRank) {
-            shouldReplace = YES;
-        } else if (rank == bestRank && specificity > bestSpecificity + 0.001) {
-            shouldReplace = YES;
-        } else if (rank == bestRank && fabs(specificity - bestSpecificity) <= 0.001 && area + 0.5 < bestArea) {
-            shouldReplace = YES;
-        } else if (rank == bestRank && fabs(specificity - bestSpecificity) <= 0.001 && fabs(area - bestArea) <= 0.5 && score > bestScore) {
-            shouldReplace = YES;
-        }
-        if (!shouldReplace) {
-            continue;
-        }
+            CGRect imageRect = [self imageRectForCandidate:candidate
+                                                 textRange:targetRange
+                                               exactTarget:matchedNormalizedText
+                                               observation:observation
+                                                     image:image];
+            if (CGRectIsNull(imageRect) || CGRectIsEmpty(imageRect)) {
+                continue;
+            }
+            validMatchCount++;
 
-        CGRect rect = [self screenRectFromImageRect:imageRect image:image sourceWindow:sourceWindow];
-        CGPoint point = sourceWindow ? [sourceWindow convertPoint:clickImagePoint toWindow:nil] : clickImagePoint;
-        NSLog(@"[AnClick][OCR] target=%@ text=%@ visionRect=(%.1f, %.1f, %.1f, %.1f) screenRect=(%.1f, %.1f, %.1f, %.1f) point=(%.1f, %.1f)",
-              target,
-              candidate.string,
-              imageRect.origin.x,
-              imageRect.origin.y,
-              imageRect.size.width,
-              imageRect.size.height,
-              rect.origin.x,
-              rect.origin.y,
-              rect.size.width,
-              rect.size.height,
-              point.x,
-              point.y);
-        bestRank = rank;
-        bestSpecificity = specificity;
-        bestArea = area;
-        bestScore = score;
-        bestMatch = @{
-            @"point": [NSValue valueWithCGPoint:point],
-            @"rect": [NSValue valueWithCGRect:rect],
-            @"score": @(score),
-            @"text": candidate.string,
-            @"fallback": @(fallback)
-        };
+            CGFloat score = candidate.confidence;
+            CGPoint clickImagePoint = CGPointMake(CGRectGetMidX(imageRect), CGRectGetMidY(imageRect));
+            CGFloat area = CGRectGetWidth(imageRect) * CGRectGetHeight(imageRect);
+
+            CGFloat minY = CGRectGetMinY(imageRect);
+            CGFloat minX = CGRectGetMinX(imageRect);
+            BOOL shouldReplace = NO;
+            if (rank > bestRank) {
+                shouldReplace = YES;
+            } else if (rank == bestRank && specificity > bestSpecificity + 0.001) {
+                shouldReplace = YES;
+            } else if (rank == bestRank && fabs(specificity - bestSpecificity) <= 0.001 && area + 0.5 < bestArea) {
+                shouldReplace = YES;
+            } else if (rank == bestRank && fabs(specificity - bestSpecificity) <= 0.001 && fabs(area - bestArea) <= 0.5 && minY + 0.5 < bestY) {
+                shouldReplace = YES;
+            } else if (rank == bestRank && fabs(specificity - bestSpecificity) <= 0.001 && fabs(area - bestArea) <= 0.5 && fabs(minY - bestY) <= 0.5 && minX + 0.5 < bestX) {
+                shouldReplace = YES;
+            } else if (rank == bestRank && fabs(specificity - bestSpecificity) <= 0.001 && fabs(area - bestArea) <= 0.5 && fabs(minY - bestY) <= 0.5 && fabs(minX - bestX) <= 0.5 && score > bestScore) {
+                shouldReplace = YES;
+            }
+            if (!shouldReplace) {
+                continue;
+            }
+
+            CGRect rect = [self screenRectFromImageRect:imageRect image:image sourceWindow:sourceWindow];
+            CGPoint point = sourceWindow ? [sourceWindow convertPoint:clickImagePoint toWindow:nil] : clickImagePoint;
+            NSLog(@"[AnClick][OCR] target=%@ regex=%d text=%@ match=%@ visionRect=(%.1f, %.1f, %.1f, %.1f) screenRect=(%.1f, %.1f, %.1f, %.1f) point=(%.1f, %.1f)",
+                  target,
+                  useRegex,
+                  candidate.string,
+                  matchedText,
+                  imageRect.origin.x,
+                  imageRect.origin.y,
+                  imageRect.size.width,
+                  imageRect.size.height,
+                  rect.origin.x,
+                  rect.origin.y,
+                  rect.size.width,
+                  rect.size.height,
+                  point.x,
+                  point.y);
+            bestRank = rank;
+            bestSpecificity = specificity;
+            bestArea = area;
+            bestScore = score;
+            bestY = minY;
+            bestX = minX;
+            bestMatch = @{
+                @"point": [NSValue valueWithCGPoint:point],
+                @"rect": [NSValue valueWithCGRect:rect],
+                @"score": @(score),
+                @"text": matchedText,
+                @"lineText": candidate.string,
+                @"regex": @(useRegex),
+                @"fallback": @(fallback)
+            };
+        }
     }
 
-    return bestMatch ?: @{@"error": @"文字识别未找到"};
+    if (bestMatch) {
+        NSMutableDictionary *result = [bestMatch mutableCopy];
+        result[@"matchCount"] = @(validMatchCount);
+        return result;
+    }
+    return @{@"error": @"文字识别未找到"};
 }
 
 + (NSDictionary *)findText:(NSString *)targetText mode:(__unused NSInteger)mode {
-    NSString *target = [self normalizedText:targetText];
+    BOOL detectedRegex = NO;
+    NSString *rawTarget = [self targetTextByRemovingRegexPrefix:targetText detectedRegex:&detectedRegex];
+    return [self findText:rawTarget mode:mode useRegex:detectedRegex];
+}
+
++ (NSDictionary *)findText:(NSString *)targetText mode:(__unused NSInteger)mode useRegex:(BOOL)useRegex {
+    NSString *rawTarget = useRegex
+        ? [self targetTextByRemovingRegexPrefix:targetText detectedRegex:nil]
+        : [targetText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *target = useRegex ? [self normalizedRegexPattern:rawTarget] : [self normalizedText:rawTarget];
     if (target.length == 0) {
         return @{@"error": @"文字识别未填写"};
     }
@@ -447,7 +628,8 @@
                         sourceWindow:sourceWindow
                                level:VNRequestTextRecognitionLevelAccurate
                   languageCorrection:YES
-                            fallback:NO];
+                            fallback:NO
+                            useRegex:useRegex];
 }
 
 @end

@@ -28,6 +28,11 @@ typedef NS_ENUM(NSInteger, AnClickOCRMode) {
     AnClickOCRModeAppleVision = 0,
 };
 
+typedef NS_ENUM(NSInteger, AnClickOCRMatchMode) {
+    AnClickOCRMatchModeContains = 0,
+    AnClickOCRMatchModeRegex = 1,
+};
+
 typedef struct __IOHIDEvent *IOHIDEventRef;
 typedef struct __IOHIDServiceClient *IOHIDServiceClientRef;
 typedef struct __IOHIDEventSystemClient *IOHIDEventSystemClientRef;
@@ -93,6 +98,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 @interface AnClickOCR : NSObject
 + (NSDictionary *)findText:(NSString *)targetText mode:(NSInteger)mode;
++ (NSDictionary *)findText:(NSString *)targetText mode:(NSInteger)mode useRegex:(BOOL)useRegex;
 + (NSString *)backendNameForMode:(NSInteger)mode;
 @end
 
@@ -153,6 +159,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_homeCloseButton;
     UIButton *_editorBackButton;
     UIButton *_imageActionButton;
+    UIButton *_ocrContainsMatchModeButton;
+    UIButton *_ocrRegexMatchModeButton;
     UIButton *_networkRequestModeButton;
     UIButton *_networkMethodButton;
     UIButton *_networkRetryModeButton;
@@ -336,6 +344,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     AnClickActionMode _actionMode;
     AnClickActionMode _imageActionMode;
     AnClickOCRMode _ocrMode;
+    AnClickOCRMatchMode _ocrMatchMode;
     UIWindow *_pointPickHostWindow;
 }
 
@@ -1052,6 +1061,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _ocrUsesMatchPoint = YES;
     _imageActionMode = AnClickActionModeTap;
     _ocrMode = AnClickOCRModeAppleVision;
+    _ocrMatchMode = AnClickOCRMatchModeContains;
     _colorTolerance = 18.0;
     _matchThreshold = 0.80;
     _actionDelay = 0;
@@ -1233,6 +1243,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _imageActionButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 196, buttonWidth, 32);
     [_panelView addSubview:_imageActionButton];
 
+    _ocrContainsMatchModeButton = [self panelButtonWithTitle:@"包含匹配" action:@selector(selectOCRMatchMode:)];
+    _ocrContainsMatchModeButton.tag = AnClickOCRMatchModeContains;
+    _ocrContainsMatchModeButton.frame = CGRectMake(gap, 196, buttonWidth, 32);
+    [_panelView addSubview:_ocrContainsMatchModeButton];
+
+    _ocrRegexMatchModeButton = [self panelButtonWithTitle:@"正则匹配" action:@selector(selectOCRMatchMode:)];
+    _ocrRegexMatchModeButton.tag = AnClickOCRMatchModeRegex;
+    _ocrRegexMatchModeButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 196, buttonWidth, 32);
+    [_panelView addSubview:_ocrRegexMatchModeButton];
+
     _networkRequestModeButton = [self panelButtonWithTitle:@"返回判断" action:@selector(toggleNetworkRequestMode)];
     _networkRequestModeButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 196, buttonWidth, 32);
     [_panelView addSubview:_networkRequestModeButton];
@@ -1346,6 +1366,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _ocrTargetField = [[UITextField alloc] initWithFrame:CGRectZero];
     _ocrTargetField.placeholder = @"目标文字";
     _ocrTargetField.keyboardType = UIKeyboardTypeDefault;
+    _ocrTargetField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _ocrTargetField.autocorrectionType = UITextAutocorrectionTypeNo;
     [self applyObsidianInputStyleToField:_ocrTargetField placeholder:@"目标文字" monospaced:NO];
     [self configureConfigTextField:_ocrTargetField];
     [_ocrTargetField addTarget:self action:@selector(ocrTargetChanged:) forControlEvents:UIControlEventEditingChanged];
@@ -2108,6 +2130,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _editorBackButton.hidden = !visible;
     _cancelEditButton.hidden = !visible;
     _imageActionButton.hidden = YES;
+    _ocrContainsMatchModeButton.hidden = YES;
+    _ocrRegexMatchModeButton.hidden = YES;
     _networkRequestModeButton.hidden = YES;
     _networkMethodButton.hidden = YES;
     _networkRetryModeButton.hidden = YES;
@@ -2168,6 +2192,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _clearActionButton,
         _testButton,
         _imageActionButton,
+        _ocrContainsMatchModeButton,
+        _ocrRegexMatchModeButton,
         _networkRequestModeButton,
         _networkMethodButton,
         _networkRetryModeButton,
@@ -3408,6 +3434,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _ocrUsesMatchPoint = YES;
     _imageActionMode = AnClickActionModeTap;
     _ocrMode = AnClickOCRModeAppleVision;
+    _ocrMatchMode = AnClickOCRMatchModeContains;
     _ocrTargetText = nil;
     _networkURL = nil;
     _networkContainsText = nil;
@@ -3438,6 +3465,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _imageUsesMatchPoint = YES;
     _ocrUsesMatchPoint = YES;
     _imageActionMode = AnClickActionModeTap;
+    _ocrMatchMode = AnClickOCRMatchModeContains;
     _templateSearchInProgress = NO;
     [self refreshModeButtons];
     [self refreshTemplatePreview];
@@ -3585,6 +3613,81 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (AnClickOCRMode)ocrModeForTask:(__unused NSDictionary *)task {
     return AnClickOCRModeAppleVision;
+}
+
+- (BOOL)ocrTextHasRegexPrefix:(NSString *)text {
+    if (text.length == 0) {
+        return NO;
+    }
+    NSString *trimmed = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSArray<NSString *> *prefixes = @[@"re:", @"regex:", @"正则:", @"re：", @"regex：", @"正则："];
+    for (NSString *prefix in prefixes) {
+        if ([trimmed rangeOfString:prefix options:NSCaseInsensitiveSearch].location == 0) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (NSString *)ocrTextByRemovingRegexPrefix:(NSString *)text {
+    if (text.length == 0) {
+        return @"";
+    }
+    NSString *trimmed = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSArray<NSString *> *prefixes = @[@"re:", @"regex:", @"正则:", @"re：", @"regex：", @"正则："];
+    for (NSString *prefix in prefixes) {
+        if ([trimmed rangeOfString:prefix options:NSCaseInsensitiveSearch].location == 0) {
+            return [[trimmed substringFromIndex:prefix.length] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        }
+    }
+    return trimmed;
+}
+
+- (BOOL)ocrRegexPatternIsValid:(NSString *)pattern {
+    NSString *regexText = [self ocrTextByRemovingRegexPrefix:pattern ?: @""];
+    if (regexText.length == 0) {
+        return NO;
+    }
+    regexText = [regexText stringByFoldingWithOptions:NSWidthInsensitiveSearch locale:nil];
+    NSError *regexError = nil;
+    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:regexText
+                                                                           options:NSRegularExpressionCaseInsensitive
+                                                                             error:&regexError];
+    return regex != nil && regexError == nil;
+}
+
+- (NSString *)ocrDisplayTextForText:(NSString *)text matchMode:(AnClickOCRMatchMode)matchMode {
+    NSString *targetText = [self trimmedActionDescription:text];
+    if (matchMode == AnClickOCRMatchModeRegex) {
+        targetText = [self ocrTextByRemovingRegexPrefix:targetText];
+    }
+    return targetText.length > 0 ? targetText : @"先填文字";
+}
+
+- (AnClickOCRMatchMode)ocrMatchModeForTask:(NSDictionary *)task {
+    NSNumber *modeNumber = task[@"ocrMatchMode"];
+    if (modeNumber) {
+        return modeNumber.integerValue == AnClickOCRMatchModeRegex
+            ? AnClickOCRMatchModeRegex
+            : AnClickOCRMatchModeContains;
+    }
+    NSString *targetText = [self trimmedActionDescription:task[@"ocrText"]];
+    if ([self ocrTextHasRegexPrefix:targetText ?: @""]) {
+        return AnClickOCRMatchModeRegex;
+    }
+    return AnClickOCRMatchModeContains;
+}
+
+- (BOOL)ocrTaskUsesRegexMatching:(NSDictionary *)task {
+    return [self ocrMatchModeForTask:task] == AnClickOCRMatchModeRegex;
+}
+
+- (AnClickOCRMatchMode)effectiveOCRMatchModeForText:(__unused NSString *)text {
+    return _ocrMatchMode == AnClickOCRMatchModeRegex ? AnClickOCRMatchModeRegex : AnClickOCRMatchModeContains;
+}
+
+- (NSString *)ocrMatchModeTitleForMode:(AnClickOCRMatchMode)mode {
+    return mode == AnClickOCRMatchModeRegex ? @"正则匹配" : @"包含匹配";
 }
 
 - (AnClickActionMode)modeForTask:(NSDictionary *)task {
@@ -3850,12 +3953,26 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)ocrTargetChanged:(UITextField *)textField {
     _ocrTargetText = [self trimmedActionDescription:textField.text];
     [self autosaveSelectedTaskIfPossible];
+    [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
 }
 
 - (void)ocrTargetEditingDidEnd:(__unused UITextField *)textField {
     [self syncOCRTargetFromField];
     [self autosaveSelectedTaskIfPossible];
+    [self updateStatusForCurrentConfig];
+}
+
+- (void)selectOCRMatchMode:(UIButton *)sender {
+    if (_actionMode != AnClickActionModeOCR) {
+        return;
+    }
+    [self syncOCRTargetFromField];
+    _ocrMatchMode = sender.tag == AnClickOCRMatchModeRegex
+        ? AnClickOCRMatchModeRegex
+        : AnClickOCRMatchModeContains;
+    [self autosaveSelectedTaskIfPossible];
+    [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
 }
 
@@ -3950,6 +4067,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _clearActionButton.hidden = YES;
     _testButton.hidden = YES;
     _imageActionButton.hidden = YES;
+    _ocrContainsMatchModeButton.hidden = YES;
+    _ocrRegexMatchModeButton.hidden = YES;
     _networkRequestModeButton.hidden = YES;
     _networkMethodButton.hidden = YES;
     _networkRetryModeButton.hidden = YES;
@@ -4304,20 +4423,33 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _ocrTargetField.hidden = NO;
         _ocrTargetField.frame = CGRectMake(side, configTopY + 22.0, contentWidth, 40);
 
+        AnClickOCRMatchMode effectiveMatchMode = [self effectiveOCRMatchModeForText:_ocrTargetText ?: @""];
+        _ocrContainsMatchModeButton.hidden = NO;
+        _ocrRegexMatchModeButton.hidden = NO;
+        [_ocrContainsMatchModeButton setTitle:@"包含匹配" forState:UIControlStateNormal];
+        [_ocrRegexMatchModeButton setTitle:@"正则匹配" forState:UIControlStateNormal];
+        [self layoutButtons:@[_ocrContainsMatchModeButton, _ocrRegexMatchModeButton] x:side y:configTopY + 72.0 width:contentWidth height:36 gap:10.0];
+        [self styleSegmentButton:_ocrContainsMatchModeButton selected:effectiveMatchMode == AnClickOCRMatchModeContains];
+        [self styleSegmentButton:_ocrRegexMatchModeButton selected:effectiveMatchMode == AnClickOCRMatchModeRegex];
+        [self updateButtonShadowPath:_ocrContainsMatchModeButton];
+        [self updateButtonShadowPath:_ocrRegexMatchModeButton];
+
         _secondaryConfigLabel.text = @"点击模式";
         _secondaryConfigLabel.hidden = NO;
-        _secondaryConfigLabel.frame = CGRectMake(side, configTopY + 72.0, contentWidth, 20);
+        CGFloat modeLabelY = configTopY + 118.0;
+        _secondaryConfigLabel.frame = CGRectMake(side, modeLabelY, contentWidth, 20);
         [_playButton setTitle:@"识字位置" forState:UIControlStateNormal];
         [_pickPointButton setTitle:_ocrUsesMatchPoint ? @"自定义位置" : [self pointSummaryForMode:AnClickActionModeOCR emptyTitle:@"自定义位置"] forState:UIControlStateNormal];
-        CGFloat modeButtonY = configTopY + 94.0;
+        CGFloat modeButtonY = modeLabelY + 22.0;
         [self layoutButtons:@[_playButton, _pickPointButton] x:side y:modeButtonY width:contentWidth height:34 gap:10.0];
         [self styleSegmentButton:_playButton selected:_ocrUsesMatchPoint];
         [self styleSegmentButton:_pickPointButton selected:!_ocrUsesMatchPoint];
 
         _tertiaryConfigLabel.text = @"成功后动作类型";
         _tertiaryConfigLabel.hidden = NO;
-        _tertiaryConfigLabel.frame = CGRectMake(side, configTopY + 140.0, contentWidth, 20);
-        CGFloat actionButtonY = configTopY + 162.0;
+        CGFloat actionLabelY = modeButtonY + 42.0;
+        _tertiaryConfigLabel.frame = CGRectMake(side, actionLabelY, contentWidth, 20);
+        CGFloat actionButtonY = actionLabelY + 22.0;
         [self layoutSuccessActionButtonsAtY:actionButtonY side:side width:contentWidth];
         CGFloat fieldsY = actionButtonY + 44.0;
         if (_imageActionMode == AnClickActionModeNetwork) {
@@ -4513,9 +4645,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     if (_actionMode == AnClickActionModeOCR) {
-        NSString *targetState = _ocrTargetText.length > 0 ? _ocrTargetText : @"先填文字";
+        AnClickOCRMatchMode matchMode = [self effectiveOCRMatchModeForText:_ocrTargetText ?: @""];
+        if (matchMode == AnClickOCRMatchModeRegex &&
+            _ocrTargetText.length > 0 &&
+            ![self ocrRegexPatternIsValid:_ocrTargetText]) {
+            _statusLabel.text = @"识字 正则格式错误";
+            return;
+        }
+        NSString *targetState = [self ocrDisplayTextForText:_ocrTargetText matchMode:matchMode];
         NSString *pointState = _ocrUsesMatchPoint ? @"识别点" : ([self hasManualPointForMode:AnClickActionModeOCR] ? @"自定义点" : @"先取点击点");
-        _statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ 后%@",
+        _statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ %@ 后%@",
+                             [self ocrMatchModeTitleForMode:matchMode],
                              targetState,
                              pointState,
                              _imageActionMode == AnClickActionModeNetwork
@@ -5880,8 +6020,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _statusLabel.text = @"先填目标文字";
             return nil;
         }
+        AnClickOCRMatchMode matchMode = [self effectiveOCRMatchModeForText:_ocrTargetText ?: @""];
+        if (matchMode == AnClickOCRMatchModeRegex &&
+            requireComplete &&
+            ![self ocrRegexPatternIsValid:_ocrTargetText]) {
+            _statusLabel.text = @"正则格式错误";
+            return nil;
+        }
         task[@"ocrMode"] = @(_ocrMode);
         task[@"ocrBackendVersion"] = @1;
+        task[@"ocrMatchMode"] = @(matchMode);
         task[@"useMatchPoint"] = @(_ocrUsesMatchPoint);
         task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
         if (_imageActionMode == AnClickActionModeNetwork && ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
@@ -5989,8 +6137,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         subtitle = events.count > 0 ? [NSString stringWithFormat:@"已录 %lu 步", (unsigned long)events.count] : @"未录制";
     } else if (desc.length == 0 && mode == AnClickActionModeOCR) {
         NSString *text = [self trimmedActionDescription:task[@"ocrText"]];
+        AnClickOCRMatchMode matchMode = [self ocrMatchModeForTask:task];
         subtitle = text.length > 0
-            ? [NSString stringWithFormat:@"识字 · %@", text]
+            ? [NSString stringWithFormat:@"识字 · %@ · %@", [self ocrMatchModeTitleForMode:matchMode], [self ocrDisplayTextForText:text matchMode:matchMode]]
             : @"未设置文字";
         if ([self taskUsesRecognitionNetworkAction:task]) {
             NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
@@ -6297,6 +6446,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } else if (mode == AnClickActionModeOCR) {
         _ocrTargetText = [self trimmedActionDescription:task[@"ocrText"]];
         _ocrMode = [self ocrModeForTask:task];
+        _ocrMatchMode = [self ocrMatchModeForTask:task];
         NSNumber *useMatchPointNumber = task[@"useMatchPoint"];
         _ocrUsesMatchPoint = useMatchPointNumber ? useMatchPointNumber.boolValue : YES;
         _imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
@@ -7301,6 +7451,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     AnClickOCRMode ocrMode = [self ocrModeForTask:task];
+    BOOL useRegex = [self ocrTaskUsesRegexMatching:task];
+    if (useRegex && ![self ocrRegexPatternIsValid:targetText]) {
+        _statusLabel.text = @"识字正则无效";
+        [self showToast:@"识字正则无效"];
+        if (completion) {
+            completion();
+        }
+        return;
+    }
     AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
     BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
     NSValue *customPointValue = task[@"point"];
@@ -7325,7 +7484,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return;
         }
         dispatch_async([delayedSelf templateSearchQueue], ^{
-            NSDictionary *match = [AnClickOCR findText:targetText mode:ocrMode];
+            NSDictionary *match = [AnClickOCR findText:targetText mode:ocrMode useRegex:useRegex];
             dispatch_async(dispatch_get_main_queue(), ^{
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) {
@@ -7351,6 +7510,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 NSValue *rectValue = match[@"rect"];
                 NSNumber *scoreNumber = match[@"score"];
                 NSString *text = [match[@"text"] isKindOfClass:NSString.class] ? match[@"text"] : targetText;
+                NSInteger matchCount = [match[@"matchCount"] respondsToSelector:@selector(integerValue)] ? MAX(1, [match[@"matchCount"] integerValue]) : 1;
+                NSString *matchSummary = matchCount > 1
+                    ? [NSString stringWithFormat:@"%@ 命中%ld选1", useRegex ? @"正则" : @"包含", (long)matchCount]
+                    : (useRegex ? @"正则" : @"包含");
                 if (!pointValue || !rectValue) {
                     strongSelf->_statusLabel.text = @"识字未找到";
                     [strongSelf showToast:@"识字未找到"];
@@ -7362,13 +7525,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
                 if (actionMode == AnClickActionModeNetwork) {
                     [strongSelf performRecognitionNetworkActionForTask:task runGeneration:runGeneration completion:completion];
-                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ 网络请求", text];
+                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ 网络请求", matchSummary, text];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     return;
                 }
                 CGPoint actionPoint = useMatchPoint ? pointValue.CGPointValue : customPointValue.CGPointValue;
                 [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
-                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %.0f,%.0f",
+                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ %.0f,%.0f",
+                                                 matchSummary,
                                                  text,
                                                  actionPoint.x,
                                                  actionPoint.y];
@@ -7501,6 +7665,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         NSString *targetText = [self trimmedActionDescription:task[@"ocrText"]];
         if (targetText.length == 0) {
             _statusLabel.text = @"任务识字未填写";
+            return NO;
+        }
+        if ([self ocrTaskUsesRegexMatching:task] && ![self ocrRegexPatternIsValid:targetText]) {
+            _statusLabel.text = @"任务识字正则无效";
             return NO;
         }
         BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
