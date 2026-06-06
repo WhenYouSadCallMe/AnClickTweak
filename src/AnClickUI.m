@@ -137,6 +137,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)handleApplicationWillLeaveForeground;
 - (void)applyScreenGeometryRefreshAllowHeavyRefresh:(BOOL)allowHeavyRefresh;
 - (void)reclampPanelWindowForCurrentScreenAllowHeavyRefresh:(BOOL)allowHeavyRefresh;
+- (void)registerKeyboardAvoidanceObserversIfNeeded;
 @end
 
 @implementation AnClickUI {
@@ -295,6 +296,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _volumeKVORegistered;
     BOOL _volumeDarwinObserverRegistered;
     BOOL _hardwareVolumeButtonObserverRegistered;
+    BOOL _keyboardAvoidanceObserversRegistered;
+    BOOL _keyboardVisible;
     BOOL _hasObservedSystemVolume;
     BOOL _volumeShortcutRunSuppressToasts;
     BOOL _suppressTemplatePreviewRefresh;
@@ -353,6 +356,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *_globalNetworkURL;
     NSString *_globalNetworkContainsText;
     NSString *_globalNetworkFalseText;
+    UITextField *_activeConfigTextField;
+    CGRect _keyboardFrameInScreen;
     NSMutableArray<NSDictionary *> *_targetColorSamples;
     NSMutableArray<NSDictionary *> *_pendingColorPickSamples;
     AnClickActionMode _actionMode;
@@ -1123,6 +1128,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     UIViewController *controller = [[UIViewController alloc] init];
     _panelWindow.rootViewController = controller;
+    [self registerKeyboardAvoidanceObserversIfNeeded];
     [self installVolumeShortcutControl];
 
     _collapsedButton = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -1630,6 +1636,134 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     field.delegate = self;
     field.returnKeyType = UIReturnKeyDone;
     field.inputAccessoryView = nil;
+}
+
+- (void)registerKeyboardAvoidanceObserversIfNeeded {
+    if (_keyboardAvoidanceObserversRegistered) {
+        return;
+    }
+    _keyboardAvoidanceObserversRegistered = YES;
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center addObserver:self
+               selector:@selector(handleKeyboardWillChangeFrame:)
+                   name:UIKeyboardWillChangeFrameNotification
+                 object:nil];
+    [center addObserver:self
+               selector:@selector(handleKeyboardWillHide:)
+                   name:UIKeyboardWillHideNotification
+                 object:nil];
+}
+
+- (UIScrollView *)keyboardAvoidanceScrollViewForField:(UITextField *)field {
+    if (!field) {
+        return nil;
+    }
+    if (_globalSettingsScrollView && [field isDescendantOfView:_globalSettingsScrollView]) {
+        return _globalSettingsScrollView;
+    }
+    if (_editorContentScrollView && [field isDescendantOfView:_editorContentScrollView]) {
+        return _editorContentScrollView;
+    }
+    return nil;
+}
+
+- (void)setKeyboardAvoidanceBottomInset:(CGFloat)bottomInset forScrollView:(UIScrollView *)scrollView {
+    if (!scrollView) {
+        return;
+    }
+    UIEdgeInsets contentInset = scrollView.contentInset;
+    contentInset.bottom = bottomInset;
+    scrollView.contentInset = contentInset;
+
+    UIEdgeInsets indicatorInsets = scrollView.scrollIndicatorInsets;
+    indicatorInsets.bottom = bottomInset;
+    scrollView.scrollIndicatorInsets = indicatorInsets;
+}
+
+- (void)resetKeyboardAvoidanceInsetsExceptScrollView:(UIScrollView *)activeScrollView {
+    NSMutableArray<UIScrollView *> *scrollViews = [NSMutableArray array];
+    if (_editorContentScrollView) {
+        [scrollViews addObject:_editorContentScrollView];
+    }
+    if (_globalSettingsScrollView) {
+        [scrollViews addObject:_globalSettingsScrollView];
+    }
+    for (UIScrollView *scrollView in scrollViews) {
+        if (scrollView != activeScrollView) {
+            [self setKeyboardAvoidanceBottomInset:0.0 forScrollView:scrollView];
+        }
+    }
+}
+
+- (void)applyKeyboardAvoidanceAnimated:(BOOL)animated duration:(NSTimeInterval)duration curve:(UIViewAnimationCurve)curve {
+    UIScrollView *scrollView = [self keyboardAvoidanceScrollViewForField:_activeConfigTextField];
+    [self resetKeyboardAvoidanceInsetsExceptScrollView:scrollView];
+    if (!_keyboardVisible || !scrollView || !_panelWindow || CGRectIsEmpty(_keyboardFrameInScreen)) {
+        [self setKeyboardAvoidanceBottomInset:0.0 forScrollView:scrollView];
+        return;
+    }
+
+    CGRect keyboardFrame = [_panelWindow convertRect:_keyboardFrameInScreen fromWindow:nil];
+    CGRect scrollFrame = [scrollView.superview convertRect:scrollView.frame toView:_panelWindow];
+    CGFloat overlap = CGRectGetMaxY(scrollFrame) - CGRectGetMinY(keyboardFrame);
+    CGFloat bottomInset = MAX(0.0, overlap + 14.0);
+    void (^updates)(void) = ^{
+        [self setKeyboardAvoidanceBottomInset:bottomInset forScrollView:scrollView];
+        if (self->_activeConfigTextField &&
+            [self->_activeConfigTextField isDescendantOfView:scrollView] &&
+            !self->_activeConfigTextField.hidden) {
+            CGRect fieldRect = [self->_activeConfigTextField.superview convertRect:self->_activeConfigTextField.frame toView:scrollView];
+            CGFloat topPadding = 12.0;
+            CGFloat bottomPadding = 18.0;
+            CGFloat visibleMinY = scrollView.contentOffset.y;
+            CGFloat visibleMaxY = visibleMinY + scrollView.bounds.size.height - bottomInset;
+            CGFloat targetOffsetY = scrollView.contentOffset.y;
+            if (CGRectGetMaxY(fieldRect) + bottomPadding > visibleMaxY) {
+                targetOffsetY += CGRectGetMaxY(fieldRect) + bottomPadding - visibleMaxY;
+            }
+            if (CGRectGetMinY(fieldRect) - topPadding < targetOffsetY) {
+                targetOffsetY = CGRectGetMinY(fieldRect) - topPadding;
+            }
+            CGFloat maxOffsetY = MAX(-scrollView.contentInset.top,
+                                     scrollView.contentSize.height + scrollView.contentInset.bottom - scrollView.bounds.size.height);
+            CGFloat minOffsetY = -scrollView.contentInset.top;
+            targetOffsetY = MIN(MAX(targetOffsetY, minOffsetY), MAX(minOffsetY, maxOffsetY));
+            scrollView.contentOffset = CGPointMake(scrollView.contentOffset.x, targetOffsetY);
+        }
+    };
+
+    if (animated) {
+        UIViewAnimationOptions options = ((NSUInteger)curve << 16) | UIViewAnimationOptionBeginFromCurrentState;
+        [UIView animateWithDuration:MAX(0.05, duration) delay:0 options:options animations:updates completion:nil];
+    } else {
+        updates();
+    }
+}
+
+- (void)applyKeyboardAvoidanceAnimated:(BOOL)animated {
+    [self applyKeyboardAvoidanceAnimated:animated duration:0.20 curve:UIViewAnimationCurveEaseInOut];
+}
+
+- (void)handleKeyboardWillChangeFrame:(NSNotification *)notification {
+    NSValue *frameValue = notification.userInfo[UIKeyboardFrameEndUserInfoKey];
+    CGRect keyboardFrame = frameValue ? frameValue.CGRectValue : CGRectZero;
+    CGRect screenBounds = [self currentScreenBounds];
+    _keyboardFrameInScreen = keyboardFrame;
+    _keyboardVisible = !CGRectIsEmpty(keyboardFrame) &&
+        CGRectIntersectsRect(screenBounds, keyboardFrame) &&
+        CGRectGetMinY(keyboardFrame) < CGRectGetMaxY(screenBounds);
+
+    NSTimeInterval duration = [notification.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+    UIViewAnimationCurve curve = (UIViewAnimationCurve)[notification.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue];
+    [self applyKeyboardAvoidanceAnimated:YES duration:duration curve:curve];
+}
+
+- (void)handleKeyboardWillHide:(NSNotification *)notification {
+    _keyboardVisible = NO;
+    _keyboardFrameInScreen = CGRectZero;
+    NSTimeInterval duration = [notification.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+    UIViewAnimationCurve curve = (UIViewAnimationCurve)[notification.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue];
+    [self applyKeyboardAvoidanceAnimated:YES duration:duration curve:curve];
 }
 
 - (UILabel *)configCaptionLabelWithText:(NSString *)text {
@@ -2417,6 +2551,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat maxOffsetY = MAX(0.0, contentHeight - _editorContentScrollView.bounds.size.height);
     if (_editorContentScrollView.contentOffset.y > maxOffsetY) {
         _editorContentScrollView.contentOffset = CGPointMake(_editorContentScrollView.contentOffset.x, maxOffsetY);
+    }
+    if (_keyboardVisible) {
+        [self applyKeyboardAvoidanceAnimated:NO];
     }
 }
 
@@ -3909,6 +4046,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)dismissKeyboard {
     [self dismissConfigKeyboardAndSync];
+    _activeConfigTextField = nil;
+    if (!_keyboardVisible) {
+        [self resetKeyboardAvoidanceInsetsExceptScrollView:nil];
+    }
     [self refreshTimingFieldsIfNeeded];
     [self refreshGlobalSettingsFieldsIfNeeded];
     if (_taskEditorVisible) {
@@ -3920,6 +4061,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [textField resignFirstResponder];
     [self dismissKeyboard];
     return YES;
+}
+
+- (void)textFieldDidBeginEditing:(UITextField *)textField {
+    _activeConfigTextField = textField;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self applyKeyboardAvoidanceAnimated:YES];
+    });
+}
+
+- (void)textFieldDidEndEditing:(UITextField *)textField {
+    if (_activeConfigTextField == textField) {
+        _activeConfigTextField = nil;
+    }
 }
 
 - (void)handlePanelTapToDismissKeyboard:(UITapGestureRecognizer *)recognizer {
