@@ -135,6 +135,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)handleExternalVolumeShortcutDirection:(NSInteger)direction;
 - (void)handleApplicationDidBecomeActive;
 - (void)handleApplicationWillLeaveForeground;
+- (void)applyScreenGeometryRefreshAllowHeavyRefresh:(BOOL)allowHeavyRefresh;
+- (void)reclampPanelWindowForCurrentScreenAllowHeavyRefresh:(BOOL)allowHeavyRefresh;
 @end
 
 @implementation AnClickUI {
@@ -295,9 +297,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _hardwareVolumeButtonObserverRegistered;
     BOOL _hasObservedSystemVolume;
     BOOL _volumeShortcutRunSuppressToasts;
+    BOOL _suppressTemplatePreviewRefresh;
     NSUInteger _panelRestoreGeneration;
     NSUInteger _taskRunGeneration;
     NSUInteger _toastGeneration;
+    NSUInteger _screenGeometryGeneration;
+    CGSize _lastAppliedScreenGeometrySize;
     CGFloat _taskReorderStartCenterY;
     CGFloat _taskReorderStartLocationY;
     CFTimeInterval _toastDeferNonVolumeUntil;
@@ -1035,32 +1040,25 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)handleScreenGeometryChanged {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self attachPanelWindowToActiveSceneIfNeeded];
-        [self installVolumeShortcutControl];
-        if (self->_toastWindow) {
-            [self ensureToastWindow];
-        }
-        [self reclampPanelWindowForCurrentScreen];
-        [self relayoutScreenInteractionOverlays];
-        NSString *toastText = self->_toastLabel.text;
-        [self layoutToastWithMessage:toastText.length > 0 ? toastText : @""];
-        UIWindow *hostWindow = [self hostWindow];
-        if (hostWindow) {
-            NSString *hostToastText = self->_hostToastLabel.text;
-            [self layoutHostToastWithMessage:hostToastText.length > 0 ? hostToastText : @"" inWindow:hostWindow];
-        }
-    });
+    void (^geometryBlock)(void) = ^{
+        NSUInteger generation = ++self->_screenGeometryGeneration;
+        [self applyScreenGeometryRefreshAllowHeavyRefresh:NO];
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.28 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self attachPanelWindowToActiveSceneIfNeeded];
-        [self installVolumeShortcutControl];
-        if (self->_toastWindow) {
-            [self ensureToastWindow];
-        }
-        [self reclampPanelWindowForCurrentScreen];
-        [self relayoutScreenInteractionOverlays];
-    });
+        __weak typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.22 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf || generation != strongSelf->_screenGeometryGeneration) {
+                return;
+            }
+            [strongSelf applyScreenGeometryRefreshAllowHeavyRefresh:YES];
+        });
+    };
+
+    if (NSThread.isMainThread) {
+        geometryBlock();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), geometryBlock);
+    }
 }
 
 - (void)buildPanel {
@@ -1680,6 +1678,42 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return CGRectStandardize(bounds);
 }
 
+- (BOOL)screenGeometrySize:(CGSize)lhs isCloseToSize:(CGSize)rhs {
+    return fabs(lhs.width - rhs.width) < 0.5 && fabs(lhs.height - rhs.height) < 0.5;
+}
+
+- (void)applyScreenGeometryRefreshAllowHeavyRefresh:(BOOL)allowHeavyRefresh {
+    CGSize screenSize = [self currentScreenBounds].size;
+    if (!allowHeavyRefresh &&
+        [self screenGeometrySize:screenSize isCloseToSize:_lastAppliedScreenGeometrySize]) {
+        return;
+    }
+    _lastAppliedScreenGeometrySize = screenSize;
+
+    [self attachPanelWindowToActiveSceneIfNeeded];
+    if (allowHeavyRefresh) {
+        [self installVolumeShortcutControl];
+    }
+
+    [UIView performWithoutAnimation:^{
+        if (self->_toastWindow) {
+            [self ensureToastWindow];
+        }
+        [self reclampPanelWindowForCurrentScreenAllowHeavyRefresh:allowHeavyRefresh];
+        [self relayoutScreenInteractionOverlays];
+
+        NSString *toastText = self->_toastLabel.text;
+        [self layoutToastWithMessage:toastText.length > 0 ? toastText : @""];
+        UIWindow *hostWindow = [self hostWindow];
+        if (hostWindow) {
+            NSString *hostToastText = self->_hostToastLabel.text;
+            [self layoutHostToastWithMessage:hostToastText.length > 0 ? hostToastText : @"" inWindow:hostWindow];
+        }
+        [self->_panelView layoutIfNeeded];
+        [self->_panelWindow.rootViewController.view layoutIfNeeded];
+    }];
+}
+
 - (void)ensureToastWindow {
     CGRect bounds = [self currentScreenBounds];
     if (!_toastWindow) {
@@ -2147,11 +2181,24 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)reclampPanelWindowForCurrentScreen {
+    [self reclampPanelWindowForCurrentScreenAllowHeavyRefresh:YES];
+}
+
+- (void)reclampPanelWindowForCurrentScreenAllowHeavyRefresh:(BOOL)allowHeavyRefresh {
     if (!_panelWindow) {
         return;
     }
+
+    if (_panelWindow.userInteractionEnabled && !_captureOverlay && !_pointPickWindow && !_colorPickWindow) {
+        _panelWindow.hidden = NO;
+    }
+
+    BOOL previousSuppressPreview = _suppressTemplatePreviewRefresh;
+    _suppressTemplatePreviewRefresh = previousSuppressPreview || !allowHeavyRefresh;
     CGRect frame = _panelWindow.frame;
     if (_panelExpanded) {
+        _collapsedButton.hidden = YES;
+        _panelView.hidden = NO;
         frame.size = [self expandedPanelSize];
         _panelWindow.frame = [self clampedPanelFrame:frame];
         _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
@@ -2160,8 +2207,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [self refreshEditorConfigControls];
         } else {
             [self layoutTaskHomeControls];
-            [self refreshTaskList];
+            if (allowHeavyRefresh) {
+                [self refreshTaskList];
+            }
         }
+        _suppressTemplatePreviewRefresh = previousSuppressPreview;
         return;
     }
 
@@ -2169,6 +2219,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _panelWindow.frame = [self clampedFloatingFrame:frame];
     _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
     _collapsedButton.frame = _panelWindow.bounds;
+    _collapsedButton.hidden = NO;
+    _panelView.hidden = YES;
+    [self refreshCollapsedButtonTitle];
+    _suppressTemplatePreviewRefresh = previousSuppressPreview;
 }
 
 - (void)refreshCollapsedButtonTitle {
@@ -4130,6 +4184,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_networkUsesPost && _actionMode == AnClickActionModeOCR && _imageActionMode == AnClickActionModeNetwork) {
         _networkPostBodyUsesOCRResult = YES;
         [self ensureNetworkPostPairs];
+    } else if (!_networkUsesPost) {
+        _networkPostBodyUsesOCRResult = NO;
+        if (_networkPostBodyField.isFirstResponder) {
+            [_networkPostBodyField resignFirstResponder];
+        }
+        [self hideNetworkPostPairControls];
     }
     [self autosaveSelectedTaskIfPossible];
     [self refreshEditorConfigControls];
@@ -4402,9 +4462,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkPostAddPairButton.hidden = YES;
     for (UITextField *field in _networkPostKeyFields) {
         field.hidden = YES;
+        if (field.isFirstResponder) {
+            [field resignFirstResponder];
+        }
     }
     for (UITextField *field in _networkPostValueFields) {
         field.hidden = YES;
+        if (field.isFirstResponder) {
+            [field resignFirstResponder];
+        }
     }
     for (UIButton *button in _networkPostValueModeButtons) {
         button.hidden = YES;
@@ -4548,6 +4614,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)refreshNetworkPostPairFieldValues {
+    BOOL shouldShow = _taskEditorVisible &&
+        _actionMode == AnClickActionModeOCR &&
+        _imageActionMode == AnClickActionModeNetwork &&
+        _networkUsesPost;
+    if (!shouldShow) {
+        [self hideNetworkPostPairControls];
+        return;
+    }
+
     [self ensureNetworkPostPairs];
     NSUInteger count = MIN(_networkPostPairs.count, MIN(_networkPostKeyFields.count, _networkPostValueFields.count));
     for (NSUInteger i = 0; i < _networkPostKeyFields.count; i++) {
@@ -5046,7 +5121,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:configTopY + 72.0 width:contentWidth height:36 gap:10.0];
         [self layoutDoubleTimingFieldsAtY:configTopY + 124.0];
     }
-    [self refreshTemplatePreview];
+    if (_suppressTemplatePreviewRefresh) {
+        _previewView.hidden = !_taskEditorVisible || _actionMode != AnClickActionModeImage;
+    } else {
+        [self refreshTemplatePreview];
+    }
     [self refreshEditorContentScrollSize];
 }
 
