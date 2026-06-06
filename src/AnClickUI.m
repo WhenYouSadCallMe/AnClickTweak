@@ -196,6 +196,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UITextField *_networkContainsField;
     UITextField *_networkFalseField;
     UITextField *_networkPostBodyField;
+    UITextField *_networkPostExtraFieldsField;
     UIView *_captureOverlay;
     UIScrollView *_captureScrollView;
     UIImageView *_captureImageView;
@@ -339,6 +340,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *_networkContainsText;
     NSString *_networkFalseText;
     NSString *_networkPostBody;
+    NSString *_networkPostExtraFields;
     NSString *_globalNetworkURL;
     NSString *_globalNetworkContainsText;
     NSString *_globalNetworkFalseText;
@@ -1077,6 +1079,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkRequestOnly = NO;
     _networkUsesPost = NO;
     _networkPostBodyUsesOCRResult = NO;
+    _networkPostExtraFields = nil;
     _networkRetryForever = YES;
     _networkTimeout = 8.0;
     _globalStartHour = 8;
@@ -1270,7 +1273,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkPostCustomButton.frame = CGRectMake(gap, 234, buttonWidth, 32);
     [_panelView addSubview:_networkPostCustomButton];
 
-    _networkPostOCRResultButton = [self panelButtonWithTitle:@"识字结果" action:@selector(selectNetworkPostBodySource:)];
+    _networkPostOCRResultButton = [self panelButtonWithTitle:@"键值JSON" action:@selector(selectNetworkPostBodySource:)];
     _networkPostOCRResultButton.tag = 1;
     _networkPostOCRResultButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 234, buttonWidth, 32);
     [_panelView addSubview:_networkPostOCRResultButton];
@@ -1431,6 +1434,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_networkPostBodyField addTarget:self action:@selector(networkFieldChanged:) forControlEvents:UIControlEventEditingChanged];
     [_networkPostBodyField addTarget:self action:@selector(networkFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_networkPostBodyField];
+
+    _networkPostExtraFieldsField = [[UITextField alloc] initWithFrame:CGRectZero];
+    _networkPostExtraFieldsField.keyboardType = UIKeyboardTypeDefault;
+    _networkPostExtraFieldsField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _networkPostExtraFieldsField.autocorrectionType = UITextAutocorrectionTypeNo;
+    [self applyObsidianInputStyleToField:_networkPostExtraFieldsField placeholder:@"键=值 例content={{result}}&to_user=@all" monospaced:NO];
+    [self configureConfigTextField:_networkPostExtraFieldsField];
+    [_networkPostExtraFieldsField addTarget:self action:@selector(networkFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+    [_networkPostExtraFieldsField addTarget:self action:@selector(networkFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+    [_panelView addSubview:_networkPostExtraFieldsField];
 
     _taskListView = [[UIScrollView alloc] initWithFrame:CGRectMake(8, 84, panelWidth - 16, panelHeight - 92)];
     _taskListView.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.92];
@@ -2172,6 +2185,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkContainsField.hidden = YES;
     _networkFalseField.hidden = YES;
     _networkPostBodyField.hidden = YES;
+    _networkPostExtraFieldsField.hidden = YES;
     _previewView.hidden = YES;
     _colorPreviewView.hidden = YES;
     _editorContentScrollView.hidden = !visible;
@@ -2235,6 +2249,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _networkContainsField,
         _networkFalseField,
         _networkPostBodyField,
+        _networkPostExtraFieldsField,
         _previewView,
         _colorPreviewView,
     };
@@ -3465,6 +3480,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkContainsText = nil;
     _networkFalseText = nil;
     _networkPostBody = nil;
+    _networkPostExtraFields = nil;
     _networkRequestOnly = NO;
     _networkUsesPost = NO;
     _networkPostBodyUsesOCRResult = NO;
@@ -3786,7 +3802,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _thresholdField, _ocrTargetField, _networkURLField, _networkContainsField, _networkFalseField, _networkPostBodyField, nil];
+    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _thresholdField, _ocrTargetField, _networkURLField, _networkContainsField, _networkFalseField, _networkPostBodyField, _networkPostExtraFieldsField, nil];
     if (_globalDelayField) {
         [fields addObject:_globalDelayField];
     }
@@ -3962,6 +3978,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_networkPostBodyField) {
         _networkPostBody = [self trimmedActionDescription:_networkPostBodyField.text];
     }
+    if (_networkPostExtraFieldsField) {
+        _networkPostExtraFields = [self trimmedActionDescription:_networkPostExtraFieldsField.text];
+    }
 }
 
 - (void)refreshTimingFieldsIfNeeded {
@@ -4125,6 +4144,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkContainsField.hidden = YES;
     _networkFalseField.hidden = YES;
     _networkPostBodyField.hidden = YES;
+    _networkPostExtraFieldsField.hidden = YES;
     _colorPreviewView.hidden = YES;
     _saveTaskButton.hidden = YES;
     _editorBackButton.hidden = YES;
@@ -4236,8 +4256,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (canUseOCRResult) {
             _networkPostCustomButton.hidden = NO;
             _networkPostOCRResultButton.hidden = NO;
-            [_networkPostCustomButton setTitle:@"自定义内容" forState:UIControlStateNormal];
-            [_networkPostOCRResultButton setTitle:(ocrMatchMode == AnClickOCRMatchModeRegex ? @"正则结果" : @"识字结果") forState:UIControlStateNormal];
+            [_networkPostCustomButton setTitle:@"原始内容" forState:UIControlStateNormal];
+            [_networkPostOCRResultButton setTitle:@"键值JSON" forState:UIControlStateNormal];
             [self layoutButtons:@[_networkPostCustomButton, _networkPostOCRResultButton]
                               x:side
                               y:nextY
@@ -4252,12 +4272,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _networkPostBodyField.hidden = NO;
             NSString *postPlaceholder = @"POST参数 JSON/表单";
             if (canUseOCRResult) {
-                postPlaceholder = ocrMatchMode == AnClickOCRMatchModeRegex
-                    ? @"POST参数 可用{{正则结果}}"
-                    : @"POST参数 可用{{识字结果}}";
+                postPlaceholder = @"原始POST 可用{{result}}";
             }
             [self setStyledPlaceholder:postPlaceholder forField:_networkPostBodyField alpha:0.25];
             _networkPostBodyField.frame = CGRectMake(side, nextY, width, 40.0);
+            nextY += 50.0;
+        } else {
+            _networkPostExtraFieldsField.hidden = NO;
+            [self setStyledPlaceholder:@"键=值 例content={{result}}&to_user=@all" forField:_networkPostExtraFieldsField alpha:0.25];
+            _networkPostExtraFieldsField.frame = CGRectMake(side, nextY, width, 40.0);
             nextY += 50.0;
         }
     }
@@ -4423,6 +4446,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     if (!_networkPostBodyField.isFirstResponder) {
         _networkPostBodyField.text = _networkPostBody ?: @"";
+    }
+    if (!_networkPostExtraFieldsField.isFirstResponder) {
+        _networkPostExtraFieldsField.text = _networkPostExtraFields ?: @"";
     }
     [self refreshTimingFieldsIfNeeded];
     CGFloat configTopY = [self editorConfigTopY];
@@ -4729,7 +4755,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         NSString *pointState = _ocrUsesMatchPoint ? @"识别点" : ([self hasManualPointForMode:AnClickActionModeOCR] ? @"自定义点" : @"先取点击点");
         NSString *networkActionName = [self normalizedNetworkMethodFromPostFlag:_networkUsesPost];
         if (_networkUsesPost && _networkPostBodyUsesOCRResult) {
-            networkActionName = matchMode == AnClickOCRMatchModeRegex ? @"POST正则结果" : @"POST识字结果";
+            networkActionName = @"POST键值";
         }
         _statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ %@ 后%@",
                              [self ocrMatchModeTitleForMode:matchMode],
@@ -6026,8 +6052,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     task[@"networkUsesPost"] = @(_networkUsesPost);
     BOOL canUseOCRResult = _actionMode == AnClickActionModeOCR && _networkUsesPost;
     task[@"networkPostBodyUsesOCRResult"] = @(canUseOCRResult && _networkPostBodyUsesOCRResult);
+    if (canUseOCRResult && _networkPostBodyUsesOCRResult && _networkPostExtraFields.length == 0) {
+        if (requireComplete) {
+            _statusLabel.text = @"先填POST键值";
+        }
+        return !requireComplete;
+    }
     if (_networkPostBody.length > 0) {
         task[@"networkPostBody"] = _networkPostBody;
+    }
+    if (_networkPostExtraFields.length > 0) {
+        task[@"networkPostExtraFields"] = _networkPostExtraFields;
     }
     return YES;
 }
@@ -6044,6 +6079,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)loadNetworkRequestConfigFromTask:(NSDictionary *)task {
     _networkURL = [self trimmedActionDescription:task[@"networkURL"]];
     _networkPostBody = [self trimmedActionDescription:task[@"networkPostBody"]];
+    _networkPostExtraFields = [self trimmedActionDescription:task[@"networkPostExtraFields"]];
     _networkUsesPost = [[self networkMethodForTask:task] isEqualToString:@"POST"];
     _networkPostBodyUsesOCRResult = _networkUsesPost &&
         [self modeForTask:task] == AnClickActionModeOCR &&
@@ -6229,7 +6265,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             if ([method isEqualToString:@"POST"] &&
                 [self modeForTask:task] == AnClickActionModeOCR &&
                 [task[@"networkPostBodyUsesOCRResult"] boolValue]) {
-                method = matchMode == AnClickOCRMatchModeRegex ? @"POST正则结果" : @"POST识字结果";
+                method = @"POST键值";
             }
             subtitle = [subtitle stringByAppendingFormat:@" · 成功后%@请求%@", method, url.length > 0 ? @"" : @"未设置"];
         }
@@ -6920,12 +6956,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSArray<NSString *> *tokens = @[
         @"{{ocr}}",
         @"{{result}}",
+        @"{{识别结果}}",
         @"{{识字结果}}",
         @"{{正则结果}}",
+        @"{{正则识别结果}}",
         @"${ocr}",
         @"${result}",
+        @"{识别结果}",
         @"{识字结果}",
         @"{正则结果}",
+        @"{正则识别结果}",
     ];
     for (NSString *token in tokens) {
         body = [body stringByReplacingOccurrencesOfString:token withString:value];
@@ -6933,9 +6973,123 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return body;
 }
 
+- (NSString *)networkPostKeyValueTextForTask:(NSDictionary *)task {
+    return [self trimmedActionDescription:task[@"networkPostExtraFields"]];
+}
+
+- (NSString *)unquotedNetworkPostText:(NSString *)text {
+    NSString *trimmed = [self trimmedActionDescription:text];
+    if (trimmed.length >= 2) {
+        unichar first = [trimmed characterAtIndex:0];
+        unichar last = [trimmed characterAtIndex:trimmed.length - 1];
+        if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+            return [trimmed substringWithRange:NSMakeRange(1, trimmed.length - 2)];
+        }
+    }
+    return trimmed;
+}
+
+- (id)networkPostJSONValueFromText:(NSString *)text recognitionText:(NSString *)recognitionText {
+    NSString *value = [self postBody:[self unquotedNetworkPostText:text] applyingRecognitionText:recognitionText];
+    NSString *lower = [[self trimmedActionDescription:value] lowercaseString];
+    if ([lower isEqualToString:@"true"]) {
+        return @(YES);
+    }
+    if ([lower isEqualToString:@"false"]) {
+        return @(NO);
+    }
+    if ([lower isEqualToString:@"null"]) {
+        return NSNull.null;
+    }
+    return value ?: @"";
+}
+
+- (id)networkPostJSONObjectByApplyingRecognitionText:(id)object recognitionText:(NSString *)recognitionText {
+    if ([object isKindOfClass:NSString.class]) {
+        return [self postBody:object applyingRecognitionText:recognitionText];
+    }
+    if ([object isKindOfClass:NSArray.class]) {
+        NSMutableArray *array = [NSMutableArray array];
+        for (id item in (NSArray *)object) {
+            [array addObject:[self networkPostJSONObjectByApplyingRecognitionText:item recognitionText:recognitionText] ?: NSNull.null];
+        }
+        return array;
+    }
+    if ([object isKindOfClass:NSDictionary.class]) {
+        NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+        [(NSDictionary *)object enumerateKeysAndObjectsUsingBlock:^(id key, id value, __unused BOOL *stop) {
+            if (![key isKindOfClass:NSString.class]) {
+                return;
+            }
+            dictionary[key] = [self networkPostJSONObjectByApplyingRecognitionText:value recognitionText:recognitionText] ?: NSNull.null;
+        }];
+        return dictionary;
+    }
+    return object ?: NSNull.null;
+}
+
+- (NSDictionary *)networkPostDictionaryFromKeyValueText:(NSString *)text recognitionText:(NSString *)recognitionText {
+    NSString *rule = [self trimmedActionDescription:text];
+    if (rule.length == 0) {
+        return nil;
+    }
+
+    if ([rule hasPrefix:@"{"]) {
+        NSData *data = [rule dataUsingEncoding:NSUTF8StringEncoding];
+        NSError *error = nil;
+        id object = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:&error] : nil;
+        if (!error && [object isKindOfClass:NSDictionary.class]) {
+            id appliedObject = [self networkPostJSONObjectByApplyingRecognitionText:object recognitionText:recognitionText];
+            return [appliedObject isKindOfClass:NSDictionary.class] ? appliedObject : nil;
+        }
+    }
+
+    NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+    NSCharacterSet *pairSeparators = [NSCharacterSet characterSetWithCharactersInString:@"&;\n；"];
+    NSArray<NSString *> *pairs = [rule componentsSeparatedByCharactersInSet:pairSeparators];
+    for (NSString *pair in pairs) {
+        NSString *trimmedPair = [self trimmedActionDescription:pair];
+        if (trimmedPair.length == 0) {
+            continue;
+        }
+        NSRange separatorRange = [trimmedPair rangeOfString:@"="];
+        if (separatorRange.location == NSNotFound) {
+            separatorRange = [trimmedPair rangeOfString:@":"];
+        }
+        if (separatorRange.location == NSNotFound) {
+            continue;
+        }
+        NSString *key = [self unquotedNetworkPostText:[trimmedPair substringToIndex:separatorRange.location]];
+        if (key.length == 0) {
+            continue;
+        }
+        NSString *valueText = [trimmedPair substringFromIndex:NSMaxRange(separatorRange)];
+        dictionary[key] = [self networkPostJSONValueFromText:valueText recognitionText:recognitionText];
+    }
+    return dictionary.count > 0 ? dictionary : nil;
+}
+
+- (NSString *)networkPostJSONStringFromDictionary:(NSDictionary *)dictionary {
+    if (![NSJSONSerialization isValidJSONObject:dictionary]) {
+        return nil;
+    }
+    NSError *error = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:dictionary options:0 error:&error];
+    if (error || data.length == 0) {
+        return nil;
+    }
+    return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+}
+
 - (NSString *)networkPostBodyForTask:(NSDictionary *)task recognitionText:(NSString *)recognitionText {
     if ([self modeForTask:task] == AnClickActionModeOCR &&
         [task[@"networkPostBodyUsesOCRResult"] boolValue]) {
+        NSDictionary *postDictionary = [self networkPostDictionaryFromKeyValueText:[self networkPostKeyValueTextForTask:task]
+                                                                   recognitionText:recognitionText];
+        NSString *jsonBody = postDictionary ? [self networkPostJSONStringFromDictionary:postDictionary] : nil;
+        if (jsonBody.length > 0) {
+            return jsonBody;
+        }
         return [self trimmedActionDescription:recognitionText] ?: @"";
     }
 
@@ -7800,6 +7954,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
             if (url.length == 0 || ![self normalizedNetworkURLString:url]) {
                 _statusLabel.text = @"任务识字网络未设置";
+                return NO;
+            }
+            if ([[self networkMethodForTask:task] isEqualToString:@"POST"] &&
+                [task[@"networkPostBodyUsesOCRResult"] boolValue] &&
+                [self networkPostKeyValueTextForTask:task].length == 0) {
+                _statusLabel.text = @"任务POST键值未填写";
                 return NO;
             }
         } else if (!useMatchPoint && !task[@"point"]) {
