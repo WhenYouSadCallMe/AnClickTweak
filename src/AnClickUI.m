@@ -90,6 +90,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 @interface AnClickCore : NSObject
 + (UIImage *)captureCurrentWindowImage;
++ (UIImage *)captureCurrentWindowImageWithWindow:(UIWindow **)capturedWindow;
 + (NSDictionary *)findTemplateImageMatch:(UIImage *)templateImage threshold:(double)threshold;
 + (NSDictionary *)findColorMatchWithRed:(NSInteger)red green:(NSInteger)green blue:(NSInteger)blue tolerance:(double)tolerance;
 + (NSDictionary *)findColorPatternMatchWithPoints:(NSArray<NSDictionary *> *)points tolerance:(double)tolerance;
@@ -137,9 +138,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)handleApplicationWillLeaveForeground;
 - (void)applyScreenGeometryRefreshAllowHeavyRefresh:(BOOL)allowHeavyRefresh;
 - (void)reclampPanelWindowForCurrentScreenAllowHeavyRefresh:(BOOL)allowHeavyRefresh;
+- (void)refreshActivePanelOverlayLayoutAllowHeavyRefresh:(BOOL)allowHeavyRefresh;
+- (BOOL)screenCoordinateSizeIsValid:(CGSize)size;
+- (CGSize)currentScreenCoordinateSize;
+- (NSValue *)currentScreenCoordinateSizeValue;
+- (CGSize)screenCoordinateSizeFromObject:(id)object;
+- (NSArray<NSDictionary *> *)colorSamples:(NSArray<NSDictionary *> *)samples mappedFromScreenSize:(CGSize)sourceSize toScreenSize:(CGSize)targetSize;
+- (CGSize)inferredRotatedSourceSizeForPoint:(CGPoint)point targetSize:(CGSize)targetSize;
+- (void)showFunctionMenu;
+- (void)showGlobalSettings;
+- (void)showSaveTaskConfigNamePrompt;
+- (void)showSavedConfigListForDeleting:(BOOL)deleting;
+- (void)showDeleteSavedConfigConfirmationAtIndex:(NSInteger)index name:(NSString *)name taskCount:(NSUInteger)taskCount;
 - (void)registerKeyboardAvoidanceObserversIfNeeded;
 - (BOOL)currentEditorUsesNetworkPostPairs;
 - (BOOL)currentEditorNetworkPostAllowsRecognitionResult;
+- (void)cleanupScreenInteractionStateRestoringPanel:(BOOL)restorePanel;
+- (void)showToast:(NSString *)message;
 @end
 
 @implementation AnClickUI {
@@ -266,12 +281,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _taskPanDirectionLocked;
     BOOL _taskPanHorizontal;
     BOOL _taskReordering;
+    BOOL _configListDeleting;
     CGPoint _manualActionPoints[AnClickActionModeCount];
     BOOL _hasManualActionPoint[AnClickActionModeCount];
     CGPoint _manualSwipeAnchor;
     BOOL _hasManualSwipeAnchor;
     CGPoint _manualSwipeEndPoint;
     BOOL _hasManualSwipeEndPoint;
+    CGSize _manualCoordinateScreenSize;
+    BOOL _hasManualCoordinateScreenSize;
     BOOL _pickingSwipeEndPoint;
     BOOL _pointPickPanStartedOnToolbar;
     CGPoint _pendingPointPickPoint;
@@ -281,7 +299,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _captureDrawingSelection;
     CGPoint _captureDragStartPoint;
     CGRect _collapsedPanelFrame;
+    CGPoint _collapsedPanelOriginRatio;
+    CGSize _collapsedPanelScreenSize;
     BOOL _hasCollapsedPanelFrame;
+    BOOL _hasCollapsedPanelOriginRatio;
+    CGRect _expandedPanelFrame;
+    CGPoint _expandedPanelOriginRatio;
+    CGSize _expandedPanelScreenSize;
+    BOOL _hasExpandedPanelFrame;
+    BOOL _hasExpandedPanelOriginRatio;
     BOOL _panelExpanded;
     BOOL _taskEditorVisible;
     BOOL _imageUsesMatchPoint;
@@ -312,9 +338,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSUInteger _taskRunGeneration;
     NSUInteger _toastGeneration;
     NSUInteger _screenGeometryGeneration;
+    NSUInteger _screenGeometryRefreshGeneration;
     CGSize _lastAppliedScreenGeometrySize;
     CGFloat _taskReorderStartCenterY;
     CGFloat _taskReorderStartLocationY;
+    CGSize _recordedMacroScreenSize;
     CFTimeInterval _toastDeferNonVolumeUntil;
     CFTimeInterval _lastVolumeShortcutTime;
     CFTimeInterval _ignoreVolumeEventsUntil;
@@ -342,6 +370,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     float _lastObservedSystemVolume;
     CGPoint _pendingColorPickPoint;
     BOOL _hasPendingColorPickPoint;
+    BOOL _hasRecordedMacroScreenSize;
     NSInteger _selectedColorPickSampleIndex;
     NSTimeInterval _networkTimeout;
     double _colorTolerance;
@@ -498,6 +527,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSArray<NSDictionary *> *)normalizedColorPatternPointsForTask:(NSDictionary *)task {
     NSArray<NSDictionary *> *samples = [self mutableColorSamplesArrayFromObject:task[@"colorPoints"]];
+    if (samples.count > 0) {
+        CGSize sourceSize = [self screenCoordinateSizeFromObject:task[@"colorPointScreenSize"]];
+        CGSize targetSize = [self currentScreenCoordinateSize];
+        if (![self screenCoordinateSizeIsValid:sourceSize]) {
+            NSDictionary *anchor = samples.firstObject;
+            if ([anchor[@"x"] respondsToSelector:@selector(doubleValue)] &&
+                [anchor[@"y"] respondsToSelector:@selector(doubleValue)]) {
+                CGPoint anchorPoint = CGPointMake([anchor[@"x"] doubleValue], [anchor[@"y"] doubleValue]);
+                sourceSize = [self inferredRotatedSourceSizeForPoint:anchorPoint targetSize:targetSize];
+            }
+        }
+        samples = [self colorSamples:samples mappedFromScreenSize:sourceSize toScreenSize:targetSize];
+    }
     if (samples.count > 0) {
         NSMutableArray<NSDictionary *> *points = [NSMutableArray arrayWithCapacity:samples.count];
         NSDictionary *anchor = samples.firstObject;
@@ -1053,13 +1095,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)handleScreenGeometryChanged {
     void (^geometryBlock)(void) = ^{
-        NSUInteger generation = ++self->_screenGeometryGeneration;
+        NSUInteger generation = ++self->_screenGeometryRefreshGeneration;
         [self applyScreenGeometryRefreshAllowHeavyRefresh:NO];
 
         __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.22 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (!strongSelf || generation != strongSelf->_screenGeometryGeneration) {
+            if (!strongSelf || generation != strongSelf->_screenGeometryRefreshGeneration) {
                 return;
             }
             [strongSelf applyScreenGeometryRefreshAllowHeavyRefresh:YES];
@@ -1129,7 +1171,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     _collapsedPanelFrame = [self defaultCollapsedPanelFrame];
+    _collapsedPanelOriginRatio = [self originRatioForWindowFrame:_collapsedPanelFrame floating:YES];
+    _collapsedPanelScreenSize = [self currentScreenBounds].size;
+    _lastAppliedScreenGeometrySize = _collapsedPanelScreenSize;
     _hasCollapsedPanelFrame = YES;
+    _hasCollapsedPanelOriginRatio = YES;
     _panelWindow = [[UIWindow alloc] initWithFrame:_collapsedPanelFrame];
     [self attachPanelWindowToActiveSceneIfNeeded];
     _panelWindow.windowLevel = UIWindowLevelAlert + 1000;
@@ -1834,16 +1880,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (CGRect)currentScreenBounds {
     CGRect bounds = CGRectZero;
     if (@available(iOS 13.0, *)) {
-        UIWindowScene *scene = _panelWindow.windowScene;
-        if (!scene) {
-            UIWindow *hostWindow = [self hostWindow];
-            scene = hostWindow.windowScene;
-        }
+        UIWindow *hostWindow = [self hostWindow];
+        UIWindowScene *scene = hostWindow.windowScene ? hostWindow.windowScene : _panelWindow.windowScene;
         if (!scene) {
             scene = [self activeWindowScene];
         }
         if (scene) {
             bounds = scene.coordinateSpace.bounds;
+        }
+        if (CGRectIsEmpty(bounds) && !CGRectIsEmpty(hostWindow.bounds)) {
+            bounds = hostWindow.bounds;
         }
     }
     if (CGRectIsEmpty(bounds)) {
@@ -1853,8 +1899,303 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return CGRectStandardize(bounds);
 }
 
+- (CGRect)screenBoundsForWindow:(UIWindow *)window {
+    CGRect bounds = CGRectZero;
+    if (window && !CGRectIsEmpty(window.bounds)) {
+        bounds = window.bounds;
+    }
+    if (CGRectIsEmpty(bounds)) {
+        bounds = [self currentScreenBounds];
+    }
+    bounds.origin = CGPointZero;
+    return CGRectStandardize(bounds);
+}
+
 - (BOOL)screenGeometrySize:(CGSize)lhs isCloseToSize:(CGSize)rhs {
     return fabs(lhs.width - rhs.width) < 0.5 && fabs(lhs.height - rhs.height) < 0.5;
+}
+
+- (BOOL)capturedImage:(UIImage *)image matchesWindow:(UIWindow *)window {
+    if (!image.CGImage) {
+        return NO;
+    }
+    if (!window || CGRectIsEmpty(window.bounds)) {
+        return YES;
+    }
+
+    CGSize windowSize = [self screenBoundsForWindow:window].size;
+    CGSize imageSize = image.size;
+    CGFloat scale = image.scale > 0.0 ? image.scale : (window.screen.scale > 0.0 ? window.screen.scale : UIScreen.mainScreen.scale);
+    CGSize pixelPointSize = CGSizeMake((CGFloat)CGImageGetWidth(image.CGImage) / MAX(scale, 0.01),
+                                       (CGFloat)CGImageGetHeight(image.CGImage) / MAX(scale, 0.01));
+    BOOL directMatch = [self screenGeometrySize:imageSize isCloseToSize:windowSize] ||
+        [self screenGeometrySize:pixelPointSize isCloseToSize:windowSize];
+    if (!directMatch) {
+        NSLog(@"[AnClick] Capture size mismatch image=(%.1f, %.1f) pixelPoint=(%.1f, %.1f) window=(%.1f, %.1f)",
+              imageSize.width,
+              imageSize.height,
+              pixelPointSize.width,
+              pixelPointSize.height,
+              windowSize.width,
+              windowSize.height);
+    }
+    return directMatch;
+}
+
+- (BOOL)screenCoordinateSizeIsValid:(CGSize)size {
+    return isfinite(size.width) && isfinite(size.height) && size.width > 1.0 && size.height > 1.0;
+}
+
+- (CGSize)currentScreenCoordinateSize {
+    CGSize size = [self currentScreenBounds].size;
+    if (![self screenCoordinateSizeIsValid:size]) {
+        size = UIScreen.mainScreen.bounds.size;
+    }
+    return size;
+}
+
+- (NSValue *)currentScreenCoordinateSizeValue {
+    return [NSValue valueWithCGSize:[self currentScreenCoordinateSize]];
+}
+
+- (CGSize)screenCoordinateSizeFromObject:(id)object {
+    if ([object isKindOfClass:NSValue.class]) {
+        CGSize size = [(NSValue *)object CGSizeValue];
+        if ([self screenCoordinateSizeIsValid:size]) {
+            return size;
+        }
+    }
+    return CGSizeZero;
+}
+
+- (CGPoint)point:(CGPoint)point mappedFromScreenSize:(CGSize)sourceSize toScreenSize:(CGSize)targetSize {
+    if (![self screenCoordinateSizeIsValid:sourceSize] ||
+        ![self screenCoordinateSizeIsValid:targetSize] ||
+        [self screenGeometrySize:sourceSize isCloseToSize:targetSize]) {
+        return point;
+    }
+
+    point.x = point.x / sourceSize.width * targetSize.width;
+    point.y = point.y / sourceSize.height * targetSize.height;
+    point.x = MIN(MAX(point.x, 0.0), targetSize.width);
+    point.y = MIN(MAX(point.y, 0.0), targetSize.height);
+    return point;
+}
+
+- (NSArray<NSValue *> *)path:(NSArray<NSValue *> *)path mappedFromScreenSize:(CGSize)sourceSize toScreenSize:(CGSize)targetSize {
+    if (![path isKindOfClass:NSArray.class] || path.count == 0) {
+        return @[];
+    }
+    if (![self screenCoordinateSizeIsValid:sourceSize] ||
+        ![self screenCoordinateSizeIsValid:targetSize] ||
+        [self screenGeometrySize:sourceSize isCloseToSize:targetSize]) {
+        return path;
+    }
+
+    NSMutableArray<NSValue *> *mappedPath = [NSMutableArray arrayWithCapacity:path.count];
+    for (NSValue *value in path) {
+        if (![value isKindOfClass:NSValue.class]) {
+            continue;
+        }
+        CGPoint point = [self point:value.CGPointValue mappedFromScreenSize:sourceSize toScreenSize:targetSize];
+        [mappedPath addObject:[NSValue valueWithCGPoint:point]];
+    }
+    return mappedPath;
+}
+
+- (NSArray<NSDictionary *> *)events:(NSArray<NSDictionary *> *)events mappedFromScreenSize:(CGSize)sourceSize toScreenSize:(CGSize)targetSize {
+    if (![events isKindOfClass:NSArray.class] || events.count == 0) {
+        return @[];
+    }
+    if (![self screenCoordinateSizeIsValid:sourceSize] ||
+        ![self screenCoordinateSizeIsValid:targetSize] ||
+        [self screenGeometrySize:sourceSize isCloseToSize:targetSize]) {
+        return events;
+    }
+
+    NSMutableArray<NSDictionary *> *mappedEvents = [NSMutableArray arrayWithCapacity:events.count];
+    for (NSDictionary *event in events) {
+        if (![event isKindOfClass:NSDictionary.class]) {
+            continue;
+        }
+        NSMutableDictionary *mappedEvent = [event mutableCopy];
+        NSNumber *xNumber = event[@"x"];
+        NSNumber *yNumber = event[@"y"];
+        if ([xNumber respondsToSelector:@selector(doubleValue)] && [yNumber respondsToSelector:@selector(doubleValue)]) {
+            CGPoint point = CGPointMake(xNumber.doubleValue, yNumber.doubleValue);
+            point = [self point:point mappedFromScreenSize:sourceSize toScreenSize:targetSize];
+            mappedEvent[@"x"] = @(point.x);
+            mappedEvent[@"y"] = @(point.y);
+        }
+        [mappedEvents addObject:mappedEvent];
+    }
+    return mappedEvents;
+}
+
+- (NSArray<NSDictionary *> *)colorSamples:(NSArray<NSDictionary *> *)samples mappedFromScreenSize:(CGSize)sourceSize toScreenSize:(CGSize)targetSize {
+    NSArray<NSDictionary *> *normalizedSamples = [self mutableColorSamplesArrayFromObject:samples];
+    if (normalizedSamples.count == 0) {
+        return @[];
+    }
+    if (![self screenCoordinateSizeIsValid:sourceSize] ||
+        ![self screenCoordinateSizeIsValid:targetSize] ||
+        [self screenGeometrySize:sourceSize isCloseToSize:targetSize]) {
+        return normalizedSamples;
+    }
+
+    CGFloat xScale = targetSize.width / sourceSize.width;
+    CGFloat yScale = targetSize.height / sourceSize.height;
+    NSMutableArray<NSDictionary *> *mappedSamples = [NSMutableArray arrayWithCapacity:normalizedSamples.count];
+    for (NSDictionary *sample in normalizedSamples) {
+        NSMutableDictionary *mappedSample = [sample mutableCopy];
+        if ([sample[@"x"] respondsToSelector:@selector(doubleValue)] &&
+            [sample[@"y"] respondsToSelector:@selector(doubleValue)]) {
+            CGPoint point = CGPointMake([sample[@"x"] doubleValue], [sample[@"y"] doubleValue]);
+            point = [self point:point mappedFromScreenSize:sourceSize toScreenSize:targetSize];
+            mappedSample[@"x"] = @(point.x);
+            mappedSample[@"y"] = @(point.y);
+        }
+        if ([sample[@"dx"] respondsToSelector:@selector(doubleValue)] &&
+            [sample[@"dy"] respondsToSelector:@selector(doubleValue)]) {
+            mappedSample[@"dx"] = @([sample[@"dx"] doubleValue] * xScale);
+            mappedSample[@"dy"] = @([sample[@"dy"] doubleValue] * yScale);
+        }
+        [mappedSamples addObject:mappedSample];
+    }
+    return mappedSamples;
+}
+
+- (CGSize)inferredRotatedSourceSizeForPoint:(CGPoint)point targetSize:(CGSize)targetSize {
+    if (![self screenCoordinateSizeIsValid:targetSize]) {
+        return CGSizeZero;
+    }
+    CGSize rotatedSize = CGSizeMake(targetSize.height, targetSize.width);
+    BOOL outsideCurrent = point.x > targetSize.width + 1.0 || point.y > targetSize.height + 1.0;
+    BOOL fitsRotated = point.x >= -1.0 && point.y >= -1.0 && point.x <= rotatedSize.width + 1.0 && point.y <= rotatedSize.height + 1.0;
+    return outsideCurrent && fitsRotated ? rotatedSize : CGSizeZero;
+}
+
+- (CGSize)inferredRotatedSourceSizeForPath:(NSArray<NSValue *> *)path targetSize:(CGSize)targetSize {
+    if (![path isKindOfClass:NSArray.class] || path.count == 0) {
+        return CGSizeZero;
+    }
+    BOOL outsideCurrent = NO;
+    CGSize rotatedSize = CGSizeMake(targetSize.height, targetSize.width);
+    for (NSValue *value in path) {
+        if (![value isKindOfClass:NSValue.class]) {
+            continue;
+        }
+        CGPoint point = value.CGPointValue;
+        if (point.x > targetSize.width + 1.0 || point.y > targetSize.height + 1.0) {
+            outsideCurrent = YES;
+        }
+        if (point.x < -1.0 || point.y < -1.0 || point.x > rotatedSize.width + 1.0 || point.y > rotatedSize.height + 1.0) {
+            return CGSizeZero;
+        }
+    }
+    return outsideCurrent ? rotatedSize : CGSizeZero;
+}
+
+- (CGSize)inferredRotatedSourceSizeForEvents:(NSArray<NSDictionary *> *)events targetSize:(CGSize)targetSize {
+    if (![events isKindOfClass:NSArray.class] || events.count == 0) {
+        return CGSizeZero;
+    }
+    BOOL outsideCurrent = NO;
+    CGSize rotatedSize = CGSizeMake(targetSize.height, targetSize.width);
+    for (NSDictionary *event in events) {
+        if (![event isKindOfClass:NSDictionary.class]) {
+            continue;
+        }
+        NSNumber *xNumber = event[@"x"];
+        NSNumber *yNumber = event[@"y"];
+        if (![xNumber respondsToSelector:@selector(doubleValue)] || ![yNumber respondsToSelector:@selector(doubleValue)]) {
+            continue;
+        }
+        CGPoint point = CGPointMake(xNumber.doubleValue, yNumber.doubleValue);
+        if (point.x > targetSize.width + 1.0 || point.y > targetSize.height + 1.0) {
+            outsideCurrent = YES;
+        }
+        if (point.x < -1.0 || point.y < -1.0 || point.x > rotatedSize.width + 1.0 || point.y > rotatedSize.height + 1.0) {
+            return CGSizeZero;
+        }
+    }
+    return outsideCurrent ? rotatedSize : CGSizeZero;
+}
+
+- (CGPoint)resolvedPointForTask:(NSDictionary *)task fallbackPoint:(CGPoint)point {
+    CGSize sourceSize = [self screenCoordinateSizeFromObject:task[@"pointScreenSize"]];
+    CGSize targetSize = [self currentScreenCoordinateSize];
+    if (![self screenCoordinateSizeIsValid:sourceSize]) {
+        sourceSize = [self inferredRotatedSourceSizeForPoint:point targetSize:targetSize];
+    }
+    return [self point:point mappedFromScreenSize:sourceSize toScreenSize:targetSize];
+}
+
+- (NSArray<NSValue *> *)resolvedPathForTask:(NSDictionary *)task {
+    NSArray<NSValue *> *path = [task[@"path"] isKindOfClass:NSArray.class] ? task[@"path"] : @[];
+    CGSize sourceSize = [self screenCoordinateSizeFromObject:task[@"pathScreenSize"]];
+    CGSize targetSize = [self currentScreenCoordinateSize];
+    if (![self screenCoordinateSizeIsValid:sourceSize]) {
+        sourceSize = [self inferredRotatedSourceSizeForPath:path targetSize:targetSize];
+    }
+    return [self path:path mappedFromScreenSize:sourceSize toScreenSize:targetSize];
+}
+
+- (NSArray<NSDictionary *> *)resolvedRecordedEvents:(NSArray<NSDictionary *> *)events fromScreenSize:(CGSize)sourceSize {
+    CGSize targetSize = [self currentScreenCoordinateSize];
+    if (![self screenCoordinateSizeIsValid:sourceSize]) {
+        sourceSize = [self inferredRotatedSourceSizeForEvents:events targetSize:targetSize];
+    }
+    return [self events:events mappedFromScreenSize:sourceSize toScreenSize:targetSize];
+}
+
+- (NSArray<NSDictionary *> *)resolvedRecordedEventsForTask:(NSDictionary *)task {
+    NSArray<NSDictionary *> *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
+    CGSize sourceSize = [self screenCoordinateSizeFromObject:task[@"eventsScreenSize"]];
+    return [self resolvedRecordedEvents:events fromScreenSize:sourceSize];
+}
+
+- (void)rememberManualCoordinateScreenSize {
+    _manualCoordinateScreenSize = [self currentScreenCoordinateSize];
+    _hasManualCoordinateScreenSize = YES;
+}
+
+- (void)remapEditorCoordinatesFromScreenSize:(CGSize)sourceSize toScreenSize:(CGSize)targetSize {
+    if (![self screenCoordinateSizeIsValid:sourceSize] ||
+        ![self screenCoordinateSizeIsValid:targetSize] ||
+        [self screenGeometrySize:sourceSize isCloseToSize:targetSize]) {
+        return;
+    }
+
+    for (NSUInteger i = 0; i < (NSUInteger)AnClickActionModeCount; i++) {
+        if (_hasManualActionPoint[i]) {
+            _manualActionPoints[i] = [self point:_manualActionPoints[i] mappedFromScreenSize:sourceSize toScreenSize:targetSize];
+        }
+    }
+    if (_hasManualSwipeAnchor) {
+        _manualSwipeAnchor = [self point:_manualSwipeAnchor mappedFromScreenSize:sourceSize toScreenSize:targetSize];
+    }
+    if (_hasManualSwipeEndPoint) {
+        _manualSwipeEndPoint = [self point:_manualSwipeEndPoint mappedFromScreenSize:sourceSize toScreenSize:targetSize];
+    }
+    if (_recordedSwipePoints.count > 0) {
+        _recordedSwipePoints = [[self path:_recordedSwipePoints mappedFromScreenSize:sourceSize toScreenSize:targetSize] mutableCopy];
+    }
+    if (_targetColorSamples.count > 0) {
+        _targetColorSamples = [[self colorSamples:_targetColorSamples mappedFromScreenSize:sourceSize toScreenSize:targetSize] mutableCopy];
+    }
+    if (_recordedMacroEvents.count > 0 && _hasRecordedMacroScreenSize) {
+        _recordedMacroEvents = [self events:_recordedMacroEvents mappedFromScreenSize:_recordedMacroScreenSize toScreenSize:targetSize];
+        _recordedMacroScreenSize = targetSize;
+    }
+    if (_hasManualActionPoint[(NSUInteger)AnClickActionModeImage] ||
+        _hasManualActionPoint[(NSUInteger)AnClickActionModeOCR] ||
+        _hasManualSwipeAnchor ||
+        _recordedSwipePoints.count > 0 ||
+        _targetColorSamples.count > 0) {
+        _manualCoordinateScreenSize = targetSize;
+        _hasManualCoordinateScreenSize = YES;
+    }
 }
 
 - (void)applyScreenGeometryRefreshAllowHeavyRefresh:(BOOL)allowHeavyRefresh {
@@ -1862,6 +2203,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (!allowHeavyRefresh &&
         [self screenGeometrySize:screenSize isCloseToSize:_lastAppliedScreenGeometrySize]) {
         return;
+    }
+    CGSize previousScreenSize = _lastAppliedScreenGeometrySize;
+    BOOL geometryChanged = [self screenCoordinateSizeIsValid:previousScreenSize] &&
+        ![self screenGeometrySize:screenSize isCloseToSize:previousScreenSize];
+    if (geometryChanged) {
+        _screenGeometryGeneration++;
+    }
+    if (geometryChanged && (_captureOverlay || _pointPickWindow || _colorPickWindow || _liveSwipePoints)) {
+        [self cleanupScreenInteractionStateRestoringPanel:YES];
+        _statusLabel.text = @"屏幕已变化 请重新取点";
+        [self showToast:_statusLabel.text];
+    }
+    if (geometryChanged) {
+        CGSize manualSourceSize = _hasManualCoordinateScreenSize ? _manualCoordinateScreenSize : previousScreenSize;
+        [self remapEditorCoordinatesFromScreenSize:manualSourceSize toScreenSize:screenSize];
     }
     _lastAppliedScreenGeometrySize = screenSize;
 
@@ -2167,6 +2523,65 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return frame;
 }
 
+- (void)layoutLimitsForFrame:(CGRect)frame floating:(BOOL)floating minX:(CGFloat *)minX minY:(CGFloat *)minY maxX:(CGFloat *)maxX maxY:(CGFloat *)maxY {
+    CGRect bounds = [self currentScreenBounds];
+    UIEdgeInsets safeInsets = [self panelSafeAreaInsets];
+    BOOL landscape = bounds.size.width > bounds.size.height;
+    CGFloat horizontalMargin = floating ? 6.0 : 4.0;
+    CGFloat minTop = floating ? 6.0 : 24.0;
+    CGFloat landscapeMinTop = floating ? 4.0 : 4.0;
+    CGFloat bottomMargin = floating ? 8.0 : 4.0;
+    CGFloat left = MAX(horizontalMargin, safeInsets.left + horizontalMargin);
+    CGFloat top = landscape ? MAX(landscapeMinTop, safeInsets.top + landscapeMinTop) : MAX(minTop, safeInsets.top + (floating ? 8.0 : 4.0));
+    CGFloat right = bounds.size.width - frame.size.width - MAX(horizontalMargin, safeInsets.right + horizontalMargin);
+    CGFloat bottom = bounds.size.height - frame.size.height - MAX(floating ? 6.0 : 4.0, safeInsets.bottom + bottomMargin);
+
+    if (minX) {
+        *minX = left;
+    }
+    if (minY) {
+        *minY = top;
+    }
+    if (maxX) {
+        *maxX = MAX(left, right);
+    }
+    if (maxY) {
+        *maxY = MAX(top, bottom);
+    }
+}
+
+- (CGFloat)clampedUnitValue:(CGFloat)value {
+    if (!isfinite(value)) {
+        return 0.0;
+    }
+    return MIN(MAX(value, 0.0), 1.0);
+}
+
+- (CGPoint)originRatioForWindowFrame:(CGRect)frame floating:(BOOL)floating {
+    CGFloat minX = 0.0;
+    CGFloat minY = 0.0;
+    CGFloat maxX = 0.0;
+    CGFloat maxY = 0.0;
+    [self layoutLimitsForFrame:frame floating:floating minX:&minX minY:&minY maxX:&maxX maxY:&maxY];
+    CGFloat xRange = maxX - minX;
+    CGFloat yRange = maxY - minY;
+    CGFloat xRatio = xRange > 0.5 ? (frame.origin.x - minX) / xRange : 0.5;
+    CGFloat yRatio = yRange > 0.5 ? (frame.origin.y - minY) / yRange : 0.0;
+    return CGPointMake([self clampedUnitValue:xRatio], [self clampedUnitValue:yRatio]);
+}
+
+- (CGRect)windowFrameWithSize:(CGSize)size originRatio:(CGPoint)originRatio floating:(BOOL)floating {
+    CGRect frame = CGRectMake(0.0, 0.0, size.width, size.height);
+    CGFloat minX = 0.0;
+    CGFloat minY = 0.0;
+    CGFloat maxX = 0.0;
+    CGFloat maxY = 0.0;
+    [self layoutLimitsForFrame:frame floating:floating minX:&minX minY:&minY maxX:&maxX maxY:&maxY];
+    frame.origin.x = minX + (maxX - minX) * [self clampedUnitValue:originRatio.x];
+    frame.origin.y = minY + (maxY - minY) * [self clampedUnitValue:originRatio.y];
+    return floating ? [self clampedFloatingFrame:frame] : [self clampedPanelFrame:frame];
+}
+
 - (CGRect)defaultCollapsedPanelFrame {
     CGRect bounds = [self currentScreenBounds];
     UIEdgeInsets safeInsets = [self panelSafeAreaInsets];
@@ -2179,13 +2594,43 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)rememberCollapsedPanelFrame:(CGRect)frame {
     frame.size = CGSizeMake(48.0, 48.0);
     _collapsedPanelFrame = [self clampedFloatingFrame:frame];
+    _collapsedPanelOriginRatio = [self originRatioForWindowFrame:_collapsedPanelFrame floating:YES];
+    _collapsedPanelScreenSize = [self currentScreenBounds].size;
     _hasCollapsedPanelFrame = YES;
+    _hasCollapsedPanelOriginRatio = YES;
 }
 
 - (CGRect)rememberedCollapsedPanelFrame {
+    CGSize currentSize = [self currentScreenBounds].size;
     CGRect frame = _hasCollapsedPanelFrame ? _collapsedPanelFrame : (_panelWindow ? _panelWindow.frame : [self defaultCollapsedPanelFrame]);
+    if (_hasCollapsedPanelOriginRatio &&
+        (![self screenGeometrySize:currentSize isCloseToSize:_collapsedPanelScreenSize] || !_hasCollapsedPanelFrame)) {
+        frame = [self windowFrameWithSize:CGSizeMake(48.0, 48.0) originRatio:_collapsedPanelOriginRatio floating:YES];
+    }
     [self rememberCollapsedPanelFrame:frame];
     return _collapsedPanelFrame;
+}
+
+- (void)rememberExpandedPanelFrame:(CGRect)frame {
+    _expandedPanelFrame = [self clampedPanelFrame:frame];
+    _expandedPanelOriginRatio = [self originRatioForWindowFrame:_expandedPanelFrame floating:NO];
+    _expandedPanelScreenSize = [self currentScreenBounds].size;
+    _hasExpandedPanelFrame = YES;
+    _hasExpandedPanelOriginRatio = YES;
+}
+
+- (CGRect)rememberedExpandedPanelFrameWithSize:(CGSize)size fallbackFrame:(CGRect)fallbackFrame {
+    CGSize currentSize = [self currentScreenBounds].size;
+    CGRect frame = _hasExpandedPanelFrame ? _expandedPanelFrame : fallbackFrame;
+    frame.size = size;
+    if (_hasExpandedPanelOriginRatio &&
+        (![self screenGeometrySize:currentSize isCloseToSize:_expandedPanelScreenSize] || !_hasExpandedPanelFrame)) {
+        frame = [self windowFrameWithSize:size originRatio:_expandedPanelOriginRatio floating:NO];
+    } else {
+        frame = [self clampedPanelFrame:frame];
+    }
+    [self rememberExpandedPanelFrame:frame];
+    return _expandedPanelFrame;
 }
 
 - (UIEdgeInsets)panelSafeAreaInsets {
@@ -2385,6 +2830,58 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 }
 
+- (void)refreshActivePanelOverlayLayoutAllowHeavyRefresh:(BOOL)allowHeavyRefresh {
+    if (!_panelView) {
+        return;
+    }
+
+    BOOL hadGlobalSettings = _globalSettingsView != nil;
+    BOOL hadFunctionMenu = _functionMenuView != nil;
+    BOOL hadConfigList = _configListView != nil;
+    BOOL configListDeleting = _configListDeleting;
+    BOOL hadSaveConfigPrompt = _configNameField != nil;
+    NSString *configNameText = _configNameField.text ?: @"";
+    NSInteger pendingDeleteIndex = _pendingConfigDeleteIndex;
+    BOOL hadDeleteConfigPrompt = _configPromptView != nil && pendingDeleteIndex >= 0 && !hadSaveConfigPrompt;
+    CGPoint globalOffset = _globalSettingsScrollView ? _globalSettingsScrollView.contentOffset : CGPointZero;
+
+    if (hadGlobalSettings && allowHeavyRefresh) {
+        [self syncGlobalSettingsFromFields];
+        [self hideGlobalSettings];
+        [self showGlobalSettings];
+        CGFloat maxOffsetY = MAX(0.0, _globalSettingsScrollView.contentSize.height - _globalSettingsScrollView.bounds.size.height);
+        _globalSettingsScrollView.contentOffset = CGPointMake(0.0, MIN(MAX(globalOffset.y, 0.0), maxOffsetY));
+        return;
+    }
+
+    if (hadFunctionMenu && allowHeavyRefresh) {
+        _functionMenuView.frame = _panelView.bounds;
+        if (hadConfigList) {
+            [self showSavedConfigListForDeleting:configListDeleting];
+        } else {
+            [self showFunctionMenu];
+        }
+
+        if (hadSaveConfigPrompt) {
+            [self showSaveTaskConfigNamePrompt];
+            _configNameField.text = configNameText;
+        } else if (hadDeleteConfigPrompt) {
+            NSArray *configs = [self savedTaskConfigs];
+            if (pendingDeleteIndex >= 0 && pendingDeleteIndex < (NSInteger)configs.count) {
+                NSDictionary *config = configs[(NSUInteger)pendingDeleteIndex];
+                NSString *name = [config[@"name"] isKindOfClass:NSString.class] ? config[@"name"] : [NSString stringWithFormat:@"配置%lu", (unsigned long)pendingDeleteIndex + 1];
+                NSArray *tasks = [config[@"tasks"] isKindOfClass:NSArray.class] ? config[@"tasks"] : @[];
+                [self showDeleteSavedConfigConfirmationAtIndex:pendingDeleteIndex name:name taskCount:tasks.count];
+            }
+        }
+        return;
+    }
+
+    _globalSettingsView.frame = _panelView.bounds;
+    _functionMenuView.frame = _panelView.bounds;
+    _configPromptView.frame = _functionMenuView.bounds;
+}
+
 - (void)reclampPanelWindowForCurrentScreen {
     [self reclampPanelWindowForCurrentScreenAllowHeavyRefresh:YES];
 }
@@ -2404,8 +2901,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_panelExpanded) {
         _collapsedButton.hidden = YES;
         _panelView.hidden = NO;
-        frame.size = [self expandedPanelSize];
-        _panelWindow.frame = [self clampedPanelFrame:frame];
+        frame = [self rememberedExpandedPanelFrameWithSize:[self expandedPanelSize] fallbackFrame:frame];
+        _panelWindow.frame = frame;
         _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
         _panelView.frame = _panelWindow.bounds;
         if (_taskEditorVisible) {
@@ -2416,6 +2913,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 [self refreshTaskList];
             }
         }
+        [self refreshActivePanelOverlayLayoutAllowHeavyRefresh:allowHeavyRefresh];
         _suppressTemplatePreviewRefresh = previousSuppressPreview;
         return;
     }
@@ -2473,8 +2971,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _taskEditorVisible = visible;
     if (_panelExpanded && _panelWindow && _panelView) {
         CGRect frame = _panelWindow.frame;
-        frame.size = [self expandedPanelSizeForEditorVisible:visible];
-        _panelWindow.frame = [self clampedPanelFrame:frame];
+        frame = [self rememberedExpandedPanelFrameWithSize:[self expandedPanelSizeForEditorVisible:visible] fallbackFrame:frame];
+        _panelWindow.frame = frame;
         _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
         _panelView.frame = _panelWindow.bounds;
     }
@@ -3568,6 +4066,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_functionMenuView removeFromSuperview];
     _functionMenuView = nil;
     _configListView = nil;
+    _configListDeleting = NO;
 }
 
 - (UIButton *)functionMenuRowWithTitle:(NSString *)title subtitle:(NSString *)subtitle color:(UIColor *)color action:(SEL)action tag:(NSInteger)tag {
@@ -3624,6 +4123,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self hideFunctionMenu];
 
     _functionMenuView = [[UIView alloc] initWithFrame:_panelView.bounds];
+    _configListDeleting = NO;
     [self installDarkBlurInView:_functionMenuView cornerRadius:_panelView.layer.cornerRadius];
     _functionMenuView.layer.cornerRadius = _panelView.layer.cornerRadius;
     _functionMenuView.clipsToBounds = YES;
@@ -3816,6 +4316,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (!_functionMenuView) {
         [self showFunctionMenu];
     }
+    _configListDeleting = deleting;
     for (UIView *view in [_functionMenuView.subviews copy]) {
         if (view.tag != AnClickBackdropBlurViewTag) {
             [view removeFromSuperview];
@@ -3961,6 +4462,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _manualSwipeEndPoint = CGPointZero;
     _hasManualSwipeAnchor = NO;
     _hasManualSwipeEndPoint = NO;
+    _manualCoordinateScreenSize = CGSizeZero;
+    _hasManualCoordinateScreenSize = NO;
     if (_recordedSwipePoints) {
         [_recordedSwipePoints removeAllObjects];
     } else {
@@ -3992,6 +4495,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _targetColorBlue = 0;
     _colorTolerance = 18.0;
     _recordedMacroEvents = nil;
+    _recordedMacroScreenSize = CGSizeZero;
+    _hasRecordedMacroScreenSize = NO;
     _matchThreshold = 0.80;
     _actionDescription = nil;
     _actionDelay = 0;
@@ -4059,6 +4564,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _panelExpanded = YES;
     frame.size = [self expandedPanelSize];
     _panelWindow.frame = [self clampedPanelFrame:frame];
+    [self rememberExpandedPanelFrame:_panelWindow.frame];
     _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
     _panelView.frame = _panelWindow.bounds;
     _collapsedButton.hidden = YES;
@@ -4354,7 +4860,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     frame.origin.x += translation.x;
     frame.origin.y += translation.y;
     _panelWindow.frame = _panelExpanded ? [self clampedPanelFrame:frame] : [self clampedFloatingFrame:frame];
-    if (!_panelExpanded) {
+    if (_panelExpanded) {
+        [self rememberExpandedPanelFrame:_panelWindow.frame];
+    } else {
         [self rememberCollapsedPanelFrame:_panelWindow.frame];
     }
     [recognizer setTranslation:CGPointZero inView:_panelWindow];
@@ -5965,6 +6473,30 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return nil;
 }
 
+- (BOOL)recognitionGeometryStillValidFromGeneration:(NSUInteger)geometryGeneration
+                                      runGeneration:(NSUInteger)runGeneration
+                                       restorePanel:(BOOL)restorePanel {
+    if (geometryGeneration == _screenGeometryGeneration) {
+        return YES;
+    }
+
+    _templateSearchInProgress = NO;
+    if (runGeneration != 0 && (!_taskRunActive || runGeneration != _taskRunGeneration)) {
+        return NO;
+    }
+    if (runGeneration != 0 && _taskRunActive && runGeneration == _taskRunGeneration) {
+        [self cleanupScreenInteractionStateRestoringPanel:YES];
+        [self stopTaskRunWithStatus:@"屏幕已变化停止"];
+    } else {
+        _statusLabel.text = @"屏幕已变化 请重试";
+        if (restorePanel) {
+            [self restorePanelAfterExternalTap];
+        }
+        [self showToast:_statusLabel.text];
+    }
+    return NO;
+}
+
 - (void)resumePausedTaskRunAttempt:(NSInteger)attempt {
     if (!_taskRunPausedForForeground || _taskRunActive) {
         return;
@@ -6107,13 +6639,22 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (!strongSelf) {
             return;
         }
-        strongSelf->_captureSnapshot = [AnClickCore captureCurrentWindowImage];
+        UIWindow *capturedWindow = nil;
+        strongSelf->_captureSnapshot = [AnClickCore captureCurrentWindowImageWithWindow:&capturedWindow];
         if (!strongSelf->_captureSnapshot.CGImage) {
             [strongSelf restorePanelAfterExternalTap];
             strongSelf->_statusLabel.text = @"截图失败";
             return;
         }
-        [strongSelf showCaptureOverlayInWindow:hostWindow];
+        UIWindow *overlayWindow = capturedWindow ?: hostWindow;
+        if (![strongSelf capturedImage:strongSelf->_captureSnapshot matchesWindow:overlayWindow]) {
+            [strongSelf restorePanelAfterExternalTap];
+            strongSelf->_captureSnapshot = nil;
+            strongSelf->_statusLabel.text = @"截图方向异常 请重试";
+            [strongSelf showToast:strongSelf->_statusLabel.text];
+            return;
+        }
+        [strongSelf showCaptureOverlayInWindow:overlayWindow];
     });
 }
 
@@ -6852,7 +7393,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSArray<NSValue *> *)recordedMacroTrajectoryPoints {
-    return [self trajectoryPointsForRecordedEvents:_recordedMacroEvents];
+    NSArray<NSDictionary *> *events = _hasRecordedMacroScreenSize
+        ? [self resolvedRecordedEvents:_recordedMacroEvents fromScreenSize:_recordedMacroScreenSize]
+        : (_recordedMacroEvents ?: @[]);
+    return [self trajectoryPointsForRecordedEvents:events];
 }
 
 - (NSTimeInterval)durationForRecordedEvents:(NSArray<NSDictionary *> *)events {
@@ -6981,6 +7525,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (!_imageUsesMatchPoint && _imageActionMode != AnClickActionModeNetwork) {
             if ([self hasManualPointForMode:AnClickActionModeImage]) {
                 task[@"point"] = [NSValue valueWithCGPoint:_manualActionPoints[(NSUInteger)AnClickActionModeImage]];
+                task[@"pointScreenSize"] = [self currentScreenCoordinateSizeValue];
             } else if (requireComplete) {
                 _statusLabel.text = @"先取点击点";
                 return nil;
@@ -7015,6 +7560,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (!_ocrUsesMatchPoint && _imageActionMode != AnClickActionModeNetwork) {
             if ([self hasManualPointForMode:AnClickActionModeOCR]) {
                 task[@"point"] = [NSValue valueWithCGPoint:_manualActionPoints[(NSUInteger)AnClickActionModeOCR]];
+                task[@"pointScreenSize"] = [self currentScreenCoordinateSizeValue];
             } else if (requireComplete) {
                 _statusLabel.text = @"先取点击点";
                 return nil;
@@ -7036,6 +7582,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         task[@"colorGreen"] = @([anchorColor[@"green"] integerValue]);
         task[@"colorBlue"] = @([anchorColor[@"blue"] integerValue]);
         task[@"colorPoints"] = colorSamples;
+        task[@"colorPointScreenSize"] = [self currentScreenCoordinateSizeValue];
         task[@"colorTolerance"] = @(_colorTolerance);
         task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
         if (_imageActionMode == AnClickActionModeNetwork && ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
@@ -7069,6 +7616,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         NSArray<NSValue *> *path = [self manualSwipePath];
         if (path.count >= 2) {
             task[@"path"] = [path copy];
+            task[@"pathScreenSize"] = [self currentScreenCoordinateSizeValue];
         } else if (requireComplete) {
             _statusLabel.text = _hasManualSwipeAnchor ? @"先取终点" : @"先取起点";
             return nil;
@@ -7079,6 +7627,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_actionMode == AnClickActionModeMacro) {
         if (_recordedMacroEvents.count > 0) {
             task[@"events"] = [_recordedMacroEvents copy];
+            task[@"eventsScreenSize"] = [NSValue valueWithCGSize:_hasRecordedMacroScreenSize ? _recordedMacroScreenSize : [self currentScreenCoordinateSize]];
         } else if (requireComplete) {
             _statusLabel.text = @"先录制";
             return nil;
@@ -7088,6 +7637,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     if ([self hasManualPointForMode:_actionMode]) {
         task[@"point"] = [NSValue valueWithCGPoint:_manualActionPoints[(NSUInteger)_actionMode]];
+        task[@"pointScreenSize"] = [self currentScreenCoordinateSizeValue];
     } else if (requireComplete) {
         _statusLabel.text = @"先取点";
         return nil;
@@ -7411,21 +7961,25 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _matchThreshold = thresholdNumber ? MIN(1.0, MAX(0.0, thresholdNumber.doubleValue)) : 0.80;
         NSValue *pointValue = task[@"point"];
         if (pointValue) {
-            _manualActionPoints[(NSUInteger)AnClickActionModeImage] = pointValue.CGPointValue;
+            _manualActionPoints[(NSUInteger)AnClickActionModeImage] = [self resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
             _hasManualActionPoint[(NSUInteger)AnClickActionModeImage] = YES;
+            [self rememberManualCoordinateScreenSize];
         }
     } else if (mode == AnClickActionModeSwipe) {
-        NSArray<NSValue *> *path = task[@"path"];
+        NSArray<NSValue *> *path = [self resolvedPathForTask:task];
         if (path.count >= 2) {
             _recordedSwipePoints = [path mutableCopy];
             _manualSwipeAnchor = path.firstObject.CGPointValue;
             _manualSwipeEndPoint = path.lastObject.CGPointValue;
             _hasManualSwipeAnchor = YES;
             _hasManualSwipeEndPoint = YES;
+            [self rememberManualCoordinateScreenSize];
         }
     } else if (mode == AnClickActionModeMacro) {
         NSArray<NSDictionary *> *events = task[@"events"];
         _recordedMacroEvents = [events isKindOfClass:NSArray.class] ? [events copy] : nil;
+        _recordedMacroScreenSize = [self screenCoordinateSizeFromObject:task[@"eventsScreenSize"]];
+        _hasRecordedMacroScreenSize = [self screenCoordinateSizeIsValid:_recordedMacroScreenSize];
     } else if (mode == AnClickActionModeOCR) {
         _ocrTargetText = [self trimmedActionDescription:task[@"ocrText"]];
         _ocrMode = [self ocrModeForTask:task];
@@ -7438,13 +7992,25 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
         NSValue *pointValue = task[@"point"];
         if (pointValue) {
-            _manualActionPoints[(NSUInteger)AnClickActionModeOCR] = pointValue.CGPointValue;
+            _manualActionPoints[(NSUInteger)AnClickActionModeOCR] = [self resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
             _hasManualActionPoint[(NSUInteger)AnClickActionModeOCR] = YES;
+            [self rememberManualCoordinateScreenSize];
         }
     } else if (mode == AnClickActionModeColor) {
         NSArray<NSDictionary *> *savedColorPoints = [self mutableColorSamplesArrayFromObject:task[@"colorPoints"]];
         if (savedColorPoints.count > 0) {
+            CGSize sourceSize = [self screenCoordinateSizeFromObject:task[@"colorPointScreenSize"]];
+            if (![self screenCoordinateSizeIsValid:sourceSize]) {
+                NSDictionary *anchor = savedColorPoints.firstObject;
+                if ([anchor[@"x"] respondsToSelector:@selector(doubleValue)] &&
+                    [anchor[@"y"] respondsToSelector:@selector(doubleValue)]) {
+                    CGPoint anchorPoint = CGPointMake([anchor[@"x"] doubleValue], [anchor[@"y"] doubleValue]);
+                    sourceSize = [self inferredRotatedSourceSizeForPoint:anchorPoint targetSize:[self currentScreenCoordinateSize]];
+                }
+            }
+            savedColorPoints = [self colorSamples:savedColorPoints mappedFromScreenSize:sourceSize toScreenSize:[self currentScreenCoordinateSize]];
             [self applyTargetColorSamples:savedColorPoints];
+            [self rememberManualCoordinateScreenSize];
         } else if ([task[@"colorRed"] respondsToSelector:@selector(integerValue)] &&
                    [task[@"colorGreen"] respondsToSelector:@selector(integerValue)] &&
                    [task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
@@ -7475,8 +8041,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } else if ([self isSelectableActionMode:mode] && mode != AnClickActionModeSwipe && mode != AnClickActionModeImage) {
         NSValue *pointValue = task[@"point"];
         if (pointValue) {
-            _manualActionPoints[(NSUInteger)mode] = pointValue.CGPointValue;
+            _manualActionPoints[(NSUInteger)mode] = [self resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
             _hasManualActionPoint[(NSUInteger)mode] = YES;
+            [self rememberManualCoordinateScreenSize];
         }
     }
 
@@ -8515,6 +9082,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     double threshold = thresholdNumber ? MIN(1.0, MAX(0.0, thresholdNumber.doubleValue)) : 0.80;
     NSValue *customPointValue = task[@"point"];
     _templateSearchInProgress = YES;
+    NSUInteger geometryGeneration = _screenGeometryGeneration;
     __weak typeof(self) weakSelf = self;
     dispatch_async([self templateSearchQueue], ^{
         __strong typeof(weakSelf) searchSelf = weakSelf;
@@ -8528,6 +9096,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 return;
             }
             strongSelf->_templateSearchInProgress = NO;
+            if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                            runGeneration:runGeneration
+                                                             restorePanel:(runGeneration == 0)]) {
+                return;
+            }
             UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
                                                                           runGeneration:runGeneration
                                                                                  status:@"窗口变化停止"];
@@ -8562,7 +9135,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 return;
             }
-            CGPoint actionPoint = useMatchPoint ? matchPointValue.CGPointValue : customPointValue.CGPointValue;
+            CGPoint actionPoint = useMatchPoint
+                ? matchPointValue.CGPointValue
+                : [strongSelf resolvedPointForTask:task fallbackPoint:customPointValue.CGPointValue];
             [strongSelf performPointActionMode:imageActionMode atPoint:actionPoint inWindow:currentHostWindow];
             strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f %@ %.0f,%.0f",
                                              scoreNumber.doubleValue,
@@ -8620,11 +9195,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
     _templateSearchInProgress = YES;
+    NSUInteger geometryGeneration = _screenGeometryGeneration;
     __weak typeof(self) weakSelf = self;
     [self hideToastForRecognitionCapture];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         __strong typeof(weakSelf) delayedSelf = weakSelf;
         if (!delayedSelf) {
+            return;
+        }
+        if (![delayedSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                         runGeneration:runGeneration
+                                                          restorePanel:(runGeneration == 0)]) {
             return;
         }
         if (runGeneration != 0 &&
@@ -8640,6 +9221,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     return;
                 }
                 strongSelf->_templateSearchInProgress = NO;
+                if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                                runGeneration:runGeneration
+                                                                 restorePanel:(runGeneration == 0)]) {
+                    return;
+                }
                 UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
                                                                               runGeneration:runGeneration
                                                                                      status:@"窗口变化停止"];
@@ -8678,7 +9264,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     return;
                 }
-                CGPoint actionPoint = useMatchPoint ? pointValue.CGPointValue : customPointValue.CGPointValue;
+                CGPoint actionPoint = useMatchPoint
+                    ? pointValue.CGPointValue
+                    : [strongSelf resolvedPointForTask:task fallbackPoint:customPointValue.CGPointValue];
                 [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
                 strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ %.0f,%.0f",
                                                  matchSummary,
@@ -8721,6 +9309,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
     NSString *patternSummary = [self colorPatternSummaryForTask:task];
     _templateSearchInProgress = YES;
+    NSUInteger geometryGeneration = _screenGeometryGeneration;
     __weak typeof(self) weakSelf = self;
     dispatch_async([self templateSearchQueue], ^{
         NSDictionary *match = [AnClickCore findColorPatternMatchWithPoints:colorPoints tolerance:tolerance];
@@ -8730,6 +9319,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 return;
             }
             strongSelf->_templateSearchInProgress = NO;
+            if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                            runGeneration:runGeneration
+                                                             restorePanel:(runGeneration == 0)]) {
+                return;
+            }
             UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
                                                                           runGeneration:runGeneration
                                                                                  status:@"窗口变化停止"];
@@ -8958,7 +9552,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 return;
             }
             if (mode == AnClickActionModeSwipe) {
-                NSArray<NSValue *> *path = task[@"path"];
+                NSArray<NSValue *> *path = [strongSelf resolvedPathForTask:task];
                 [strongSelf showTrajectoryForScreenPoints:path inWindow:currentHostWindow duration:0.75];
                 [AnClickFakeTouch playPath:path duration:0.55];
             } else if (mode == AnClickActionModeImage) {
@@ -8971,16 +9565,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 [strongSelf performNetworkRequestTask:task runGeneration:runGeneration completion:nil];
             } else if (mode == AnClickActionModeMacro) {
                 NSArray<NSDictionary *> *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
-                NSArray<NSValue *> *trajectory = [strongSelf trajectoryPointsForRecordedEvents:events];
+                NSArray<NSDictionary *> *resolvedEvents = [strongSelf resolvedRecordedEventsForTask:task];
+                NSArray<NSValue *> *trajectory = [strongSelf trajectoryPointsForRecordedEvents:resolvedEvents];
                 if (trajectory.count >= 2) {
                     [strongSelf showTrajectoryForScreenPoints:trajectory inWindow:currentHostWindow duration:[strongSelf durationForRecordedEvents:events]];
                 } else if (trajectory.count == 1) {
                     [strongSelf showTapMarkerAtScreenPoint:trajectory.firstObject.CGPointValue inWindow:currentHostWindow];
                 }
-                [AnClickFakeTouch playRecordedEvents:events];
+                [AnClickFakeTouch playRecordedEvents:resolvedEvents];
             } else {
                 NSValue *pointValue = task[@"point"];
-                [strongSelf performPointActionMode:mode atPoint:pointValue.CGPointValue inWindow:currentHostWindow];
+                CGPoint point = [strongSelf resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
+                [strongSelf performPointActionMode:mode atPoint:point inWindow:currentHostWindow];
             }
         });
     }
@@ -9668,13 +10264,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (!strongSelf) {
             return;
         }
-        UIImage *image = [AnClickCore captureCurrentWindowImage];
+        UIWindow *capturedWindow = nil;
+        UIImage *image = [AnClickCore captureCurrentWindowImageWithWindow:&capturedWindow];
         if (!image.CGImage) {
             strongSelf->_statusLabel.text = @"截图失败";
             [strongSelf restorePanelAfterExternalTap];
             return;
         }
-        [strongSelf showColorPickOverlayWithImage:image hostWindow:hostWindow];
+        UIWindow *overlayWindow = capturedWindow ?: hostWindow;
+        if (![strongSelf capturedImage:image matchesWindow:overlayWindow]) {
+            strongSelf->_statusLabel.text = @"截图方向异常 请重试";
+            [strongSelf showToast:strongSelf->_statusLabel.text];
+            [strongSelf restorePanelAfterExternalTap];
+            return;
+        }
+        [strongSelf showColorPickOverlayWithImage:image hostWindow:overlayWindow];
     });
 }
 
@@ -9690,7 +10294,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    _colorPickWindow = [[UIWindow alloc] initWithFrame:[self currentScreenBounds]];
+    _colorPickWindow = [[UIWindow alloc] initWithFrame:[self screenBoundsForWindow:hostWindow]];
     if (@available(iOS 13.0, *)) {
         _colorPickWindow.windowScene = hostWindow.windowScene ?: [self activeWindowScene];
     }
@@ -10033,6 +10637,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
     [self applyTargetColorSamples:_pendingColorPickSamples];
+    [self rememberManualCoordinateScreenSize];
     [self finishColorPickingOverlay];
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
@@ -10086,13 +10691,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (!strongSelf) {
             return;
         }
-        UIImage *image = [AnClickCore captureCurrentWindowImage];
+        UIWindow *capturedWindow = nil;
+        UIImage *image = [AnClickCore captureCurrentWindowImageWithWindow:&capturedWindow];
         if (!image.CGImage) {
             strongSelf->_statusLabel.text = @"截图失败";
             [strongSelf restorePanelAfterExternalTap];
             return;
         }
-        [strongSelf showPointPickOverlayWithImage:image hostWindow:hostWindow];
+        UIWindow *overlayWindow = capturedWindow ?: hostWindow;
+        if (![strongSelf capturedImage:image matchesWindow:overlayWindow]) {
+            strongSelf->_statusLabel.text = @"截图方向异常 请重试";
+            [strongSelf showToast:strongSelf->_statusLabel.text];
+            [strongSelf restorePanelAfterExternalTap];
+            return;
+        }
+        [strongSelf showPointPickOverlayWithImage:image hostWindow:overlayWindow];
     });
 }
 
@@ -10102,7 +10715,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _pointPickSnapshot = image;
     _pointPickHostWindow = hostWindow;
 
-    _pointPickWindow = [[UIWindow alloc] initWithFrame:[self currentScreenBounds]];
+    _pointPickWindow = [[UIWindow alloc] initWithFrame:[self screenBoundsForWindow:hostWindow]];
     if (@available(iOS 13.0, *)) {
         _pointPickWindow.windowScene = hostWindow.windowScene ?: [self activeWindowScene];
     }
@@ -10471,6 +11084,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _hasManualSwipeAnchor = YES;
             _hasManualSwipeEndPoint = NO;
             _manualSwipeEndPoint = CGPointZero;
+            [self rememberManualCoordinateScreenSize];
             _pickingSwipeEndPoint = YES;
             _pendingPointPickPoint = [self pointPickImagePointFromScreenPoint:screenPoint];
             [self showPointPickSwipeStartMarker];
@@ -10482,6 +11096,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
         _manualSwipeEndPoint = screenPoint;
         _hasManualSwipeEndPoint = YES;
+        [self rememberManualCoordinateScreenSize];
         [self finishPointPickingOverlay];
         [self showTapMarkerAtScreenPoint:_manualSwipeAnchor inWindow:hostWindow];
         __weak typeof(self) weakSelf = self;
@@ -10504,6 +11119,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     _manualActionPoints[(NSUInteger)_actionMode] = screenPoint;
     _hasManualActionPoint[(NSUInteger)_actionMode] = YES;
+    [self rememberManualCoordinateScreenSize];
     [self finishPointPickingOverlay];
     [self refreshEditorConfigControls];
     [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
@@ -10549,10 +11165,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
         NSTimeInterval previewDuration = 1.2;
         [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+        NSUInteger geometryGeneration = _screenGeometryGeneration;
         __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) {
+                return;
+            }
+            if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                            runGeneration:0
+                                                             restorePanel:YES]) {
                 return;
             }
             [strongSelf showTrajectoryForScreenPoints:path inWindow:hostWindow duration:previewDuration];
@@ -10580,10 +11202,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         NSTimeInterval previewDuration = 1.0;
         AnClickActionMode imageActionMode = _imageActionMode;
         [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+        NSUInteger geometryGeneration = _screenGeometryGeneration;
         __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) {
+                return;
+            }
+            if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                            runGeneration:0
+                                                             restorePanel:YES]) {
                 return;
             }
             [strongSelf showOperationTraceForMode:imageActionMode atPoint:point inWindow:hostWindow duration:previewDuration];
@@ -10614,10 +11242,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         NSTimeInterval previewDuration = (_imageActionMode == AnClickActionModeLongPress) ? 2.0 : 1.0;
         AnClickActionMode actionMode = _imageActionMode;
         [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+        NSUInteger geometryGeneration = _screenGeometryGeneration;
         __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) {
+                return;
+            }
+            if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                            runGeneration:0
+                                                             restorePanel:YES]) {
                 return;
             }
             [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:previewDuration];
@@ -10652,12 +11286,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         NSTimeInterval previewDuration = 1.2;
         NSString *patternSummary = [self targetColorShortDescription];
         [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+        NSUInteger geometryGeneration = _screenGeometryGeneration;
         __weak typeof(self) weakSelf = self;
         dispatch_async([self templateSearchQueue], ^{
             NSDictionary *match = [AnClickCore findColorPatternMatchWithPoints:colorPoints tolerance:tolerance];
             dispatch_async(dispatch_get_main_queue(), ^{
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) {
+                    return;
+                }
+                if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                                runGeneration:0
+                                                                 restorePanel:YES]) {
                     return;
                 }
                 if (!match) {
@@ -10687,10 +11327,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     AnClickActionMode actionMode = _actionMode;
     NSString *actionName = [self currentActionName];
     [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+    NSUInteger geometryGeneration = _screenGeometryGeneration;
     __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) {
+            return;
+        }
+        if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                        runGeneration:0
+                                                         restorePanel:YES]) {
             return;
         }
         [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:previewDuration];
@@ -10704,6 +11350,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (recorder.isRecording) {
         [recorder stopRecording];
         _recordedMacroEvents = [recorder serializedEvents];
+        _recordedMacroScreenSize = [self currentScreenCoordinateSize];
+        _hasRecordedMacroScreenSize = YES;
         [_macroRecordButton setTitle:@"重新录制" forState:UIControlStateNormal];
         [self styleRecordButton:_macroRecordButton active:NO];
         _statusLabel.text = [NSString stringWithFormat:@"已录 %lu步", (unsigned long)_recordedMacroEvents.count];
@@ -10720,6 +11368,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     _actionMode = AnClickActionModeMacro;
     _recordedMacroEvents = nil;
+    _recordedMacroScreenSize = CGSizeZero;
+    _hasRecordedMacroScreenSize = NO;
     _returnToEditorAfterRecording = _taskEditorVisible;
     [recorder startRecording];
     [_macroRecordButton setTitle:@"停止录制" forState:UIControlStateNormal];
@@ -10744,8 +11394,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     NSTimeInterval duration = [self durationForRecordedEvents:_recordedMacroEvents];
     [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
-    NSArray<NSValue *> *trajectory = [self recordedMacroTrajectoryPoints];
-    NSArray<NSDictionary *> *recordedEvents = [_recordedMacroEvents copy];
+    NSArray<NSDictionary *> *recordedEvents = _hasRecordedMacroScreenSize
+        ? [self resolvedRecordedEvents:_recordedMacroEvents fromScreenSize:_recordedMacroScreenSize]
+        : [_recordedMacroEvents copy];
+    NSArray<NSValue *> *trajectory = [self trajectoryPointsForRecordedEvents:recordedEvents];
     __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -10831,6 +11483,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _recordedSwipePoints = [_liveSwipePoints mutableCopy];
             _hasManualSwipeAnchor = NO;
             _hasManualSwipeEndPoint = NO;
+            [self rememberManualCoordinateScreenSize];
             _actionMode = AnClickActionModeSwipe;
             [self refreshModeButtons];
             _statusLabel.text = [NSString stringWithFormat:@"已录 %lu点", (unsigned long)_recordedSwipePoints.count];
@@ -10885,6 +11538,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _playButton.alpha = 0.55;
     double matchThreshold = _matchThreshold;
     [self preparePanelForExternalTapWithHostWindow:hostWindow];
+    NSUInteger geometryGeneration = _screenGeometryGeneration;
     __weak typeof(self) weakSelf = self;
     dispatch_async([self templateSearchQueue], ^{
         __strong typeof(weakSelf) searchSelf = weakSelf;
@@ -10900,6 +11554,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             strongSelf->_templateSearchInProgress = NO;
             strongSelf->_playButton.enabled = YES;
             strongSelf->_playButton.alpha = 1.0;
+            if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                            runGeneration:0
+                                                             restorePanel:YES]) {
+                return;
+            }
             if (!match) {
                 [strongSelf restorePanelAfterExternalTap];
                 strongSelf->_statusLabel.text = @"未找到";

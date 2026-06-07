@@ -6,6 +6,7 @@
 #include <dlfcn.h>
 #include <float.h>
 #include <math.h>
+#include <string.h>
 #include <vector>
 
 @interface AnClickFakeTouch : NSObject
@@ -117,6 +118,11 @@ static NSArray<UIWindow *> *AnClickCaptureCandidateWindows(UIWindow **primaryWin
     if (!primary) {
         primary = windows.firstObject ?: AnClickActiveWindow();
     }
+    if (windows.count == 0 && AnClickWindowCanBeCaptured(primary)) {
+        [windows addObject:primary];
+    } else if (primary && ![windows containsObject:primary] && AnClickWindowCanBeCaptured(primary)) {
+        [windows insertObject:primary atIndex:0];
+    }
     if (primaryWindow) {
         *primaryWindow = primary;
     }
@@ -146,41 +152,115 @@ static UIImage *AnClickCaptureHardwareScreenImage(void) {
     return image;
 }
 
+static BOOL AnClickImageAppearsUniform(UIImage *image) {
+    if (!image.CGImage) {
+        return YES;
+    }
+
+    const size_t sampleWidth = 8;
+    const size_t sampleHeight = 8;
+    const size_t bytesPerPixel = 4;
+    const size_t bytesPerRow = sampleWidth * bytesPerPixel;
+    unsigned char pixels[sampleHeight * bytesPerRow];
+    memset(pixels, 0, sizeof(pixels));
+
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    if (!colorSpace) {
+        return NO;
+    }
+    CGContextRef context = CGBitmapContextCreate(pixels,
+                                                 sampleWidth,
+                                                 sampleHeight,
+                                                 8,
+                                                 bytesPerRow,
+                                                 colorSpace,
+                                                 kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(colorSpace);
+    if (!context) {
+        return NO;
+    }
+
+    CGContextSetInterpolationQuality(context, kCGInterpolationLow);
+    CGContextDrawImage(context, CGRectMake(0, 0, sampleWidth, sampleHeight), image.CGImage);
+    CGContextRelease(context);
+
+    int minR = 255;
+    int minG = 255;
+    int minB = 255;
+    int maxR = 0;
+    int maxG = 0;
+    int maxB = 0;
+    for (size_t y = 0; y < sampleHeight; y++) {
+        for (size_t x = 0; x < sampleWidth; x++) {
+            const unsigned char *pixel = pixels + y * bytesPerRow + x * bytesPerPixel;
+            int r = pixel[0];
+            int g = pixel[1];
+            int b = pixel[2];
+            minR = MIN(minR, r);
+            minG = MIN(minG, g);
+            minB = MIN(minB, b);
+            maxR = MAX(maxR, r);
+            maxG = MAX(maxG, g);
+            maxB = MAX(maxB, b);
+        }
+    }
+    return (maxR - minR) <= 2 && (maxG - minG) <= 2 && (maxB - minB) <= 2;
+}
+
+static BOOL AnClickImageMatchesWindowPointSize(UIImage *image, UIWindow *window) {
+    if (!image.CGImage || !window || CGRectIsEmpty(window.bounds)) {
+        return YES;
+    }
+
+    CGSize windowSize = window.bounds.size;
+    CGSize imageSize = image.size;
+    CGFloat scale = image.scale > 0.0 ? image.scale : (window.screen.scale > 0.0 ? window.screen.scale : UIScreen.mainScreen.scale);
+    CGSize pixelPointSize = CGSizeMake((CGFloat)CGImageGetWidth(image.CGImage) / MAX(scale, 0.01),
+                                       (CGFloat)CGImageGetHeight(image.CGImage) / MAX(scale, 0.01));
+    BOOL imageMatches = fabs(imageSize.width - windowSize.width) < 0.5 &&
+        fabs(imageSize.height - windowSize.height) < 0.5;
+    BOOL pixelMatches = fabs(pixelPointSize.width - windowSize.width) < 0.5 &&
+        fabs(pixelPointSize.height - windowSize.height) < 0.5;
+    return imageMatches || pixelMatches;
+}
+
 static UIImage *AnClickCaptureActiveWindowImage(UIWindow **capturedWindow) {
     __block UIImage *image = nil;
     __block UIWindow *window = nil;
     void (^captureBlock)(void) = ^{
+        NSArray<UIWindow *> *windows = AnClickCaptureCandidateWindows(&window);
+        if (window) {
+            CGSize size = window.bounds.size;
+            CGFloat scale = window.screen.scale > 0 ? window.screen.scale : UIScreen.mainScreen.scale;
+            UIGraphicsBeginImageContextWithOptions(size, NO, scale);
+            CGContextRef context = UIGraphicsGetCurrentContext();
+            for (UIWindow *captureWindow in windows) {
+                if (!AnClickWindowCanBeCaptured(captureWindow)) {
+                    continue;
+                }
+                CGPoint origin = [captureWindow convertPoint:CGPointZero toWindow:window];
+                CGContextSaveGState(context);
+                CGContextTranslateCTM(context, origin.x, origin.y);
+                BOOL drawn = [captureWindow drawViewHierarchyInRect:captureWindow.bounds afterScreenUpdates:YES];
+                if (!drawn) {
+                    [captureWindow.layer renderInContext:context];
+                }
+                CGContextRestoreGState(context);
+            }
+            image = UIGraphicsGetImageFromCurrentImageContext();
+            UIGraphicsEndImageContext();
+            if (image.CGImage && !AnClickImageAppearsUniform(image)) {
+                return;
+            }
+        }
+
         UIImage *screenImage = AnClickCaptureHardwareScreenImage();
-        if (screenImage.CGImage) {
+        if (screenImage.CGImage && AnClickImageMatchesWindowPointSize(screenImage, window)) {
             image = screenImage;
             window = nil;
-            return;
+        } else if (screenImage.CGImage) {
+            NSLog(@"[AnClick] Ignored hardware screenshot with mismatched orientation size");
         }
-
-        NSArray<UIWindow *> *windows = AnClickCaptureCandidateWindows(&window);
-        if (!window) {
-            return;
-        }
-
-        CGSize size = window.bounds.size;
-        CGFloat scale = UIScreen.mainScreen.scale;
-        UIGraphicsBeginImageContextWithOptions(size, NO, scale);
-        CGContextRef context = UIGraphicsGetCurrentContext();
-        for (UIWindow *captureWindow in windows) {
-            if (!AnClickWindowCanBeCaptured(captureWindow)) {
-                continue;
-            }
-            CGPoint origin = [captureWindow convertPoint:CGPointZero toWindow:window];
-            CGContextSaveGState(context);
-            CGContextTranslateCTM(context, origin.x, origin.y);
-            BOOL drawn = [captureWindow drawViewHierarchyInRect:captureWindow.bounds afterScreenUpdates:YES];
-            if (!drawn) {
-                [captureWindow.layer renderInContext:context];
-            }
-            CGContextRestoreGState(context);
-        }
-        image = UIGraphicsGetImageFromCurrentImageContext();
-        UIGraphicsEndImageContext();
     };
 
     if (NSThread.isMainThread) {
