@@ -235,10 +235,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIView *_trajectoryView;
     CAShapeLayer *_trajectoryLayer;
     UIView *_functionMenuView;
+    UIView *_configPromptView;
     UIView *_globalSettingsView;
     UIScrollView *_globalSettingsScrollView;
     UITextField *_globalDelayField;
     UITextField *_globalRepeatField;
+    UITextField *_configNameField;
     UITextField *_globalNetworkURLField;
     UITextField *_globalNetworkContainsField;
     UITextField *_globalNetworkFalseField;
@@ -259,6 +261,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSInteger _selectedTaskIndex;
     NSInteger _draggingTaskIndex;
     NSInteger _revealedDeleteTaskIndex;
+    NSInteger _pendingConfigDeleteIndex;
     CGFloat _taskPanStartOffsetX;
     BOOL _taskPanDirectionLocked;
     BOOL _taskPanHorizontal;
@@ -277,6 +280,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _templateSearchInProgress;
     BOOL _captureDrawingSelection;
     CGPoint _captureDragStartPoint;
+    CGRect _collapsedPanelFrame;
+    BOOL _hasCollapsedPanelFrame;
     BOOL _panelExpanded;
     BOOL _taskEditorVisible;
     BOOL _imageUsesMatchPoint;
@@ -1113,6 +1118,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _hasObservedSystemVolume = NO;
     _volumeShortcutRunSuppressToasts = NO;
     _ignoreVolumeEventsUntil = 0;
+    _pendingConfigDeleteIndex = -1;
     [self loadGlobalSettings];
     [self registerVolumeShortcutObserver];
     if (!_recordedSwipePoints) {
@@ -1122,7 +1128,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _taskItems = [self savedCurrentTaskList];
     }
 
-    _panelWindow = [[UIWindow alloc] initWithFrame:[self defaultCollapsedPanelFrame]];
+    _collapsedPanelFrame = [self defaultCollapsedPanelFrame];
+    _hasCollapsedPanelFrame = YES;
+    _panelWindow = [[UIWindow alloc] initWithFrame:_collapsedPanelFrame];
     [self attachPanelWindowToActiveSceneIfNeeded];
     _panelWindow.windowLevel = UIWindowLevelAlert + 1000;
     _panelWindow.backgroundColor = UIColor.clearColor;
@@ -2168,6 +2176,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [self clampedFloatingFrame:CGRectMake(x, y, size.width, size.height)];
 }
 
+- (void)rememberCollapsedPanelFrame:(CGRect)frame {
+    frame.size = CGSizeMake(48.0, 48.0);
+    _collapsedPanelFrame = [self clampedFloatingFrame:frame];
+    _hasCollapsedPanelFrame = YES;
+}
+
+- (CGRect)rememberedCollapsedPanelFrame {
+    CGRect frame = _hasCollapsedPanelFrame ? _collapsedPanelFrame : (_panelWindow ? _panelWindow.frame : [self defaultCollapsedPanelFrame]);
+    [self rememberCollapsedPanelFrame:frame];
+    return _collapsedPanelFrame;
+}
+
 - (UIEdgeInsets)panelSafeAreaInsets {
     UIEdgeInsets insets = UIEdgeInsetsZero;
     CGSize screenSize = [self currentScreenBounds].size;
@@ -2400,8 +2420,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    frame.size = CGSizeMake(48.0, 48.0);
-    _panelWindow.frame = [self clampedFloatingFrame:frame];
+    frame = [self rememberedCollapsedPanelFrame];
+    _panelWindow.frame = frame;
     _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
     _collapsedButton.frame = _panelWindow.bounds;
     _collapsedButton.hidden = NO;
@@ -3544,6 +3564,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)hideFunctionMenu {
+    [self hideConfigPrompt];
     [_functionMenuView removeFromSuperview];
     _functionMenuView = nil;
     _configListView = nil;
@@ -3632,7 +3653,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_functionMenuView addSubview:caption];
 
     UIButton *saveRow = [self functionMenuRowWithTitle:@"保存当前任务列表"
-                                             subtitle:@"保存当前所有任务和设置"
+                                             subtitle:@"可自定义名字保存任务和设置"
                                                 color:[UIColor colorWithRed:0.03 green:0.30 blue:0.52 alpha:0.82]
                                                action:@selector(saveCurrentTaskConfig)
                                                   tag:0];
@@ -3642,7 +3663,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                  action:@selector(showSavedConfigChooser)
                                                     tag:0];
     UIButton *deleteRow = [self functionMenuRowWithTitle:@"删除任务配置"
-                                               subtitle:@"删除已保存的配置文件"
+                                               subtitle:@"删除前会再次确认"
                                                   color:[UIColor colorWithRed:0.44 green:0.16 blue:0.07 alpha:0.82]
                                                  action:@selector(showSavedConfigDeleter)
                                                     tag:0];
@@ -3652,17 +3673,117 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self layoutFunctionMenuRows:@[saveRow, chooseRow, deleteRow] startY:108.0];
 }
 
-- (void)saveCurrentTaskConfig {
+- (NSString *)defaultTaskConfigName {
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateFormat = @"MM-dd HH:mm";
+    return [NSString stringWithFormat:@"配置 %@  %lu项", [formatter stringFromDate:[NSDate date]], (unsigned long)_taskItems.count];
+}
+
+- (UIButton *)configPromptButtonWithTitle:(NSString *)title action:(SEL)action destructive:(BOOL)destructive {
+    UIButton *button = [self panelButtonWithTitle:title action:action];
+    if (destructive) {
+        button.backgroundColor = [UIColor colorWithRed:0.78 green:0.10 blue:0.07 alpha:0.96];
+        button.layer.borderColor = [UIColor colorWithRed:1.0 green:0.42 blue:0.32 alpha:0.92].CGColor;
+    }
+    return button;
+}
+
+- (void)hideConfigPrompt {
+    [_configNameField resignFirstResponder];
+    [_configPromptView removeFromSuperview];
+    _configPromptView = nil;
+    _configNameField = nil;
+    _pendingConfigDeleteIndex = -1;
+}
+
+- (UIView *)showConfigPromptBaseWithTitle:(NSString *)title message:(NSString *)message {
+    if (!_functionMenuView) {
+        [self showFunctionMenu];
+    }
+    [self hideConfigPrompt];
+
+    UIView *overlay = [[UIView alloc] initWithFrame:_functionMenuView.bounds];
+    overlay.backgroundColor = [UIColor colorWithWhite:0 alpha:0.66];
+    overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [_functionMenuView addSubview:overlay];
+    _configPromptView = overlay;
+
+    CGFloat side = 18.0;
+    CGFloat width = overlay.bounds.size.width - side * 2.0;
+    CGFloat cardHeight = 236.0;
+    CGFloat cardY = MAX(70.0, (overlay.bounds.size.height - cardHeight) * 0.42);
+    UIView *card = [[UIView alloc] initWithFrame:CGRectMake(side, cardY, width, cardHeight)];
+    card.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.105 alpha:0.98];
+    card.layer.cornerRadius = 12;
+    card.layer.borderWidth = 1.0;
+    card.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
+    card.layer.shadowColor = UIColor.blackColor.CGColor;
+    card.layer.shadowOpacity = 0.42;
+    card.layer.shadowRadius = 14.0;
+    card.layer.shadowOffset = CGSizeMake(0, 8);
+    [overlay addSubview:card];
+
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 14, width - 32, 28)];
+    titleLabel.text = title;
+    titleLabel.textColor = UIColor.whiteColor;
+    titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
+    titleLabel.adjustsFontSizeToFitWidth = YES;
+    titleLabel.minimumScaleFactor = 0.72;
+    [card addSubview:titleLabel];
+
+    UILabel *messageLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 48, width - 32, 44)];
+    messageLabel.text = message;
+    messageLabel.textColor = [UIColor colorWithWhite:1 alpha:0.66];
+    messageLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+    messageLabel.numberOfLines = 2;
+    [card addSubview:messageLabel];
+
+    return card;
+}
+
+- (void)showSaveTaskConfigNamePrompt {
     if (_taskItems.count == 0) {
         _statusLabel.text = @"没有任务可保存";
         [self hideFunctionMenu];
         return;
     }
 
+    NSString *defaultName = [self defaultTaskConfigName];
+    UIView *card = [self showConfigPromptBaseWithTitle:@"保存配置" message:@"可以修改保存配置名字，方便下次选择。"];
+    CGFloat width = card.bounds.size.width;
+    _configNameField = [[UITextField alloc] initWithFrame:CGRectMake(16, 98, width - 32, 42)];
+    _configNameField.text = defaultName;
+    _configNameField.returnKeyType = UIReturnKeyDone;
+    [self applyObsidianInputStyleToField:_configNameField placeholder:@"配置名称" monospaced:NO];
+    [self configureConfigTextField:_configNameField];
+    [card addSubview:_configNameField];
+
+    CGFloat buttonY = CGRectGetMaxY(_configNameField.frame) + 20.0;
+    CGFloat gap = 12.0;
+    CGFloat buttonWidth = floor((width - 32.0 - gap) / 2.0);
+    UIButton *cancelButton = [self configPromptButtonWithTitle:@"取消" action:@selector(hideConfigPrompt) destructive:NO];
+    cancelButton.frame = CGRectMake(16, buttonY, buttonWidth, 42);
+    [card addSubview:cancelButton];
+
+    UIButton *saveButton = [self configPromptButtonWithTitle:@"保存" action:@selector(confirmSaveCurrentTaskConfig) destructive:NO];
+    saveButton.frame = CGRectMake(16 + buttonWidth + gap, buttonY, buttonWidth, 42);
+    [self applyObsidian3DStyleToButton:saveButton selected:YES];
+    [card addSubview:saveButton];
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self->_configNameField becomeFirstResponder];
+        [self->_configNameField selectAll:nil];
+    });
+}
+
+- (NSString *)trimmedConfigNameFromField {
+    NSString *name = [_configNameField.text ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return name.length > 0 ? name : [self defaultTaskConfigName];
+}
+
+- (void)confirmSaveCurrentTaskConfig {
     NSMutableArray *configs = [self savedTaskConfigs];
-    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-    formatter.dateFormat = @"MM-dd HH:mm";
-    NSString *name = [NSString stringWithFormat:@"配置 %@  %lu项", [formatter stringFromDate:[NSDate date]], (unsigned long)_taskItems.count];
+    NSString *name = [self trimmedConfigNameFromField];
     NSMutableDictionary *config = [@{
         @"name": name,
         @"createdAt": @([NSDate date].timeIntervalSince1970),
@@ -3673,6 +3794,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self writeSavedTaskConfigs:configs];
     _statusLabel.text = @"任务配置已保存";
     [self hideFunctionMenu];
+}
+
+- (void)saveCurrentTaskConfig {
+    [self showSaveTaskConfigNamePrompt];
 }
 
 - (void)showSavedConfigChooser {
@@ -3776,9 +3901,50 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
+    NSDictionary *config = configs[(NSUInteger)index];
+    NSString *name = [config[@"name"] isKindOfClass:NSString.class] ? config[@"name"] : [NSString stringWithFormat:@"配置%lu", (unsigned long)index + 1];
+    NSArray *tasks = [config[@"tasks"] isKindOfClass:NSArray.class] ? config[@"tasks"] : @[];
+    [self showDeleteSavedConfigConfirmationAtIndex:index name:name taskCount:tasks.count];
+}
+
+- (void)showDeleteSavedConfigConfirmationAtIndex:(NSInteger)index name:(NSString *)name taskCount:(NSUInteger)taskCount {
+    NSString *message = [NSString stringWithFormat:@"确定删除“%@”？包含 %lu 个任务。", name ?: @"配置", (unsigned long)taskCount];
+    UIView *card = [self showConfigPromptBaseWithTitle:@"删除配置" message:message];
+    _pendingConfigDeleteIndex = index;
+    CGFloat width = card.bounds.size.width;
+
+    UILabel *warningLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 104, width - 32, 28)];
+    warningLabel.text = @"删除后不可恢复";
+    warningLabel.textColor = [UIColor colorWithRed:1.0 green:0.56 blue:0.42 alpha:0.94];
+    warningLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
+    warningLabel.textAlignment = NSTextAlignmentCenter;
+    [card addSubview:warningLabel];
+
+    CGFloat buttonY = 154.0;
+    CGFloat gap = 12.0;
+    CGFloat buttonWidth = floor((width - 32.0 - gap) / 2.0);
+    UIButton *cancelButton = [self configPromptButtonWithTitle:@"取消" action:@selector(hideConfigPrompt) destructive:NO];
+    cancelButton.frame = CGRectMake(16, buttonY, buttonWidth, 42);
+    [card addSubview:cancelButton];
+
+    UIButton *deleteButton = [self configPromptButtonWithTitle:@"删除" action:@selector(confirmDeleteSavedConfig) destructive:YES];
+    deleteButton.frame = CGRectMake(16 + buttonWidth + gap, buttonY, buttonWidth, 42);
+    [card addSubview:deleteButton];
+}
+
+- (void)confirmDeleteSavedConfig {
+    NSMutableArray *configs = [self savedTaskConfigs];
+    NSInteger index = _pendingConfigDeleteIndex;
+    if (index < 0 || index >= (NSInteger)configs.count) {
+        [self hideConfigPrompt];
+        _statusLabel.text = @"配置不存在";
+        return;
+    }
+
     [configs removeObjectAtIndex:(NSUInteger)index];
     [self writeSavedTaskConfigs:configs];
     _statusLabel.text = @"配置已删除";
+    [self hideConfigPrompt];
     [self showSavedConfigListForDeleting:YES];
 }
 
@@ -3849,9 +4015,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self hideFunctionMenu];
     _panelExpanded = NO;
     _taskEditorVisible = NO;
-    CGRect frame = _panelWindow.frame;
-    frame.size = CGSizeMake(48.0, 48.0);
-    _panelWindow.frame = [self clampedFloatingFrame:frame];
+    CGRect frame = [self rememberedCollapsedPanelFrame];
+    _panelWindow.frame = frame;
     _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
     _collapsedButton.frame = _panelWindow.bounds;
     _collapsedButton.hidden = NO;
@@ -3866,9 +4031,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     _panelExpanded = NO;
-    CGRect frame = _panelWindow.frame;
-    frame.size = CGSizeMake(48.0, 48.0);
-    _panelWindow.frame = [self clampedFloatingFrame:frame];
+    CGRect frame = [self rememberedCollapsedPanelFrame];
+    _panelWindow.frame = frame;
     _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
     _collapsedButton.frame = _panelWindow.bounds;
     _collapsedButton.hidden = NO;
@@ -3884,8 +4048,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    _panelExpanded = YES;
     CGRect frame = _panelWindow.frame;
+    if (!_panelExpanded) {
+        [self rememberCollapsedPanelFrame:frame];
+    }
+    _panelExpanded = YES;
     frame.size = [self expandedPanelSize];
     _panelWindow.frame = [self clampedPanelFrame:frame];
     _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
@@ -4160,6 +4327,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_globalNetworkFalseField) {
         [fields addObject:_globalNetworkFalseField];
     }
+    if (_configNameField) {
+        [fields addObject:_configNameField];
+    }
     for (UITextField *field in fields) {
         UIView *fieldContainer = field.superview ? field.superview : _panelView;
         CGPoint fieldPoint = [recognizer locationInView:fieldContainer];
@@ -4180,6 +4350,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     frame.origin.x += translation.x;
     frame.origin.y += translation.y;
     _panelWindow.frame = _panelExpanded ? [self clampedPanelFrame:frame] : [self clampedFloatingFrame:frame];
+    if (!_panelExpanded) {
+        [self rememberCollapsedPanelFrame:_panelWindow.frame];
+    }
     [recognizer setTranslation:CGPointZero inView:_panelWindow];
 
     if (recognizer.state == UIGestureRecognizerStateEnded ||
