@@ -3809,6 +3809,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)showSavedConfigListForDeleting:(BOOL)deleting {
+    [self showSavedConfigListForDeleting:deleting configsOverride:nil];
+}
+
+- (void)showSavedConfigListForDeleting:(BOOL)deleting configsOverride:(NSArray *)configsOverride {
     if (!_functionMenuView) {
         [self showFunctionMenu];
     }
@@ -3839,7 +3843,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _configListView.backgroundColor = UIColor.clearColor;
     [_functionMenuView addSubview:_configListView];
 
-    NSArray *configs = [self savedTaskConfigs];
+    NSArray *configs = configsOverride ?: [self savedTaskConfigs];
     if (configs.count == 0) {
         UILabel *empty = [[UILabel alloc] initWithFrame:CGRectMake(10, 30, _configListView.bounds.size.width - 20, 60)];
         empty.text = @"暂无已保存配置";
@@ -3945,7 +3949,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self writeSavedTaskConfigs:configs];
     _statusLabel.text = @"配置已删除";
     [self hideConfigPrompt];
-    [self showSavedConfigListForDeleting:YES];
+    [self showSavedConfigListForDeleting:YES configsOverride:configs];
 }
 
 - (void)resetEditorActionState {
