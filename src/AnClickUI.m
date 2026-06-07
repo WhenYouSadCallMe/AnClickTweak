@@ -1122,7 +1122,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _taskItems = [self savedCurrentTaskList];
     }
 
-    _panelWindow = [[UIWindow alloc] initWithFrame:CGRectMake(8, 118, panelWidth, panelHeight)];
+    _panelWindow = [[UIWindow alloc] initWithFrame:[self defaultCollapsedPanelFrame]];
     [self attachPanelWindowToActiveSceneIfNeeded];
     _panelWindow.windowLevel = UIWindowLevelAlert + 1000;
     _panelWindow.backgroundColor = UIColor.clearColor;
@@ -1135,10 +1135,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     _collapsedButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _collapsedButton.frame = CGRectMake(0, 0, 48, 48);
-    _collapsedButton.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.92];
-    _collapsedButton.layer.cornerRadius = 6;
-    _collapsedButton.layer.borderWidth = 1;
-    _collapsedButton.layer.borderColor = [[self themeHighlightColor] colorWithAlphaComponent:0.82].CGColor;
+    _collapsedButton.backgroundColor = [UIColor colorWithRed:0.03 green:0.78 blue:0.28 alpha:0.98];
+    _collapsedButton.layer.cornerRadius = 24;
+    _collapsedButton.layer.borderWidth = 2;
+    _collapsedButton.layer.borderColor = [UIColor colorWithRed:0.82 green:1.0 blue:0.28 alpha:0.95].CGColor;
+    _collapsedButton.layer.shadowColor = [UIColor colorWithRed:0.08 green:0.95 blue:0.34 alpha:1.0].CGColor;
+    _collapsedButton.layer.shadowOpacity = 0.58;
+    _collapsedButton.layer.shadowRadius = 10.0;
+    _collapsedButton.layer.shadowOffset = CGSizeZero;
     _collapsedButton.titleLabel.font = [UIFont systemFontOfSize:19 weight:UIFontWeightBold];
     [_collapsedButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     [_collapsedButton addTarget:self action:@selector(handleCollapsedTap) forControlEvents:UIControlEventTouchUpInside];
@@ -2155,6 +2159,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return frame;
 }
 
+- (CGRect)defaultCollapsedPanelFrame {
+    CGRect bounds = [self currentScreenBounds];
+    UIEdgeInsets safeInsets = [self panelSafeAreaInsets];
+    CGSize size = CGSizeMake(48.0, 48.0);
+    CGFloat x = bounds.size.width - size.width - MAX(12.0, safeInsets.right + 12.0);
+    CGFloat y = MAX(118.0, safeInsets.top + 36.0);
+    return [self clampedFloatingFrame:CGRectMake(x, y, size.width, size.height)];
+}
+
 - (UIEdgeInsets)panelSafeAreaInsets {
     UIEdgeInsets insets = UIEdgeInsetsZero;
     CGSize screenSize = [self currentScreenBounds].size;
@@ -2399,20 +2412,41 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)refreshCollapsedButtonTitle {
     if ([AnClickRecorder shared].isRecording) {
-        _collapsedButton.backgroundColor = [UIColor colorWithRed:0.84 green:0.12 blue:0.10 alpha:0.94];
-        _collapsedButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.34 blue:0.30 alpha:0.90].CGColor;
+        _collapsedButton.layer.cornerRadius = CGRectGetWidth(_collapsedButton.bounds) * 0.5;
+        _collapsedButton.layer.borderWidth = 2.0;
+        _collapsedButton.backgroundColor = [UIColor colorWithRed:0.92 green:0.05 blue:0.08 alpha:0.98];
+        _collapsedButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.64 blue:0.48 alpha:0.95].CGColor;
+        _collapsedButton.layer.shadowColor = [UIColor colorWithRed:1.0 green:0.12 blue:0.08 alpha:1.0].CGColor;
+        _collapsedButton.layer.shadowOpacity = 0.62;
+        _collapsedButton.layer.shadowRadius = 10.0;
+        _collapsedButton.layer.shadowOffset = CGSizeZero;
         [self setCenteredIconForButton:_collapsedButton systemName:@"stop.fill" fallbackTitle:@"■" fontSize:20];
+        [self updateButtonShadowPath:_collapsedButton];
         return;
     }
     if (_taskRunActive) {
-        _collapsedButton.backgroundColor = [UIColor colorWithRed:0.84 green:0.12 blue:0.10 alpha:0.94];
-        _collapsedButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.34 blue:0.30 alpha:0.90].CGColor;
+        _collapsedButton.layer.cornerRadius = CGRectGetWidth(_collapsedButton.bounds) * 0.5;
+        _collapsedButton.layer.borderWidth = 2.0;
+        _collapsedButton.backgroundColor = [UIColor colorWithRed:0.92 green:0.05 blue:0.08 alpha:0.98];
+        _collapsedButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.64 blue:0.48 alpha:0.95].CGColor;
+        _collapsedButton.layer.shadowColor = [UIColor colorWithRed:1.0 green:0.12 blue:0.08 alpha:1.0].CGColor;
+        _collapsedButton.layer.shadowOpacity = 0.62;
+        _collapsedButton.layer.shadowRadius = 10.0;
+        _collapsedButton.layer.shadowOffset = CGSizeZero;
         [self setCenteredIconForButton:_collapsedButton systemName:@"stop.fill" fallbackTitle:@"■" fontSize:20];
+        [self updateButtonShadowPath:_collapsedButton];
         return;
     }
-    _collapsedButton.backgroundColor = [UIColor colorWithRed:0.05 green:0.42 blue:0.88 alpha:0.95];
-    _collapsedButton.layer.borderColor = [UIColor colorWithRed:0.42 green:0.82 blue:1.0 alpha:0.90].CGColor;
+    _collapsedButton.layer.cornerRadius = CGRectGetWidth(_collapsedButton.bounds) * 0.5;
+    _collapsedButton.layer.borderWidth = 2.0;
+    _collapsedButton.backgroundColor = [UIColor colorWithRed:0.03 green:0.78 blue:0.28 alpha:0.98];
+    _collapsedButton.layer.borderColor = [UIColor colorWithRed:0.82 green:1.0 blue:0.28 alpha:0.95].CGColor;
+    _collapsedButton.layer.shadowColor = [UIColor colorWithRed:0.08 green:0.95 blue:0.34 alpha:1.0].CGColor;
+    _collapsedButton.layer.shadowOpacity = 0.58;
+    _collapsedButton.layer.shadowRadius = 10.0;
+    _collapsedButton.layer.shadowOffset = CGSizeZero;
     [self setCenteredIconForButton:_collapsedButton systemName:@"play.circle.fill" fallbackTitle:@"▶" fontSize:25];
+    [self updateButtonShadowPath:_collapsedButton];
 }
 
 - (void)setTaskEditorVisible:(BOOL)visible {
