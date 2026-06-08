@@ -186,6 +186,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_networkMethodButton;
     UIButton *_networkRetryModeButton;
     UIButton *_recognitionRetryModeButton;
+    UIButton *_recognitionRetryCountOptionButton;
+    UIButton *_recognitionRetryUntilFoundOptionButton;
     UIButton *_networkPostCustomButton;
     UIButton *_networkPostOCRResultButton;
     UIButton *_networkPostAddPairButton;
@@ -223,6 +225,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UITextField *_networkFalseField;
     UITextField *_networkPostBodyField;
     UIView *_captureOverlay;
+    UIView *_recognitionRetryDropdownView;
     UIScrollView *_captureScrollView;
     UIImageView *_captureImageView;
     UIView *_selectionView;
@@ -325,6 +328,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _networkPostBodyUsesOCRResult;
     BOOL _networkRetryForever;
     BOOL _recognitionRetryUntilFound;
+    BOOL _recognitionRetryDropdownVisible;
     BOOL _globalTimePickerEditingStartTime;
     BOOL _taskRunActive;
     BOOL _taskRunPausedForForeground;
@@ -1150,6 +1154,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkRetryForever = YES;
     _networkTimeout = 8.0;
     _recognitionRetryUntilFound = NO;
+    _recognitionRetryDropdownVisible = NO;
     _recognitionRetryInterval = 1.0;
     _globalStartHour = 8;
     _globalStartMinute = 0;
@@ -1370,6 +1375,26 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _recognitionRetryModeButton = [self panelButtonWithTitle:@"执行次数" action:@selector(toggleRecognitionRetryMode)];
     _recognitionRetryModeButton.frame = CGRectMake(gap, 234, buttonWidth, 32);
     [_panelView addSubview:_recognitionRetryModeButton];
+
+    _recognitionRetryDropdownView = [[UIView alloc] initWithFrame:CGRectZero];
+    _recognitionRetryDropdownView.hidden = YES;
+    _recognitionRetryDropdownView.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.98];
+    _recognitionRetryDropdownView.layer.cornerRadius = 8;
+    _recognitionRetryDropdownView.layer.borderWidth = 1.0;
+    _recognitionRetryDropdownView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
+    _recognitionRetryDropdownView.layer.shadowColor = UIColor.blackColor.CGColor;
+    _recognitionRetryDropdownView.layer.shadowOffset = CGSizeMake(0, 6);
+    _recognitionRetryDropdownView.layer.shadowRadius = 10.0;
+    _recognitionRetryDropdownView.layer.shadowOpacity = 0.34;
+    [_panelView addSubview:_recognitionRetryDropdownView];
+
+    _recognitionRetryCountOptionButton = [self panelButtonWithTitle:@"执行次数" action:@selector(selectRecognitionRetryModeOption:)];
+    _recognitionRetryCountOptionButton.tag = 0;
+    [_recognitionRetryDropdownView addSubview:_recognitionRetryCountOptionButton];
+
+    _recognitionRetryUntilFoundOptionButton = [self panelButtonWithTitle:@"识别到为止" action:@selector(selectRecognitionRetryModeOption:)];
+    _recognitionRetryUntilFoundOptionButton.tag = 1;
+    [_recognitionRetryDropdownView addSubview:_recognitionRetryUntilFoundOptionButton];
 
     _previewActionButton = [self panelButtonWithTitle:@"预览" action:@selector(previewCurrentAction)];
     _previewActionButton.frame = CGRectMake(gap, 234, buttonWidth, 32);
@@ -3031,6 +3056,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkMethodButton.hidden = YES;
     _networkRetryModeButton.hidden = YES;
     _recognitionRetryModeButton.hidden = YES;
+    _recognitionRetryDropdownView.hidden = YES;
     _networkPostCustomButton.hidden = YES;
     _networkPostOCRResultButton.hidden = YES;
     _networkPostAddPairButton.hidden = YES;
@@ -3054,6 +3080,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _editorContentScrollView.hidden = !visible;
     if (!visible) {
         _editorContentScrollView.contentOffset = CGPointZero;
+        _recognitionRetryDropdownVisible = NO;
     }
 
     _addTaskButton.hidden = visible;
@@ -3101,6 +3128,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _networkMethodButton,
         _networkRetryModeButton,
         _recognitionRetryModeButton,
+        _recognitionRetryDropdownView,
         _networkPostCustomButton,
         _networkPostOCRResultButton,
         _networkPostAddPairButton,
@@ -4516,6 +4544,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkPostBodyUsesOCRResult = NO;
     _networkRetryForever = YES;
     _networkTimeout = 8.0;
+    _recognitionRetryUntilFound = NO;
+    _recognitionRetryDropdownVisible = NO;
+    _recognitionRetryInterval = 1.0;
     _hasTargetColor = NO;
     _targetColorSamples = [NSMutableArray array];
     _pendingColorPickSamples = [NSMutableArray array];
@@ -4970,7 +5001,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)recognitionRetryModeTitle {
-    return _recognitionRetryUntilFound ? @"当前：识别到为止" : @"当前：执行次数";
+    return _recognitionRetryUntilFound ? @"当前：识别到为止 ▾" : @"当前：执行次数 ▾";
 }
 
 - (NSString *)recognitionRetryStatusSummary {
@@ -5071,7 +5102,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _recognitionIntervalField.text = [self recognitionRetryIntervalFieldText];
     }
     [_recognitionRetryModeButton setTitle:[self recognitionRetryModeTitle] forState:UIControlStateNormal];
-    [self configureRecognitionRetryModeMenuIfAvailable];
     if (!_thresholdField.isFirstResponder) {
         _thresholdField.text = [self thresholdFieldText];
     }
@@ -5149,38 +5179,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     [self syncActionTimingFromFields];
     _recognitionRetryUntilFound = untilFound;
+    _recognitionRetryDropdownVisible = NO;
     [self autosaveSelectedTaskIfPossible];
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
 }
 
 - (void)toggleRecognitionRetryMode {
-    [self setRecognitionRetryUntilFound:!_recognitionRetryUntilFound];
-}
-
-- (void)configureRecognitionRetryModeMenuIfAvailable {
-    if (!_recognitionRetryModeButton) {
+    if (![self currentActionIsRecognitionMode]) {
         return;
     }
-    if (@available(iOS 14.0, *)) {
-        __weak typeof(self) weakSelf = self;
-        UIAction *countAction = [UIAction actionWithTitle:@"执行次数"
-                                                    image:nil
-                                               identifier:nil
-                                                  handler:^(__unused UIAction *action) {
-            [weakSelf setRecognitionRetryUntilFound:NO];
-        }];
-        countAction.state = _recognitionRetryUntilFound ? UIMenuElementStateOff : UIMenuElementStateOn;
-        UIAction *untilFoundAction = [UIAction actionWithTitle:@"识别到为止"
-                                                         image:nil
-                                                    identifier:nil
-                                                       handler:^(__unused UIAction *action) {
-            [weakSelf setRecognitionRetryUntilFound:YES];
-        }];
-        untilFoundAction.state = _recognitionRetryUntilFound ? UIMenuElementStateOn : UIMenuElementStateOff;
-        _recognitionRetryModeButton.menu = [UIMenu menuWithTitle:@"识别策略" children:@[countAction, untilFoundAction]];
-        _recognitionRetryModeButton.showsMenuAsPrimaryAction = YES;
-    }
+    [self syncActionTimingFromFields];
+    _recognitionRetryDropdownVisible = !_recognitionRetryDropdownVisible;
+    [self refreshEditorConfigControls];
+}
+
+- (void)selectRecognitionRetryModeOption:(UIButton *)sender {
+    [self setRecognitionRetryUntilFound:sender.tag == 1];
 }
 
 - (void)toggleNetworkMethod {
@@ -5820,8 +5835,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _recognitionRetryModeButton.hidden = NO;
     _recognitionRetryModeButton.frame = CGRectMake(side, y + 22.0, modeWidth, 38);
     [self styleSegmentButton:_recognitionRetryModeButton selected:_recognitionRetryUntilFound];
-    [self configureRecognitionRetryModeMenuIfAvailable];
     [self updateButtonShadowPath:_recognitionRetryModeButton];
+
+    BOOL showDropdown = _recognitionRetryDropdownVisible && [self currentActionIsRecognitionMode];
+    _recognitionRetryDropdownView.hidden = !showDropdown;
+    if (showDropdown) {
+        CGFloat dropdownY = y + 64.0;
+        CGFloat dropdownHeight = 86.0;
+        _recognitionRetryDropdownView.frame = CGRectMake(side, dropdownY, modeWidth, dropdownHeight);
+        _recognitionRetryDropdownView.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:_recognitionRetryDropdownView.bounds cornerRadius:8].CGPath;
+
+        CGFloat inset = 7.0;
+        CGFloat optionHeight = 32.0;
+        CGFloat optionWidth = modeWidth - inset * 2.0;
+        _recognitionRetryCountOptionButton.hidden = NO;
+        _recognitionRetryUntilFoundOptionButton.hidden = NO;
+        _recognitionRetryCountOptionButton.frame = CGRectMake(inset, inset, optionWidth, optionHeight);
+        _recognitionRetryUntilFoundOptionButton.frame = CGRectMake(inset, inset + optionHeight + 8.0, optionWidth, optionHeight);
+        [self styleSegmentButton:_recognitionRetryCountOptionButton selected:!_recognitionRetryUntilFound];
+        [self styleSegmentButton:_recognitionRetryUntilFoundOptionButton selected:_recognitionRetryUntilFound];
+        [self updateButtonShadowPath:_recognitionRetryCountOptionButton];
+        [self updateButtonShadowPath:_recognitionRetryUntilFoundOptionButton];
+    }
 
     _recognitionIntervalCaptionLabel.hidden = !showInterval;
     _recognitionIntervalField.hidden = !showInterval;
@@ -5831,7 +5866,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _recognitionIntervalCaptionLabel.frame = CGRectMake(intervalX, y, intervalWidth, 20);
         _recognitionIntervalField.frame = CGRectMake(intervalX, y + 22.0, intervalWidth, 38);
     }
-    return y + 66.0;
+    return y + (showDropdown ? 154.0 : 66.0);
 }
 
 - (void)layoutImageFieldsAtY:(CGFloat)y {
@@ -8517,6 +8552,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)loadRecognitionRetryConfigFromTask:(NSDictionary *)task {
     _recognitionRetryUntilFound = [self recognitionRetryUntilFoundForTask:task];
+    _recognitionRetryDropdownVisible = NO;
     _recognitionRetryInterval = [self recognitionRetryIntervalForTask:task];
 }
 
