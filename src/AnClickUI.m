@@ -185,6 +185,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_networkRequestModeButton;
     UIButton *_networkMethodButton;
     UIButton *_networkRetryModeButton;
+    UIButton *_recognitionRetryModeButton;
     UIButton *_networkPostCustomButton;
     UIButton *_networkPostOCRResultButton;
     UIButton *_networkPostAddPairButton;
@@ -209,9 +210,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UILabel *_thresholdCaptionLabel;
     UILabel *_delayCaptionLabel;
     UILabel *_repeatCaptionLabel;
+    UILabel *_recognitionRetryModeCaptionLabel;
+    UILabel *_recognitionIntervalCaptionLabel;
     UITextField *_descriptionField;
     UITextField *_delayField;
     UITextField *_repeatField;
+    UITextField *_recognitionIntervalField;
     UITextField *_thresholdField;
     UITextField *_ocrTargetField;
     UITextField *_networkURLField;
@@ -320,6 +324,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _networkUsesPost;
     BOOL _networkPostBodyUsesOCRResult;
     BOOL _networkRetryForever;
+    BOOL _recognitionRetryUntilFound;
     BOOL _globalTimePickerEditingStartTime;
     BOOL _taskRunActive;
     BOOL _taskRunPausedForForeground;
@@ -373,6 +378,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _hasRecordedMacroScreenSize;
     NSInteger _selectedColorPickSampleIndex;
     NSTimeInterval _networkTimeout;
+    NSTimeInterval _recognitionRetryInterval;
     double _colorTolerance;
     NSTimer *_globalStartTimer;
     NSTimer *_globalStopTimer;
@@ -1143,6 +1149,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkPostBodyUsesOCRResult = NO;
     _networkRetryForever = YES;
     _networkTimeout = 8.0;
+    _recognitionRetryUntilFound = NO;
+    _recognitionRetryInterval = 1.0;
     _globalStartHour = 8;
     _globalStartMinute = 0;
     _globalStartSecond = 0;
@@ -1359,6 +1367,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkRetryModeButton.frame = CGRectMake(gap, 234, buttonWidth, 32);
     [_panelView addSubview:_networkRetryModeButton];
 
+    _recognitionRetryModeButton = [self panelButtonWithTitle:@"执行次数" action:@selector(toggleRecognitionRetryMode)];
+    _recognitionRetryModeButton.frame = CGRectMake(gap, 234, buttonWidth, 32);
+    [_panelView addSubview:_recognitionRetryModeButton];
+
     _previewActionButton = [self panelButtonWithTitle:@"预览" action:@selector(previewCurrentAction)];
     _previewActionButton.frame = CGRectMake(gap, 234, buttonWidth, 32);
     [_panelView addSubview:_previewActionButton];
@@ -1431,6 +1443,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_panelView addSubview:_delayCaptionLabel];
     _repeatCaptionLabel = [self configCaptionLabelWithText:@"执行次数（次数）"];
     [_panelView addSubview:_repeatCaptionLabel];
+    _recognitionRetryModeCaptionLabel = [self configCaptionLabelWithText:@"识别策略"];
+    [_panelView addSubview:_recognitionRetryModeCaptionLabel];
+    _recognitionIntervalCaptionLabel = [self configCaptionLabelWithText:@"循环间隔（秒）"];
+    [_panelView addSubview:_recognitionIntervalCaptionLabel];
 
     _descriptionField = [[UITextField alloc] initWithFrame:CGRectMake(8, 142, panelWidth - 16, 34)];
     _descriptionField.placeholder = @"备注/动作说明";
@@ -1450,6 +1466,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_repeatField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
     [_repeatField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_repeatField];
+
+    _recognitionIntervalField = [self configTextFieldWithPlaceholder:@"1.0"];
+    _recognitionIntervalField.keyboardType = UIKeyboardTypeDecimalPad;
+    [_recognitionIntervalField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
+    [_recognitionIntervalField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+    [_panelView addSubview:_recognitionIntervalField];
 
     _thresholdField = [self configTextFieldWithPlaceholder:@"0.80"];
     _thresholdField.keyboardType = UIKeyboardTypeDecimalPad;
@@ -2989,6 +3011,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _thresholdCaptionLabel.hidden = YES;
     _delayCaptionLabel.hidden = YES;
     _repeatCaptionLabel.hidden = YES;
+    _recognitionRetryModeCaptionLabel.hidden = YES;
+    _recognitionIntervalCaptionLabel.hidden = YES;
     _captureButton.hidden = YES;
     _playButton.hidden = YES;
     _pickPointButton.hidden = YES;
@@ -3006,6 +3030,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkRequestModeButton.hidden = YES;
     _networkMethodButton.hidden = YES;
     _networkRetryModeButton.hidden = YES;
+    _recognitionRetryModeButton.hidden = YES;
     _networkPostCustomButton.hidden = YES;
     _networkPostOCRResultButton.hidden = YES;
     _networkPostAddPairButton.hidden = YES;
@@ -3017,6 +3042,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _thresholdField.hidden = YES;
     _delayField.hidden = YES;
     _repeatField.hidden = YES;
+    _recognitionIntervalField.hidden = YES;
     _ocrTargetField.hidden = YES;
     _networkURLField.hidden = YES;
     _networkContainsField.hidden = YES;
@@ -3058,6 +3084,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _thresholdCaptionLabel,
         _delayCaptionLabel,
         _repeatCaptionLabel,
+        _recognitionRetryModeCaptionLabel,
+        _recognitionIntervalCaptionLabel,
         _captureButton,
         _playButton,
         _pickPointButton,
@@ -3072,6 +3100,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _networkRequestModeButton,
         _networkMethodButton,
         _networkRetryModeButton,
+        _recognitionRetryModeButton,
         _networkPostCustomButton,
         _networkPostOCRResultButton,
         _networkPostAddPairButton,
@@ -3081,6 +3110,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _macroPlayButton,
         _delayField,
         _repeatField,
+        _recognitionIntervalField,
         _thresholdField,
         _ocrTargetField,
         _networkURLField,
@@ -4934,6 +4964,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [NSString stringWithFormat:@"%ld", (long)MAX(1, _actionRepeatCount)];
 }
 
+- (NSString *)recognitionRetryIntervalFieldText {
+    NSTimeInterval interval = MIN(30.0, MAX(0.2, _recognitionRetryInterval));
+    return [NSString stringWithFormat:@"%.1f", interval];
+}
+
+- (NSString *)recognitionRetryModeTitle {
+    return _recognitionRetryUntilFound ? @"当前：识别到为止" : @"当前：执行次数";
+}
+
+- (NSString *)recognitionRetryStatusSummary {
+    return _recognitionRetryUntilFound
+        ? [NSString stringWithFormat:@" 识别到为止 间%.1fs", MIN(30.0, MAX(0.2, _recognitionRetryInterval))]
+        : [NSString stringWithFormat:@" 次%ld", (long)MAX(1, _actionRepeatCount)];
+}
+
 - (NSString *)thresholdFieldText {
     if (_actionMode == AnClickActionModeNetwork) {
         return [NSString stringWithFormat:@"%.0f", MAX(1.0, _networkTimeout)];
@@ -4957,6 +5002,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _actionRepeatCount = MIN(99, MAX(1, repeatText.integerValue));
     } else {
         _actionRepeatCount = 1;
+    }
+    NSString *recognitionIntervalText = [_recognitionIntervalField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (recognitionIntervalText.length > 0) {
+        _recognitionRetryInterval = MIN(30.0, MAX(0.2, recognitionIntervalText.doubleValue));
+        _recognitionRetryInterval = round(_recognitionRetryInterval * 10.0) / 10.0;
+    } else {
+        _recognitionRetryInterval = 1.0;
     }
 }
 
@@ -5015,6 +5067,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (!_repeatField.isFirstResponder) {
         _repeatField.text = [self repeatFieldText];
     }
+    if (!_recognitionIntervalField.isFirstResponder) {
+        _recognitionIntervalField.text = [self recognitionRetryIntervalFieldText];
+    }
+    [_recognitionRetryModeButton setTitle:[self recognitionRetryModeTitle] forState:UIControlStateNormal];
+    [self configureRecognitionRetryModeMenuIfAvailable];
     if (!_thresholdField.isFirstResponder) {
         _thresholdField.text = [self thresholdFieldText];
     }
@@ -5078,6 +5135,52 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self autosaveSelectedTaskIfPossible];
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
+}
+
+- (BOOL)currentActionIsRecognitionMode {
+    return _actionMode == AnClickActionModeImage ||
+        _actionMode == AnClickActionModeOCR ||
+        _actionMode == AnClickActionModeColor;
+}
+
+- (void)setRecognitionRetryUntilFound:(BOOL)untilFound {
+    if (![self currentActionIsRecognitionMode]) {
+        return;
+    }
+    [self syncActionTimingFromFields];
+    _recognitionRetryUntilFound = untilFound;
+    [self autosaveSelectedTaskIfPossible];
+    [self refreshEditorConfigControls];
+    [self updateStatusForCurrentConfig];
+}
+
+- (void)toggleRecognitionRetryMode {
+    [self setRecognitionRetryUntilFound:!_recognitionRetryUntilFound];
+}
+
+- (void)configureRecognitionRetryModeMenuIfAvailable {
+    if (!_recognitionRetryModeButton) {
+        return;
+    }
+    if (@available(iOS 14.0, *)) {
+        __weak typeof(self) weakSelf = self;
+        UIAction *countAction = [UIAction actionWithTitle:@"执行次数"
+                                                    image:nil
+                                               identifier:nil
+                                                  handler:^(__unused UIAction *action) {
+            [weakSelf setRecognitionRetryUntilFound:NO];
+        }];
+        countAction.state = _recognitionRetryUntilFound ? UIMenuElementStateOff : UIMenuElementStateOn;
+        UIAction *untilFoundAction = [UIAction actionWithTitle:@"识别到为止"
+                                                         image:nil
+                                                    identifier:nil
+                                                       handler:^(__unused UIAction *action) {
+            [weakSelf setRecognitionRetryUntilFound:YES];
+        }];
+        untilFoundAction.state = _recognitionRetryUntilFound ? UIMenuElementStateOn : UIMenuElementStateOff;
+        _recognitionRetryModeButton.menu = [UIMenu menuWithTitle:@"识别策略" children:@[countAction, untilFoundAction]];
+        _recognitionRetryModeButton.showsMenuAsPrimaryAction = YES;
+    }
 }
 
 - (void)toggleNetworkMethod {
@@ -5225,6 +5328,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _macroPlayButton.hidden = YES;
     _delayField.hidden = YES;
     _repeatField.hidden = YES;
+    _recognitionIntervalField.hidden = YES;
     _thresholdField.hidden = YES;
     _ocrTargetField.hidden = YES;
     _networkURLField.hidden = YES;
@@ -5700,6 +5804,36 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _repeatField.frame = CGRectMake(side + fieldWidth + gap, y + 22.0, fieldWidth, 40);
 }
 
+- (CGFloat)layoutRecognitionRetryControlsAtY:(CGFloat)y {
+    CGFloat side = 18.0;
+    CGFloat width = _panelView.bounds.size.width;
+    CGFloat contentWidth = width - side * 2.0;
+    CGFloat gap = 12.0;
+    BOOL showInterval = _recognitionRetryUntilFound;
+    CGFloat modeWidth = showInterval ? floor((contentWidth - gap) * 0.58) : contentWidth;
+    CGFloat intervalWidth = contentWidth - modeWidth - gap;
+
+    _recognitionRetryModeCaptionLabel.text = @"识别策略";
+    _recognitionRetryModeCaptionLabel.hidden = NO;
+    _recognitionRetryModeCaptionLabel.frame = CGRectMake(side, y, modeWidth, 20);
+    [_recognitionRetryModeButton setTitle:[self recognitionRetryModeTitle] forState:UIControlStateNormal];
+    _recognitionRetryModeButton.hidden = NO;
+    _recognitionRetryModeButton.frame = CGRectMake(side, y + 22.0, modeWidth, 38);
+    [self styleSegmentButton:_recognitionRetryModeButton selected:_recognitionRetryUntilFound];
+    [self configureRecognitionRetryModeMenuIfAvailable];
+    [self updateButtonShadowPath:_recognitionRetryModeButton];
+
+    _recognitionIntervalCaptionLabel.hidden = !showInterval;
+    _recognitionIntervalField.hidden = !showInterval;
+    if (showInterval) {
+        CGFloat intervalX = side + modeWidth + gap;
+        _recognitionIntervalCaptionLabel.text = @"循环间隔秒";
+        _recognitionIntervalCaptionLabel.frame = CGRectMake(intervalX, y, intervalWidth, 20);
+        _recognitionIntervalField.frame = CGRectMake(intervalX, y + 22.0, intervalWidth, 38);
+    }
+    return y + 66.0;
+}
+
 - (void)layoutImageFieldsAtY:(CGFloat)y {
     CGFloat side = 18.0;
     CGFloat width = _panelView.bounds.size.width;
@@ -5718,6 +5852,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         field.hidden = NO;
         field.frame = CGRectMake(x, y + 22.0, fieldWidth, 38);
     }
+    [self layoutRecognitionRetryControlsAtY:y + 68.0];
 }
 
 - (void)layoutColorFieldsAtY:(CGFloat)y {
@@ -5738,6 +5873,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         field.hidden = NO;
         field.frame = CGRectMake(x, y + 22.0, fieldWidth, 38);
     }
+    [self layoutRecognitionRetryControlsAtY:y + 68.0];
 }
 
 - (void)layoutNetworkFieldsAtY:(CGFloat)y {
@@ -5916,6 +6052,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             fieldsY = [self layoutRecognitionNetworkFieldsAtY:fieldsY side:side width:contentWidth];
         }
         [self layoutDoubleTimingFieldsAtY:fieldsY];
+        [self layoutRecognitionRetryControlsAtY:fieldsY + 70.0];
     } else if (_actionMode == AnClickActionModeColor) {
         _saveTaskButton.enabled = YES;
         _saveTaskButton.alpha = 1.0;
@@ -6098,12 +6235,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (!_imageUsesMatchPoint && [self hasManualPointForMode:AnClickActionModeImage]) {
             targetState = @"已取点击点";
         }
-        _statusLabel.text = [NSString stringWithFormat:@"识图 %@ %@ 后%@",
+        _statusLabel.text = [NSString stringWithFormat:@"识图 %@ %@ 后%@%@",
                              templateState,
                              targetState,
                              _imageActionMode == AnClickActionModeNetwork
                                 ? [NSString stringWithFormat:@"%@网络", [self normalizedNetworkMethodFromPostFlag:_networkUsesPost]]
-                                : [self actionNameForMode:_imageActionMode]];
+                                : [self actionNameForMode:_imageActionMode],
+                             [self recognitionRetryStatusSummary]];
         return;
     }
 
@@ -6121,24 +6259,26 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (_networkUsesPost && _networkPostBodyUsesOCRResult) {
             networkActionName = @"POST键值";
         }
-        _statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ %@ 后%@",
+        _statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ %@ 后%@%@",
                              [self ocrMatchModeTitleForMode:matchMode],
                              targetState,
                              pointState,
                              _imageActionMode == AnClickActionModeNetwork
                                 ? [NSString stringWithFormat:@"%@网络", networkActionName]
-                                : [self actionNameForMode:_imageActionMode]];
+                                : [self actionNameForMode:_imageActionMode],
+                             [self recognitionRetryStatusSummary]];
         return;
     }
 
     if (_actionMode == AnClickActionModeColor) {
         NSString *targetState = [self targetColorShortDescription];
-        _statusLabel.text = [NSString stringWithFormat:@"识色 %@ 容差%.0f 后%@",
+        _statusLabel.text = [NSString stringWithFormat:@"识色 %@ 容差%.0f 后%@%@",
                              targetState,
                              _colorTolerance,
                              _imageActionMode == AnClickActionModeNetwork
                                 ? [NSString stringWithFormat:@"%@网络", [self normalizedNetworkMethodFromPostFlag:_networkUsesPost]]
-                                : [self actionNameForMode:_imageActionMode]];
+                                : [self actionNameForMode:_imageActionMode],
+                             [self recognitionRetryStatusSummary]];
         return;
     }
 
@@ -7519,6 +7659,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         task[@"useMatchPoint"] = @(_imageUsesMatchPoint);
         task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
         task[@"threshold"] = @(_matchThreshold);
+        [self storeRecognitionRetryConfigInTask:task];
         if (_imageActionMode == AnClickActionModeNetwork && ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
             return nil;
         }
@@ -7554,6 +7695,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         task[@"ocrMatchMode"] = @(matchMode);
         task[@"useMatchPoint"] = @(_ocrUsesMatchPoint);
         task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
+        [self storeRecognitionRetryConfigInTask:task];
         if (_imageActionMode == AnClickActionModeNetwork && ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
             return nil;
         }
@@ -7585,6 +7727,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         task[@"colorPointScreenSize"] = [self currentScreenCoordinateSizeValue];
         task[@"colorTolerance"] = @(_colorTolerance);
         task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
+        [self storeRecognitionRetryConfigInTask:task];
         if (_imageActionMode == AnClickActionModeNetwork && ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
             return nil;
         }
@@ -7647,6 +7790,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSString *)commonSuffixForTask:(NSDictionary *)task {
     NSTimeInterval delay = [task[@"delay"] doubleValue];
+    if ([self recognitionRetryUntilFoundForTask:task]) {
+        NSString *delayText = delay > 0.001 ? [NSString stringWithFormat:@" 延%.1f", delay] : @"";
+        return [NSString stringWithFormat:@"%@ 识别到为止 间%.1fs", delayText, [self recognitionRetryIntervalForTask:task]];
+    }
     NSInteger repeat = MAX(1, [task[@"repeat"] integerValue]);
     if (delay <= 0.001 && repeat <= 1) {
         return @"";
@@ -7714,6 +7861,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                             : [NSString stringWithFormat:@"判断%ld次", (long)[self networkRetryLimitForTask:task]]];
         }
         subtitle = [subtitle stringByAppendingFormat:@" · 超时%.0fs", [self networkTimeoutForTask:task]];
+    }
+    if (mode != AnClickActionModeNetwork) {
+        NSString *suffix = [self commonSuffixForTask:task];
+        if (suffix.length > 0) {
+            subtitle = [subtitle stringByAppendingString:suffix];
+        }
     }
     return [NSString stringWithFormat:@"任务 %lu - %@\n%@", (unsigned long)index + 1, name, subtitle];
 }
@@ -7950,6 +8103,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (mode == AnClickActionModeNone) {
         _statusLabel.text = @"请选择动作";
     } else if (mode == AnClickActionModeImage) {
+        [self loadRecognitionRetryConfigFromTask:task];
         _currentTemplatePath = task[@"templatePath"];
         NSNumber *useMatchPointNumber = task[@"useMatchPoint"];
         _imageUsesMatchPoint = useMatchPointNumber ? useMatchPointNumber.boolValue : YES;
@@ -7981,6 +8135,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _recordedMacroScreenSize = [self screenCoordinateSizeFromObject:task[@"eventsScreenSize"]];
         _hasRecordedMacroScreenSize = [self screenCoordinateSizeIsValid:_recordedMacroScreenSize];
     } else if (mode == AnClickActionModeOCR) {
+        [self loadRecognitionRetryConfigFromTask:task];
         _ocrTargetText = [self trimmedActionDescription:task[@"ocrText"]];
         _ocrMode = [self ocrModeForTask:task];
         _ocrMatchMode = [self ocrMatchModeForTask:task];
@@ -7997,6 +8152,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [self rememberManualCoordinateScreenSize];
         }
     } else if (mode == AnClickActionModeColor) {
+        [self loadRecognitionRetryConfigFromTask:task];
         NSArray<NSDictionary *> *savedColorPoints = [self mutableColorSamplesArrayFromObject:task[@"colorPoints"]];
         if (savedColorPoints.count > 0) {
             CGSize sourceSize = [self screenCoordinateSizeFromObject:task[@"colorPointScreenSize"]];
@@ -8330,6 +8486,38 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSInteger)repeatCountForTask:(NSDictionary *)task {
     return MAX(1, [task[@"repeat"] integerValue]);
+}
+
+- (BOOL)modeIsRecognitionTask:(AnClickActionMode)mode {
+    return mode == AnClickActionModeImage ||
+        mode == AnClickActionModeOCR ||
+        mode == AnClickActionModeColor;
+}
+
+- (BOOL)recognitionRetryUntilFoundForTask:(NSDictionary *)task {
+    if (![self modeIsRecognitionTask:[self modeForTask:task]]) {
+        return NO;
+    }
+    id value = task[@"recognitionRetryUntilFound"];
+    return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : NO;
+}
+
+- (NSTimeInterval)recognitionRetryIntervalForTask:(NSDictionary *)task {
+    id value = task[@"recognitionRetryInterval"];
+    if ([value respondsToSelector:@selector(doubleValue)]) {
+        return MIN(30.0, MAX(0.2, [value doubleValue]));
+    }
+    return 1.0;
+}
+
+- (void)storeRecognitionRetryConfigInTask:(NSMutableDictionary *)task {
+    task[@"recognitionRetryUntilFound"] = @(_recognitionRetryUntilFound);
+    task[@"recognitionRetryInterval"] = @(MIN(30.0, MAX(0.2, _recognitionRetryInterval)));
+}
+
+- (void)loadRecognitionRetryConfigFromTask:(NSDictionary *)task {
+    _recognitionRetryUntilFound = [self recognitionRetryUntilFoundForTask:task];
+    _recognitionRetryInterval = [self recognitionRetryIntervalForTask:task];
 }
 
 - (NSTimeInterval)networkTimeoutForTask:(NSDictionary *)task {
@@ -8930,7 +9118,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)performRecognitionNetworkTask:(NSDictionary *)task
                               inWindow:(UIWindow *)hostWindow
                             generation:(NSUInteger)runGeneration
-                            completion:(void (^)(void))completion {
+                            completion:(void (^)(BOOL success))completion {
     AnClickActionMode mode = [self modeForTask:task];
     if (mode == AnClickActionModeImage) {
         [self performImageTask:task inWindow:hostWindow runGeneration:runGeneration completion:completion];
@@ -8939,7 +9127,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } else if (mode == AnClickActionModeColor) {
         [self performColorTask:task inWindow:hostWindow runGeneration:runGeneration completion:completion];
     } else if (completion) {
-        completion();
+        completion(NO);
     }
 }
 
@@ -8958,7 +9146,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    [self performRecognitionNetworkTask:task inWindow:hostWindow generation:runGeneration completion:^{
+    [self performRecognitionNetworkTask:task inWindow:hostWindow generation:runGeneration completion:^(__unused BOOL success) {
         if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
             return;
         }
@@ -8992,6 +9180,133 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
         [strongSelf runRecognitionNetworkTask:task atIndex:index inWindow:currentHostWindow generation:runGeneration repeatIndex:0];
     });
+}
+
+- (NSTimeInterval)postRecognitionSuccessDelayForTask:(NSDictionary *)task {
+    AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+    if (actionMode == AnClickActionModeNetwork) {
+        return 0.12;
+    }
+    return [self durationForTaskMode:actionMode] + 0.12;
+}
+
+- (void)scheduleRecognitionTaskAttempt:(NSDictionary *)task
+                               atIndex:(NSUInteger)index
+                              inWindow:(UIWindow *)hostWindow
+                            generation:(NSUInteger)runGeneration
+                               attempt:(NSInteger)attempt
+                                 delay:(NSTimeInterval)delay {
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(0.0, delay) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf ||
+            ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+            return;
+        }
+        UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
+        [strongSelf runRecognitionTaskAttempt:task
+                                      atIndex:index
+                                     inWindow:currentHostWindow
+                                   generation:runGeneration
+                                      attempt:attempt];
+    });
+}
+
+- (void)scheduleTaskContinuationAfterRecognitionTask:(NSDictionary *)task
+                                             atIndex:(NSUInteger)index
+                                            inWindow:(UIWindow *)hostWindow
+                                          generation:(NSUInteger)runGeneration {
+    NSTimeInterval postDelay = [self postRecognitionSuccessDelayForTask:task];
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(postDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf ||
+            ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+            return;
+        }
+        UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
+        [strongSelf continueTaskRunAfterIndex:index inWindow:currentHostWindow generation:runGeneration];
+    });
+}
+
+- (void)runRecognitionTaskAttempt:(NSDictionary *)task
+                           atIndex:(NSUInteger)index
+                          inWindow:(UIWindow *)hostWindow
+                        generation:(NSUInteger)runGeneration
+                           attempt:(NSInteger)attempt {
+    if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+        return;
+    }
+
+    BOOL retryUntilFound = [self recognitionRetryUntilFoundForTask:task];
+    NSInteger repeatCount = [self repeatCountForTask:task];
+    if (!retryUntilFound && attempt > repeatCount) {
+        [self continueTaskRunAfterIndex:index inWindow:hostWindow generation:runGeneration];
+        return;
+    }
+
+    [self performRecognitionNetworkTask:task inWindow:hostWindow generation:runGeneration completion:^(BOOL success) {
+        if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+            return;
+        }
+        UIWindow *currentHostWindow = [self currentUsableHostWindowForTaskRunFallback:hostWindow];
+        if (success) {
+            if (retryUntilFound || attempt >= repeatCount) {
+                [self scheduleTaskContinuationAfterRecognitionTask:task atIndex:index inWindow:currentHostWindow generation:runGeneration];
+                return;
+            }
+            [self scheduleRecognitionTaskAttempt:task
+                                         atIndex:index
+                                        inWindow:currentHostWindow
+                                      generation:runGeneration
+                                         attempt:attempt + 1
+                                           delay:[self postRecognitionSuccessDelayForTask:task]];
+            return;
+        }
+
+        NSString *taskName = [self actionNameForMode:[self modeForTask:task]];
+        if (retryUntilFound) {
+            NSTimeInterval retryInterval = [self recognitionRetryIntervalForTask:task];
+            self->_statusLabel.text = [NSString stringWithFormat:@"%@ 未命中  %.1fs后继续", taskName, retryInterval];
+            [self showToast:self->_statusLabel.text];
+            [self scheduleRecognitionTaskAttempt:task
+                                         atIndex:index
+                                        inWindow:currentHostWindow
+                                      generation:runGeneration
+                                         attempt:attempt + 1
+                                           delay:retryInterval];
+            return;
+        }
+
+        if (attempt >= repeatCount) {
+            [self continueTaskRunAfterIndex:index inWindow:currentHostWindow generation:runGeneration];
+            return;
+        }
+
+        self->_statusLabel.text = [NSString stringWithFormat:@"%@ 重试 %ld/%ld", taskName, (long)attempt, (long)repeatCount];
+        [self showToast:self->_statusLabel.text];
+        [self scheduleRecognitionTaskAttempt:task
+                                     atIndex:index
+                                    inWindow:currentHostWindow
+                                  generation:runGeneration
+                                     attempt:attempt + 1
+                                       delay:0.12];
+    }];
+}
+
+- (void)runRecognitionTask:(NSDictionary *)task
+                   atIndex:(NSUInteger)index
+                  inWindow:(UIWindow *)hostWindow
+                generation:(NSUInteger)runGeneration {
+    if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+        return;
+    }
+    [self scheduleRecognitionTaskAttempt:task
+                                 atIndex:index
+                                inWindow:hostWindow
+                              generation:runGeneration
+                                 attempt:1
+                                   delay:[self delayForTask:task]];
 }
 
 - (void)performPointActionMode:(AnClickActionMode)mode atPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow {
@@ -9065,13 +9380,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)performImageTask:(NSDictionary *)task
                 inWindow:(UIWindow *)hostWindow
            runGeneration:(NSUInteger)runGeneration
-              completion:(void (^)(void))completion {
+              completion:(void (^)(BOOL success))completion {
     NSString *templatePath = task[@"templatePath"];
     UIImage *templateImage = (templatePath.length > 0 && [[NSFileManager defaultManager] fileExistsAtPath:templatePath]) ? [UIImage imageWithContentsOfFile:templatePath] : nil;
     if (!templateImage) {
         _statusLabel.text = @"识图无模板";
         if (completion) {
-            completion();
+            completion(NO);
         }
         return;
     }
@@ -9111,7 +9426,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 strongSelf->_statusLabel.text = @"识图未找到";
                 [strongSelf showToast:@"识图未找到"];
                 if (completion) {
-                    completion();
+                    completion(NO);
                 }
                 return;
             }
@@ -9122,14 +9437,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 strongSelf->_statusLabel.text = @"识图异常";
                 [strongSelf showToast:@"识图异常"];
                 if (completion) {
-                    completion();
+                    completion(NO);
                 }
                 return;
             }
             CGRect rect = rectValue.CGRectValue;
             [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.2];
             if (imageActionMode == AnClickActionModeNetwork) {
-                [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:completion];
+                [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:^{
+                    if (completion) {
+                        completion(YES);
+                    }
+                }];
                 strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f 网络请求",
                                                  scoreNumber.doubleValue];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
@@ -9146,7 +9465,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                              actionPoint.y];
             [strongSelf showToast:strongSelf->_statusLabel.text];
             if (completion) {
-                completion();
+                completion(YES);
             }
         });
     });
@@ -9163,14 +9482,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)performOCRTask:(NSDictionary *)task
               inWindow:(UIWindow *)hostWindow
          runGeneration:(NSUInteger)runGeneration
-            completion:(void (^)(void))completion {
+            completion:(void (^)(BOOL success))completion {
     NSString *targetText = [self trimmedActionDescription:task[@"ocrText"]];
     BOOL useRegex = [self ocrTaskUsesRegexMatching:task];
     if (targetText.length == 0) {
         _statusLabel.text = useRegex ? @"正则表达式未填写" : @"识字未填写";
         [self showToast:_statusLabel.text];
         if (completion) {
-            completion();
+            completion(NO);
         }
         return;
     }
@@ -9180,7 +9499,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _statusLabel.text = @"正则表达式无效";
         [self showToast:_statusLabel.text];
         if (completion) {
-            completion();
+            completion(NO);
         }
         return;
     }
@@ -9190,7 +9509,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (actionMode != AnClickActionModeNetwork && !useMatchPoint && !customPointValue) {
         _statusLabel.text = @"识字未取点";
         if (completion) {
-            completion();
+            completion(NO);
         }
         return;
     }
@@ -9237,7 +9556,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     strongSelf->_statusLabel.text = error;
                     [strongSelf showToast:error];
                     if (completion) {
-                        completion();
+                        completion(NO);
                     }
                     return;
                 }
@@ -9253,13 +9572,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     strongSelf->_statusLabel.text = @"识字未找到";
                     [strongSelf showToast:@"识字未找到"];
                     if (completion) {
-                        completion();
+                        completion(NO);
                     }
                     return;
                 }
                 [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
                 if (actionMode == AnClickActionModeNetwork) {
-                    [strongSelf performRecognitionNetworkActionForTask:task recognitionText:text runGeneration:runGeneration completion:completion];
+                    [strongSelf performRecognitionNetworkActionForTask:task recognitionText:text runGeneration:runGeneration completion:^{
+                        if (completion) {
+                            completion(YES);
+                        }
+                    }];
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ 网络请求", matchSummary, text];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     return;
@@ -9275,7 +9598,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                  actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 if (completion) {
-                    completion();
+                    completion(YES);
                 }
             });
         });
@@ -9293,12 +9616,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)performColorTask:(NSDictionary *)task
                 inWindow:(UIWindow *)hostWindow
            runGeneration:(NSUInteger)runGeneration
-              completion:(void (^)(void))completion {
+              completion:(void (^)(BOOL success))completion {
     NSArray<NSDictionary *> *colorPoints = [self normalizedColorPatternPointsForTask:task];
     if (colorPoints.count == 0) {
         _statusLabel.text = @"识色未取色";
         if (completion) {
-            completion();
+            completion(NO);
         }
         return;
     }
@@ -9334,7 +9657,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 strongSelf->_statusLabel.text = @"颜色未找到";
                 [strongSelf showToast:@"颜色未找到"];
                 if (completion) {
-                    completion();
+                    completion(NO);
                 }
                 return;
             }
@@ -9345,13 +9668,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 strongSelf->_statusLabel.text = @"识色异常";
                 [strongSelf showToast:@"识色异常"];
                 if (completion) {
-                    completion();
+                    completion(NO);
                 }
                 return;
             }
             [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
             if (actionMode == AnClickActionModeNetwork) {
-                [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:completion];
+                [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:^{
+                    if (completion) {
+                        completion(YES);
+                    }
+                }];
                 strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ 网络请求", patternSummary];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 return;
@@ -9364,7 +9691,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                              actionPoint.y];
             [strongSelf showToast:strongSelf->_statusLabel.text];
             if (completion) {
-                completion();
+                completion(YES);
             }
         });
     });
@@ -9742,9 +10069,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    [self showToast:[self toastTextForTask:_taskItems[index] index:index]];
-    if ([self modeForTask:_taskItems[index]] == AnClickActionModeNetwork) {
-        if (![self taskIsComplete:_taskItems[index]]) {
+    NSDictionary *task = _taskItems[index];
+    AnClickActionMode mode = [self modeForTask:task];
+    [self showToast:[self toastTextForTask:task index:index]];
+    if (mode == AnClickActionModeNetwork) {
+        if (![self taskIsComplete:task]) {
             _taskRunActive = NO;
             [self clearTaskRunPauseState];
             [self expandPanel];
@@ -9753,12 +10082,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [self refreshCollapsedButtonTitle];
             return;
         }
-        [self runNetworkTask:_taskItems[index] atIndex:index inWindow:currentHostWindow generation:runGeneration];
+        [self runNetworkTask:task atIndex:index inWindow:currentHostWindow generation:runGeneration];
         return;
     }
 
-    if ([self taskUsesRecognitionNetworkAction:_taskItems[index]]) {
-        if (![self taskIsComplete:_taskItems[index]]) {
+    if ([self modeIsRecognitionTask:mode]) {
+        if (![self taskIsComplete:task]) {
             _taskRunActive = NO;
             [self clearTaskRunPauseState];
             [self expandPanel];
@@ -9767,11 +10096,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [self refreshCollapsedButtonTitle];
             return;
         }
-        [self runRecognitionNetworkTask:_taskItems[index] atIndex:index inWindow:currentHostWindow generation:runGeneration];
+        [self runRecognitionTask:task atIndex:index inWindow:currentHostWindow generation:runGeneration];
         return;
     }
 
-    NSTimeInterval duration = [self performTask:_taskItems[index] inWindow:currentHostWindow runGeneration:runGeneration];
+    NSTimeInterval duration = [self performTask:task inWindow:currentHostWindow runGeneration:runGeneration];
     if (duration <= 0) {
         _taskRunActive = NO;
         [self clearTaskRunPauseState];
