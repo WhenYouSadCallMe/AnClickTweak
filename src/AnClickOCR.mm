@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <Vision/Vision.h>
 #import <ImageIO/ImageIO.h>
+#include <math.h>
 
 @interface AnClickCore : NSObject
 + (UIImage *)captureCurrentWindowImage;
@@ -100,6 +101,38 @@
             return kCGImagePropertyOrientationRightMirrored;
     }
     return kCGImagePropertyOrientationUp;
+}
+
++ (UIImage *)imageByAddingRecognitionEdgePadding:(UIImage *)image contentOffset:(CGPoint *)contentOffset {
+    if (contentOffset) {
+        *contentOffset = CGPointZero;
+    }
+    if (!image.CGImage || image.size.width <= 0.0 || image.size.height <= 0.0) {
+        return image;
+    }
+
+    CGFloat shortestSide = MIN(image.size.width, image.size.height);
+    CGFloat padding = MIN(24.0, MAX(8.0, floor(shortestSide * 0.03)));
+    if (padding <= 0.0) {
+        return image;
+    }
+
+    CGSize paddedSize = CGSizeMake(image.size.width + padding * 2.0,
+                                   image.size.height + padding * 2.0);
+    UIGraphicsBeginImageContextWithOptions(paddedSize, NO, image.scale > 0.0 ? image.scale : UIScreen.mainScreen.scale);
+    [[UIColor clearColor] setFill];
+    UIRectFill(CGRectMake(0, 0, paddedSize.width, paddedSize.height));
+    [image drawInRect:CGRectMake(padding, padding, image.size.width, image.size.height)];
+    UIImage *paddedImage = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+
+    if (!paddedImage.CGImage) {
+        return image;
+    }
+    if (contentOffset) {
+        *contentOffset = CGPointMake(padding, padding);
+    }
+    return paddedImage;
 }
 
 + (CGRect)imageRectForNormalizedBox:(CGRect)box image:(UIImage *)image {
@@ -271,6 +304,28 @@
     return CGRectStandardize(clippedRect);
 }
 
++ (CGRect)clippedRect:(CGRect)rect toImageSize:(CGSize)imageSize {
+    if (CGRectIsNull(rect) || CGRectIsEmpty(rect) || imageSize.width <= 0.0 || imageSize.height <= 0.0) {
+        return CGRectNull;
+    }
+    CGRect imageBounds = CGRectMake(0, 0, imageSize.width, imageSize.height);
+    CGRect clippedRect = CGRectIntersection(CGRectStandardize(rect), imageBounds);
+    if (CGRectIsNull(clippedRect) || CGRectIsEmpty(clippedRect) || clippedRect.size.width <= 0.5 || clippedRect.size.height <= 0.5) {
+        return CGRectNull;
+    }
+    return CGRectStandardize(clippedRect);
+}
+
++ (CGRect)sourceImageRectForRecognitionRect:(CGRect)recognitionRect
+                            sourceImageSize:(CGSize)sourceImageSize
+                              contentOffset:(CGPoint)contentOffset {
+    if (CGRectIsNull(recognitionRect) || CGRectIsEmpty(recognitionRect)) {
+        return CGRectNull;
+    }
+    CGRect sourceRect = CGRectOffset(recognitionRect, -contentOffset.x, -contentOffset.y);
+    return [self clippedRect:sourceRect toImageSize:sourceImageSize];
+}
+
 + (BOOL)targetRect:(CGRect)targetRect isSpecificAgainstObservationRect:(CGRect)observationRect target:(NSString *)target recognized:(NSString *)recognized {
     if (CGRectIsNull(targetRect) || CGRectIsEmpty(targetRect) || CGRectIsNull(observationRect) || CGRectIsEmpty(observationRect)) {
         return NO;
@@ -387,6 +442,8 @@
 + (NSDictionary *)matchNormalizedText:(NSString *)target
                                inImage:(UIImage *)image
                            sourceWindow:(UIWindow *)sourceWindow
+                        sourceImageSize:(CGSize)sourceImageSize
+                          contentOffset:(CGPoint)contentOffset
                                  level:(VNRequestTextRecognitionLevel)level
                     languageCorrection:(BOOL)languageCorrection
                               fallback:(BOOL)fallback
@@ -533,14 +590,20 @@
             if (CGRectIsNull(imageRect) || CGRectIsEmpty(imageRect)) {
                 continue;
             }
+            CGRect sourceImageRect = [self sourceImageRectForRecognitionRect:imageRect
+                                                             sourceImageSize:sourceImageSize
+                                                               contentOffset:contentOffset];
+            if (CGRectIsNull(sourceImageRect) || CGRectIsEmpty(sourceImageRect)) {
+                continue;
+            }
             validMatchCount++;
 
             CGFloat score = candidate.confidence;
-            CGPoint clickImagePoint = CGPointMake(CGRectGetMidX(imageRect), CGRectGetMidY(imageRect));
-            CGFloat area = CGRectGetWidth(imageRect) * CGRectGetHeight(imageRect);
+            CGPoint clickImagePoint = CGPointMake(CGRectGetMidX(sourceImageRect), CGRectGetMidY(sourceImageRect));
+            CGFloat area = CGRectGetWidth(sourceImageRect) * CGRectGetHeight(sourceImageRect);
 
-            CGFloat minY = CGRectGetMinY(imageRect);
-            CGFloat minX = CGRectGetMinX(imageRect);
+            CGFloat minY = CGRectGetMinY(sourceImageRect);
+            CGFloat minX = CGRectGetMinX(sourceImageRect);
             BOOL shouldReplace = NO;
             if (rank > bestRank) {
                 shouldReplace = YES;
@@ -559,17 +622,17 @@
                 continue;
             }
 
-            CGRect rect = [self screenRectFromImageRect:imageRect image:image sourceWindow:sourceWindow];
+            CGRect rect = [self screenRectFromImageRect:sourceImageRect image:image sourceWindow:sourceWindow];
             CGPoint point = sourceWindow ? [sourceWindow convertPoint:clickImagePoint toWindow:nil] : clickImagePoint;
             NSLog(@"[AnClick][OCR] target=%@ regex=%d text=%@ match=%@ visionRect=(%.1f, %.1f, %.1f, %.1f) screenRect=(%.1f, %.1f, %.1f, %.1f) point=(%.1f, %.1f)",
                   target,
                   useRegex,
                   candidate.string,
                   matchedText,
-                  imageRect.origin.x,
-                  imageRect.origin.y,
-                  imageRect.size.width,
-                  imageRect.size.height,
+                  sourceImageRect.origin.x,
+                  sourceImageRect.origin.y,
+                  sourceImageRect.size.width,
+                  sourceImageRect.size.height,
                   rect.origin.x,
                   rect.origin.y,
                   rect.size.width,
@@ -623,9 +686,14 @@
         return @{@"error": @"截图失败"};
     }
 
+    CGPoint contentOffset = CGPointZero;
+    CGSize sourceImageSize = image.size;
+    UIImage *recognitionImage = [self imageByAddingRecognitionEdgePadding:image contentOffset:&contentOffset] ?: image;
     return [self matchNormalizedText:target
-                             inImage:image
+                             inImage:recognitionImage
                         sourceWindow:sourceWindow
+                     sourceImageSize:sourceImageSize
+                       contentOffset:contentOffset
                                level:VNRequestTextRecognitionLevelAccurate
                   languageCorrection:YES
                             fallback:NO

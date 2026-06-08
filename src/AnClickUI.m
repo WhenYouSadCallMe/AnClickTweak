@@ -67,6 +67,7 @@ static const NSInteger AnClickColorPickMarkerTagBase = 43100;
 static const NSInteger AnClickColorPickRowTagBase = 43200;
 static const NSUInteger AnClickColorPickMaxSamples = 32;
 static const NSUInteger AnClickNetworkPostMaxPairs = 8;
+static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.10;
 static CFStringRef const AnClickVolumeShortcutDownNotification = CFSTR("com.anclick.volume.down");
 static CFStringRef const AnClickVolumeShortcutUpNotification = CFSTR("com.anclick.volume.up");
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
@@ -155,6 +156,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (BOOL)currentEditorNetworkPostAllowsRecognitionResult;
 - (void)cleanupScreenInteractionStateRestoringPanel:(BOOL)restorePanel;
 - (void)showToast:(NSString *)message;
+- (void)performSelectedActionAtPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow preparePanel:(BOOL)preparePanel;
 @end
 
 @implementation AnClickUI {
@@ -2518,6 +2520,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _toastView.hidden = YES;
     _hostToastView.hidden = YES;
     _toastWindow.hidden = YES;
+}
+
+- (BOOL)hideOwnUIForRecognitionCaptureWithHostWindow:(UIWindow *)hostWindow {
+    BOOL shouldRestorePanel = _panelWindow && !_panelWindow.hidden;
+    [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+    [self hideToastForRecognitionCapture];
+    return shouldRestorePanel;
+}
+
+- (void)restorePanelAfterRecognitionCaptureIfNeeded:(BOOL)shouldRestore delay:(NSTimeInterval)delay {
+    if (!shouldRestore) {
+        return;
+    }
+    [self restorePanelAfterScreenDelay:MAX(0.05, delay)];
 }
 
 - (void)showVolumeShortcutToast:(NSString *)message {
@@ -7463,12 +7479,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)performSelectedActionAtPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow {
+    [self performSelectedActionAtPoint:point inWindow:hostWindow preparePanel:YES];
+}
+
+- (void)performSelectedActionAtPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow preparePanel:(BOOL)preparePanel {
     if (_actionMode == AnClickActionModeNone) {
         _statusLabel.text = @"先选择动作";
         return;
     }
 
-    [self preparePanelForExternalTapWithHostWindow:hostWindow];
+    if (preparePanel) {
+        [self preparePanelForExternalTapWithHostWindow:hostWindow];
+    }
 
     if (_actionMode == AnClickActionModeSwipe) {
         NSArray<NSValue *> *path = (_hasManualSwipeAnchor && _hasManualSwipeEndPoint)
@@ -9432,77 +9454,96 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSNumber *thresholdNumber = task[@"threshold"];
     double threshold = thresholdNumber ? MIN(1.0, MAX(0.0, thresholdNumber.doubleValue)) : 0.80;
     NSValue *customPointValue = task[@"point"];
+    BOOL shouldRestorePanel = [self hideOwnUIForRecognitionCaptureWithHostWindow:hostWindow];
     _templateSearchInProgress = YES;
     NSUInteger geometryGeneration = _screenGeometryGeneration;
     __weak typeof(self) weakSelf = self;
-    dispatch_async([self templateSearchQueue], ^{
-        __strong typeof(weakSelf) searchSelf = weakSelf;
-        if (!searchSelf) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickRecognitionCaptureDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) delayedSelf = weakSelf;
+        if (!delayedSelf) {
             return;
         }
-        NSDictionary *match = [AnClickCore findTemplateImageMatch:templateImage threshold:threshold];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (!strongSelf) {
-                return;
-            }
-            strongSelf->_templateSearchInProgress = NO;
-            if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
-                                                            runGeneration:runGeneration
-                                                             restorePanel:(runGeneration == 0)]) {
-                return;
-            }
-            UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
-                                                                          runGeneration:runGeneration
-                                                                                 status:@"窗口变化停止"];
-            if (!currentHostWindow) {
-                return;
-            }
-            if (!match) {
-                strongSelf->_statusLabel.text = @"识图未找到";
-                [strongSelf showToast:@"识图未找到"];
-                if (completion) {
-                    completion(NO);
+        if (![delayedSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                         runGeneration:runGeneration
+                                                          restorePanel:(runGeneration == 0 || shouldRestorePanel)] ||
+            (runGeneration != 0 &&
+             ![delayedSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"])) {
+            delayedSelf->_templateSearchInProgress = NO;
+            [delayedSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+            return;
+        }
+        dispatch_async([delayedSelf templateSearchQueue], ^{
+            NSDictionary *match = [AnClickCore findTemplateImageMatch:templateImage threshold:threshold];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) {
+                    return;
                 }
-                return;
-            }
-            NSValue *matchPointValue = match[@"point"];
-            NSValue *rectValue = match[@"rect"];
-            NSNumber *scoreNumber = match[@"score"];
-            if (!matchPointValue || !rectValue) {
-                strongSelf->_statusLabel.text = @"识图异常";
-                [strongSelf showToast:@"识图异常"];
-                if (completion) {
-                    completion(NO);
+                strongSelf->_templateSearchInProgress = NO;
+                if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                                runGeneration:runGeneration
+                                                                 restorePanel:(runGeneration == 0 || shouldRestorePanel)]) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    return;
                 }
-                return;
-            }
-            CGRect rect = rectValue.CGRectValue;
-            [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.2];
-            if (imageActionMode == AnClickActionModeNetwork) {
-                [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:^{
+                UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
+                                                                              runGeneration:runGeneration
+                                                                                     status:@"窗口变化停止"];
+                if (!currentHostWindow) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    return;
+                }
+                if (!match) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    strongSelf->_statusLabel.text = @"识图未找到";
+                    [strongSelf showToast:@"识图未找到"];
                     if (completion) {
-                        completion(YES);
+                        completion(NO);
                     }
-                }];
-                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f 网络请求",
-                                                 scoreNumber.doubleValue];
+                    return;
+                }
+                NSValue *matchPointValue = match[@"point"];
+                NSValue *rectValue = match[@"rect"];
+                NSNumber *scoreNumber = match[@"score"];
+                if (!matchPointValue || !rectValue) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    strongSelf->_statusLabel.text = @"识图异常";
+                    [strongSelf showToast:@"识图异常"];
+                    if (completion) {
+                        completion(NO);
+                    }
+                    return;
+                }
+                CGRect rect = rectValue.CGRectValue;
+                [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.2];
+                if (imageActionMode == AnClickActionModeNetwork) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:^{
+                        if (completion) {
+                            completion(YES);
+                        }
+                    }];
+                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f 网络请求",
+                                                     scoreNumber.doubleValue];
+                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    return;
+                }
+                CGPoint actionPoint = useMatchPoint
+                    ? matchPointValue.CGPointValue
+                    : [strongSelf resolvedPointForTask:task fallbackPoint:customPointValue.CGPointValue];
+                [strongSelf performPointActionMode:imageActionMode atPoint:actionPoint inWindow:currentHostWindow];
+                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f %@ %.0f,%.0f",
+                                                 scoreNumber.doubleValue,
+                                                 [strongSelf actionNameForMode:imageActionMode],
+                                                 actionPoint.x,
+                                                 actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
-                return;
-            }
-            CGPoint actionPoint = useMatchPoint
-                ? matchPointValue.CGPointValue
-                : [strongSelf resolvedPointForTask:task fallbackPoint:customPointValue.CGPointValue];
-            [strongSelf performPointActionMode:imageActionMode atPoint:actionPoint inWindow:currentHostWindow];
-            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f %@ %.0f,%.0f",
-                                             scoreNumber.doubleValue,
-                                             [strongSelf actionNameForMode:imageActionMode],
-                                             actionPoint.x,
-                                             actionPoint.y];
-            [strongSelf showToast:strongSelf->_statusLabel.text];
-            if (completion) {
-                completion(YES);
-            }
+                [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
+                                                                   delay:[strongSelf durationForTaskMode:imageActionMode] + 0.10];
+                if (completion) {
+                    completion(YES);
+                }
+            });
         });
     });
 }
@@ -9549,23 +9590,26 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
         return;
     }
+    BOOL shouldRestorePanel = [self hideOwnUIForRecognitionCaptureWithHostWindow:hostWindow];
     _templateSearchInProgress = YES;
     NSUInteger geometryGeneration = _screenGeometryGeneration;
     __weak typeof(self) weakSelf = self;
-    [self hideToastForRecognitionCapture];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickRecognitionCaptureDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         __strong typeof(weakSelf) delayedSelf = weakSelf;
         if (!delayedSelf) {
             return;
         }
         if (![delayedSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
                                                          runGeneration:runGeneration
-                                                          restorePanel:(runGeneration == 0)]) {
+                                                          restorePanel:(runGeneration == 0 || shouldRestorePanel)]) {
+            delayedSelf->_templateSearchInProgress = NO;
+            [delayedSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
             return;
         }
         if (runGeneration != 0 &&
             ![delayedSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
             delayedSelf->_templateSearchInProgress = NO;
+            [delayedSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
             return;
         }
         dispatch_async([delayedSelf templateSearchQueue], ^{
@@ -9578,17 +9622,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 strongSelf->_templateSearchInProgress = NO;
                 if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
                                                                 runGeneration:runGeneration
-                                                                 restorePanel:(runGeneration == 0)]) {
+                                                                 restorePanel:(runGeneration == 0 || shouldRestorePanel)]) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     return;
                 }
                 UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
                                                                               runGeneration:runGeneration
                                                                                      status:@"窗口变化停止"];
                 if (!currentHostWindow) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     return;
                 }
                 NSString *error = [match[@"error"] isKindOfClass:NSString.class] ? match[@"error"] : nil;
                 if (error.length > 0) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     strongSelf->_statusLabel.text = error;
                     [strongSelf showToast:error];
                     if (completion) {
@@ -9605,6 +9652,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     ? [NSString stringWithFormat:@"%@ 命中%ld选1", useRegex ? @"正则" : @"包含", (long)matchCount]
                     : (useRegex ? @"正则" : @"包含");
                 if (!pointValue || !rectValue) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     strongSelf->_statusLabel.text = @"识字未找到";
                     [strongSelf showToast:@"识字未找到"];
                     if (completion) {
@@ -9614,6 +9662,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 }
                 [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
                 if (actionMode == AnClickActionModeNetwork) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     [strongSelf performRecognitionNetworkActionForTask:task recognitionText:text runGeneration:runGeneration completion:^{
                         if (completion) {
                             completion(YES);
@@ -9633,6 +9682,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                  actionPoint.x,
                                                  actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
+                [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
+                                                                   delay:[strongSelf durationForTaskMode:actionMode] + 0.10];
                 if (completion) {
                     completion(YES);
                 }
@@ -9667,68 +9718,91 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         : 18.0;
     AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
     NSString *patternSummary = [self colorPatternSummaryForTask:task];
+    BOOL shouldRestorePanel = [self hideOwnUIForRecognitionCaptureWithHostWindow:hostWindow];
     _templateSearchInProgress = YES;
     NSUInteger geometryGeneration = _screenGeometryGeneration;
     __weak typeof(self) weakSelf = self;
-    dispatch_async([self templateSearchQueue], ^{
-        NSDictionary *match = [AnClickCore findColorPatternMatchWithPoints:colorPoints tolerance:tolerance];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (!strongSelf) {
-                return;
-            }
-            strongSelf->_templateSearchInProgress = NO;
-            if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
-                                                            runGeneration:runGeneration
-                                                             restorePanel:(runGeneration == 0)]) {
-                return;
-            }
-            UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
-                                                                          runGeneration:runGeneration
-                                                                                 status:@"窗口变化停止"];
-            if (!currentHostWindow) {
-                return;
-            }
-            if (!match) {
-                strongSelf->_statusLabel.text = @"颜色未找到";
-                [strongSelf showToast:@"颜色未找到"];
-                if (completion) {
-                    completion(NO);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickRecognitionCaptureDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) delayedSelf = weakSelf;
+        if (!delayedSelf) {
+            return;
+        }
+        if (![delayedSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                         runGeneration:runGeneration
+                                                          restorePanel:(runGeneration == 0 || shouldRestorePanel)] ||
+            (runGeneration != 0 &&
+             ![delayedSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"])) {
+            delayedSelf->_templateSearchInProgress = NO;
+            [delayedSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+            return;
+        }
+        dispatch_async([delayedSelf templateSearchQueue], ^{
+            NSDictionary *match = [AnClickCore findColorPatternMatchWithPoints:colorPoints tolerance:tolerance];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) {
+                    return;
                 }
-                return;
-            }
-            NSValue *pointValue = match[@"point"];
-            NSValue *rectValue = match[@"rect"];
-            NSNumber *scoreNumber = match[@"score"];
-            if (!pointValue || !rectValue) {
-                strongSelf->_statusLabel.text = @"识色异常";
-                [strongSelf showToast:@"识色异常"];
-                if (completion) {
-                    completion(NO);
+                strongSelf->_templateSearchInProgress = NO;
+                if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                                runGeneration:runGeneration
+                                                                 restorePanel:(runGeneration == 0 || shouldRestorePanel)]) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    return;
                 }
-                return;
-            }
-            [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
-            if (actionMode == AnClickActionModeNetwork) {
-                [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:^{
+                UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
+                                                                              runGeneration:runGeneration
+                                                                                     status:@"窗口变化停止"];
+                if (!currentHostWindow) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    return;
+                }
+                if (!match) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    strongSelf->_statusLabel.text = @"颜色未找到";
+                    [strongSelf showToast:@"颜色未找到"];
                     if (completion) {
-                        completion(YES);
+                        completion(NO);
                     }
-                }];
-                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ 网络请求", patternSummary];
+                    return;
+                }
+                NSValue *pointValue = match[@"point"];
+                NSValue *rectValue = match[@"rect"];
+                NSNumber *scoreNumber = match[@"score"];
+                if (!pointValue || !rectValue) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    strongSelf->_statusLabel.text = @"识色异常";
+                    [strongSelf showToast:@"识色异常"];
+                    if (completion) {
+                        completion(NO);
+                    }
+                    return;
+                }
+                [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
+                if (actionMode == AnClickActionModeNetwork) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:^{
+                        if (completion) {
+                            completion(YES);
+                        }
+                    }];
+                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ 网络请求", patternSummary];
+                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    return;
+                }
+                CGPoint actionPoint = pointValue.CGPointValue;
+                [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
+                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ %.0f,%.0f",
+                                                 patternSummary,
+                                                 actionPoint.x,
+                                                 actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
-                return;
-            }
-            CGPoint actionPoint = pointValue.CGPointValue;
-            [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
-            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ %.0f,%.0f",
-                                             patternSummary,
-                                             actionPoint.x,
-                                             actionPoint.y];
-            [strongSelf showToast:strongSelf->_statusLabel.text];
-            if (completion) {
-                completion(YES);
-            }
+                [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
+                                                                   delay:[strongSelf durationForTaskMode:actionMode] + 0.10];
+                if (completion) {
+                    completion(YES);
+                }
+            });
         });
     });
 }
@@ -11653,31 +11727,42 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
         NSUInteger geometryGeneration = _screenGeometryGeneration;
         __weak typeof(self) weakSelf = self;
-        dispatch_async([self templateSearchQueue], ^{
-            NSDictionary *match = [AnClickCore findColorPatternMatchWithPoints:colorPoints tolerance:tolerance];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                __strong typeof(weakSelf) strongSelf = weakSelf;
-                if (!strongSelf) {
-                    return;
-                }
-                if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
-                                                                runGeneration:0
-                                                                 restorePanel:YES]) {
-                    return;
-                }
-                if (!match) {
-                    strongSelf->_statusLabel.text = @"颜色未找到";
-                    [strongSelf restorePanelAfterExternalTap];
-                    return;
-                }
-                NSValue *rectValue = match[@"rect"];
-                NSValue *pointValue = match[@"point"];
-                if (rectValue) {
-                    [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:[match[@"score"] doubleValue] inWindow:hostWindow duration:previewDuration];
-                }
-                CGPoint point = pointValue ? pointValue.CGPointValue : CGPointZero;
-                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览识色 %@ %.0f,%.0f", patternSummary, point.x, point.y];
-                [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickRecognitionCaptureDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) delayedSelf = weakSelf;
+            if (!delayedSelf) {
+                return;
+            }
+            if (![delayedSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                             runGeneration:0
+                                                              restorePanel:YES]) {
+                return;
+            }
+            dispatch_async([delayedSelf templateSearchQueue], ^{
+                NSDictionary *match = [AnClickCore findColorPatternMatchWithPoints:colorPoints tolerance:tolerance];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
+                    if (!strongSelf) {
+                        return;
+                    }
+                    if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                                    runGeneration:0
+                                                                     restorePanel:YES]) {
+                        return;
+                    }
+                    if (!match) {
+                        strongSelf->_statusLabel.text = @"颜色未找到";
+                        [strongSelf restorePanelAfterExternalTap];
+                        return;
+                    }
+                    NSValue *rectValue = match[@"rect"];
+                    NSValue *pointValue = match[@"point"];
+                    if (rectValue) {
+                        [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:[match[@"score"] doubleValue] inWindow:hostWindow duration:previewDuration];
+                    }
+                    CGPoint point = pointValue ? pointValue.CGPointValue : CGPointZero;
+                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览识色 %@ %.0f,%.0f", patternSummary, point.x, point.y];
+                    [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
+                });
             });
         });
         return;
@@ -11902,58 +11987,72 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _playButton.enabled = NO;
     _playButton.alpha = 0.55;
     double matchThreshold = _matchThreshold;
-    [self preparePanelForExternalTapWithHostWindow:hostWindow];
+    BOOL shouldRestorePanel = [self hideOwnUIForRecognitionCaptureWithHostWindow:hostWindow];
     NSUInteger geometryGeneration = _screenGeometryGeneration;
     __weak typeof(self) weakSelf = self;
-    dispatch_async([self templateSearchQueue], ^{
-        __strong typeof(weakSelf) searchSelf = weakSelf;
-        if (!searchSelf) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickRecognitionCaptureDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) delayedSelf = weakSelf;
+        if (!delayedSelf) {
             return;
         }
-        NSDictionary *match = [AnClickCore findTemplateImageMatch:templateImage threshold:matchThreshold];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (!strongSelf) {
-                return;
-            }
-            strongSelf->_templateSearchInProgress = NO;
-            strongSelf->_playButton.enabled = YES;
-            strongSelf->_playButton.alpha = 1.0;
-            if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
-                                                            runGeneration:0
-                                                             restorePanel:YES]) {
-                return;
-            }
-            if (!match) {
-                [strongSelf restorePanelAfterExternalTap];
-                strongSelf->_statusLabel.text = @"未找到";
-                return;
-            }
-            NSValue *pointValue = match[@"point"];
-            NSValue *rectValue = match[@"rect"];
-            NSNumber *scoreNumber = match[@"score"];
-            if (!pointValue || !rectValue) {
-                [strongSelf restorePanelAfterExternalTap];
-                strongSelf->_statusLabel.text = @"识别异常";
-                return;
-            }
-            CGPoint point = pointValue.CGPointValue;
-            CGRect rect = rectValue.CGRectValue;
-            UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
-                                                                          runGeneration:0
-                                                                                 status:nil];
-            if (!currentHostWindow) {
-                [strongSelf restorePanelAfterExternalTap];
-                strongSelf->_statusLabel.text = @"无窗口";
-                return;
-            }
-            [strongSelf preparePanelForExternalTapWithHostWindow:currentHostWindow];
-            [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.6];
-            [strongSelf performSelectedActionAtPoint:point inWindow:currentHostWindow];
-            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识别 %.2f  %.0f,%.0f",
-                                             scoreNumber.doubleValue,
-                                             point.x,
-                                             point.y];
+        if (![delayedSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                         runGeneration:0
+                                                          restorePanel:YES]) {
+            delayedSelf->_templateSearchInProgress = NO;
+            delayedSelf->_playButton.enabled = YES;
+            delayedSelf->_playButton.alpha = 1.0;
+            [delayedSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+            return;
+        }
+        dispatch_async([delayedSelf templateSearchQueue], ^{
+            NSDictionary *match = [AnClickCore findTemplateImageMatch:templateImage threshold:matchThreshold];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) {
+                    return;
+                }
+                strongSelf->_templateSearchInProgress = NO;
+                strongSelf->_playButton.enabled = YES;
+                strongSelf->_playButton.alpha = 1.0;
+                if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                                runGeneration:0
+                                                                 restorePanel:YES]) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    return;
+                }
+                if (!match) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    strongSelf->_statusLabel.text = @"未找到";
+                    return;
+                }
+                NSValue *pointValue = match[@"point"];
+                NSValue *rectValue = match[@"rect"];
+                NSNumber *scoreNumber = match[@"score"];
+                if (!pointValue || !rectValue) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    strongSelf->_statusLabel.text = @"识别异常";
+                    return;
+                }
+                CGPoint point = pointValue.CGPointValue;
+                CGRect rect = rectValue.CGRectValue;
+                UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
+                                                                              runGeneration:0
+                                                                                     status:nil];
+                if (!currentHostWindow) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    strongSelf->_statusLabel.text = @"无窗口";
+                    return;
+                }
+                [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.6];
+                [strongSelf performSelectedActionAtPoint:point inWindow:currentHostWindow preparePanel:NO];
+                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识别 %.2f  %.0f,%.0f",
+                                                 scoreNumber.doubleValue,
+                                                 point.x,
+                                                 point.y];
+                NSTimeInterval restoreDelay = MAX([strongSelf durationForTaskMode:strongSelf->_actionMode],
+                                                  strongSelf->_actionMode == AnClickActionModeSwipe ? 1.15 : 1.0);
+                [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:restoreDelay + 0.10];
+            });
         });
     });
 }
