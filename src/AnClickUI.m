@@ -4032,7 +4032,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (UIView *)doorooSettingsAuthorPanelWithWidth:(CGFloat)width {
-    CGFloat height = 304.0;
+    CGFloat height = 250.0;
     UIView *panel = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, height)];
     panel.backgroundColor = [UIColor colorWithRed:0.06 green:0.13 blue:0.20 alpha:0.96];
     panel.layer.cornerRadius = 8.0;
@@ -4057,17 +4057,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     titleLabel.minimumScaleFactor = 0.64;
     [panel addSubview:titleLabel];
 
-    UILabel *noticeLabel = [[UILabel alloc] initWithFrame:CGRectMake(18.0, 66.0, width - 36.0, 82.0)];
-    noticeLabel.text = @"此连点器为完全免费版本\n禁止倒卖,发现倒卖者请直接举报\n加拉黑!";
+    UILabel *noticeLabel = [[UILabel alloc] initWithFrame:CGRectMake(18.0, 76.0, width - 36.0, 30.0)];
+    noticeLabel.text = @"此版本为公益版本禁止倒卖";
     noticeLabel.textAlignment = NSTextAlignmentCenter;
     noticeLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.90];
     noticeLabel.font = [UIFont systemFontOfSize:21 weight:UIFontWeightMedium];
-    noticeLabel.numberOfLines = 0;
+    noticeLabel.numberOfLines = 1;
     noticeLabel.adjustsFontSizeToFitWidth = YES;
     noticeLabel.minimumScaleFactor = 0.62;
     [panel addSubview:noticeLabel];
 
-    UILabel *authorLabel = [[UILabel alloc] initWithFrame:CGRectMake(18.0, 154.0, width - 36.0, 30.0)];
+    UILabel *authorLabel = [[UILabel alloc] initWithFrame:CGRectMake(18.0, 132.0, width - 36.0, 30.0)];
     authorLabel.text = @"作者哔哩哔哩: DooRoo";
     authorLabel.textAlignment = NSTextAlignmentCenter;
     authorLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.82];
@@ -4076,7 +4076,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     authorLabel.minimumScaleFactor = 0.62;
     [panel addSubview:authorLabel];
 
-    UILabel *uidLabel = [[UILabel alloc] initWithFrame:CGRectMake(18.0, 184.0, width - 36.0, 24.0)];
+    UILabel *uidLabel = [[UILabel alloc] initWithFrame:CGRectMake(18.0, 162.0, width - 36.0, 24.0)];
     uidLabel.text = @"哔哩哔哩UID: 399301044";
     uidLabel.textAlignment = NSTextAlignmentCenter;
     uidLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.80];
@@ -4085,17 +4085,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     uidLabel.minimumScaleFactor = 0.62;
     [panel addSubview:uidLabel];
 
-    UILabel *spaceLabel = [[UILabel alloc] initWithFrame:CGRectMake(18.0, 212.0, width - 36.0, 22.0)];
-    spaceLabel.text = @"DooRoo的个人空间-哔哩哔哩";
-    spaceLabel.textAlignment = NSTextAlignmentCenter;
-    spaceLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.70];
-    spaceLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
-    spaceLabel.adjustsFontSizeToFitWidth = YES;
-    spaceLabel.minimumScaleFactor = 0.58;
-    [panel addSubview:spaceLabel];
-
     UIButton *followButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    followButton.frame = CGRectMake(18.0, 246.0, width - 36.0, 46.0);
+    followButton.frame = CGRectMake(18.0, 196.0, width - 36.0, 46.0);
     followButton.backgroundColor = [UIColor colorWithRed:0.85 green:0.12 blue:0.28 alpha:0.98];
     followButton.layer.cornerRadius = 8.0;
     followButton.titleLabel.font = [UIFont systemFontOfSize:21 weight:UIFontWeightBold];
