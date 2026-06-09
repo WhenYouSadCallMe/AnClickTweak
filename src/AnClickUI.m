@@ -89,13 +89,13 @@ static void (*AnClickOriginalSpringBoardHandlePhysicalButtonEvent)(id self, SEL 
 extern int ptrace(int request, pid_t pid, void *addr, int data);
 
 static NSTimeInterval AnClickLocalExpiryUnixTime(void) {
-    const uint8_t encoded[] = {0x26, 0xA4, 0x78, 0xF8, 0x0F, 0xC4, 0x78, 0xB3};
+    const uint8_t encoded[] = {0x26, 0xA7, 0x1F, 0xF8, 0x0F, 0xC4, 0x78, 0xB3};
     const uint8_t masks[] = {0xA6, 0x31, 0x5D, 0x92, 0x0F, 0xC4, 0x78, 0xB3};
     uint64_t value = 0;
     for (size_t i = 0; i < sizeof(encoded); i++) {
         value |= ((uint64_t)(encoded[i] ^ masks[i])) << (8 * i);
     }
-    if (((uint32_t)value ^ 0xA70C91EFu) != 0xCD29046Fu ||
+    if (((uint32_t)value ^ 0xA70C91EFu) != 0xCD4E076Fu ||
         value < 1600000000ULL ||
         value > 2200000000ULL) {
         return 1.0;
@@ -4008,6 +4008,107 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalNetworkGateButton = nil;
 }
 
+- (void)openDooRooBilibiliProfile {
+    NSURL *appURL = [NSURL URLWithString:@"bilibili://space/399301044"];
+    NSURL *webURL = [NSURL URLWithString:@"https://b23.tv/fXw1dto"];
+    if (!appURL && !webURL) {
+        return;
+    }
+    UIApplication *application = UIApplication.sharedApplication;
+    void (^openWebURL)(void) = ^{
+        if (webURL) {
+            [application openURL:webURL options:@{} completionHandler:nil];
+        }
+    };
+    if (!appURL) {
+        openWebURL();
+        return;
+    }
+    [application openURL:appURL options:@{} completionHandler:^(BOOL success) {
+        if (!success) {
+            openWebURL();
+        }
+    }];
+}
+
+- (UIView *)doorooSettingsAuthorPanelWithWidth:(CGFloat)width {
+    CGFloat height = 304.0;
+    UIView *panel = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, height)];
+    panel.backgroundColor = [UIColor colorWithRed:0.06 green:0.13 blue:0.20 alpha:0.96];
+    panel.layer.cornerRadius = 8.0;
+    panel.layer.borderWidth = 1.0;
+    panel.layer.borderColor = [UIColor colorWithRed:0.10 green:0.32 blue:0.55 alpha:0.82].CGColor;
+    panel.clipsToBounds = YES;
+
+    UIView *leftLine = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 2.0, height)];
+    leftLine.backgroundColor = [UIColor colorWithRed:0.08 green:0.45 blue:0.86 alpha:0.75];
+    [panel addSubview:leftLine];
+
+    UIView *rightLine = [[UIView alloc] initWithFrame:CGRectMake(width - 2.0, 0, 2.0, height)];
+    rightLine.backgroundColor = leftLine.backgroundColor;
+    [panel addSubview:rightLine];
+
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(16.0, 18.0, width - 32.0, 34.0)];
+    titleLabel.text = [self toolDisplayName];
+    titleLabel.textAlignment = NSTextAlignmentCenter;
+    titleLabel.textColor = UIColor.whiteColor;
+    titleLabel.font = [UIFont systemFontOfSize:27 weight:UIFontWeightHeavy];
+    titleLabel.adjustsFontSizeToFitWidth = YES;
+    titleLabel.minimumScaleFactor = 0.64;
+    [panel addSubview:titleLabel];
+
+    UILabel *noticeLabel = [[UILabel alloc] initWithFrame:CGRectMake(18.0, 66.0, width - 36.0, 82.0)];
+    noticeLabel.text = @"此连点器为完全免费版本\n禁止倒卖,发现倒卖者请直接举报\n加拉黑!";
+    noticeLabel.textAlignment = NSTextAlignmentCenter;
+    noticeLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.90];
+    noticeLabel.font = [UIFont systemFontOfSize:21 weight:UIFontWeightMedium];
+    noticeLabel.numberOfLines = 0;
+    noticeLabel.adjustsFontSizeToFitWidth = YES;
+    noticeLabel.minimumScaleFactor = 0.62;
+    [panel addSubview:noticeLabel];
+
+    UILabel *authorLabel = [[UILabel alloc] initWithFrame:CGRectMake(18.0, 154.0, width - 36.0, 30.0)];
+    authorLabel.text = @"作者哔哩哔哩: DooRoo";
+    authorLabel.textAlignment = NSTextAlignmentCenter;
+    authorLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.82];
+    authorLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightMedium];
+    authorLabel.adjustsFontSizeToFitWidth = YES;
+    authorLabel.minimumScaleFactor = 0.62;
+    [panel addSubview:authorLabel];
+
+    UILabel *uidLabel = [[UILabel alloc] initWithFrame:CGRectMake(18.0, 184.0, width - 36.0, 24.0)];
+    uidLabel.text = @"哔哩哔哩UID: 399301044";
+    uidLabel.textAlignment = NSTextAlignmentCenter;
+    uidLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.80];
+    uidLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightMedium];
+    uidLabel.adjustsFontSizeToFitWidth = YES;
+    uidLabel.minimumScaleFactor = 0.62;
+    [panel addSubview:uidLabel];
+
+    UILabel *spaceLabel = [[UILabel alloc] initWithFrame:CGRectMake(18.0, 212.0, width - 36.0, 22.0)];
+    spaceLabel.text = @"DooRoo的个人空间-哔哩哔哩";
+    spaceLabel.textAlignment = NSTextAlignmentCenter;
+    spaceLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.70];
+    spaceLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+    spaceLabel.adjustsFontSizeToFitWidth = YES;
+    spaceLabel.minimumScaleFactor = 0.58;
+    [panel addSubview:spaceLabel];
+
+    UIButton *followButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    followButton.frame = CGRectMake(18.0, 246.0, width - 36.0, 46.0);
+    followButton.backgroundColor = [UIColor colorWithRed:0.85 green:0.12 blue:0.28 alpha:0.98];
+    followButton.layer.cornerRadius = 8.0;
+    followButton.titleLabel.font = [UIFont systemFontOfSize:21 weight:UIFontWeightBold];
+    followButton.titleLabel.adjustsFontSizeToFitWidth = YES;
+    followButton.titleLabel.minimumScaleFactor = 0.72;
+    [followButton setTitle:@"关注作者DooRoo" forState:UIControlStateNormal];
+    [followButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    [followButton addTarget:self action:@selector(openDooRooBilibiliProfile) forControlEvents:UIControlEventTouchUpInside];
+    [panel addSubview:followButton];
+
+    return panel;
+}
+
 - (void)showGlobalSettings {
     [self dismissKeyboard];
     [self hideFunctionMenu];
@@ -4022,7 +4123,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat width = _globalSettingsView.bounds.size.width;
     CGFloat height = _globalSettingsView.bounds.size.height;
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(18, 14, width - 76, 34)];
-    titleLabel.text = [NSString stringWithFormat:@"%@ 设置", [self toolDisplayName]];
+    titleLabel.text = @"设置";
     titleLabel.textColor = UIColor.whiteColor;
     titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
     titleLabel.adjustsFontSizeToFitWidth = YES;
@@ -4050,6 +4151,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat side = 18.0;
     CGFloat y = 18.0;
     CGFloat contentWidth = width - side * 2.0;
+    UIView *authorPanel = [self doorooSettingsAuthorPanelWithWidth:contentWidth];
+    authorPanel.frame = CGRectMake(side, y, contentWidth, authorPanel.bounds.size.height);
+    [_globalSettingsScrollView addSubview:authorPanel];
+    y += authorPanel.bounds.size.height + 18.0;
+
     NSArray<NSString *> *captions = @[
         @"整体延时（毫秒，0=无延时）",
         @"整体执行次数（0=无限循环）",
