@@ -1750,7 +1750,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_repeatField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_repeatField];
 
-    _intervalField = [self configTextFieldWithPlaceholder:@"默认0.1"];
+    _intervalField = [self configTextFieldWithPlaceholder:@"空=最快"];
     _intervalField.keyboardType = UIKeyboardTypeDecimalPad;
     [_intervalField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
     [_intervalField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
@@ -5997,6 +5997,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _primaryConfigLabel.hidden = YES;
     _secondaryConfigLabel.hidden = YES;
     _tertiaryConfigLabel.hidden = YES;
+    _failureActionCaptionLabel.hidden = YES;
     _thresholdCaptionLabel.hidden = YES;
     _delayCaptionLabel.hidden = YES;
     _repeatCaptionLabel.hidden = YES;
@@ -6691,48 +6692,38 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return y + (showDropdown ? 154.0 : 66.0);
 }
 
-- (void)layoutImageFieldsAtY:(CGFloat)y {
+- (CGFloat)layoutRecognitionMetricFieldsAtY:(CGFloat)y firstTitle:(NSString *)firstTitle {
     CGFloat side = 18.0;
     CGFloat width = _panelView.bounds.size.width;
-    CGFloat gap = 8.0;
-    CGFloat fieldWidth = floor((width - side * 2.0 - gap * 3.0) / 4.0);
+    CGFloat gap = 10.0;
+    CGFloat fieldWidth = floor((width - side * 2.0 - gap) / 2.0);
     NSArray<UILabel *> *captions = @[_thresholdCaptionLabel, _delayCaptionLabel, _repeatCaptionLabel, _intervalCaptionLabel];
     NSArray<UITextField *> *fields = @[_thresholdField, _delayField, _repeatField, _intervalField];
-    NSArray<NSString *> *titles = @[@"匹配", (_actionRandomDelayEnabled ? @"随机上限" : @"延时"), @"次数", @"间隔"];
+    NSArray<NSString *> *titles = @[firstTitle, (_actionRandomDelayEnabled ? @"随机上限" : @"延时"), @"次数", @"间隔"];
     for (NSUInteger i = 0; i < captions.count; i++) {
         UILabel *caption = captions[i];
         UITextField *field = fields[i];
-        CGFloat x = side + (fieldWidth + gap) * i;
+        NSUInteger row = i / 2;
+        NSUInteger column = i % 2;
+        CGFloat rowY = y + row * 66.0;
+        CGFloat x = side + (fieldWidth + gap) * column;
         caption.text = titles[i];
         caption.hidden = NO;
-        caption.frame = CGRectMake(x, y, fieldWidth, 20);
+        caption.frame = CGRectMake(x, rowY, fieldWidth, 20);
         field.hidden = NO;
-        field.frame = CGRectMake(x, y + 22.0, fieldWidth, 38);
+        field.frame = CGRectMake(x, rowY + 22.0, fieldWidth, 38);
     }
-    CGFloat branchY = [self layoutRecognitionRetryControlsAtY:y + 68.0] + 4.0;
+    return y + 136.0;
+}
+
+- (void)layoutImageFieldsAtY:(CGFloat)y {
+    CGFloat branchY = [self layoutRecognitionRetryControlsAtY:[self layoutRecognitionMetricFieldsAtY:y firstTitle:@"匹配"]] + 4.0;
     CGFloat randomY = [self layoutRecognitionBranchFieldsAtY:branchY] + 4.0;
     [self layoutRandomizationControlsAtY:randomY];
 }
 
 - (void)layoutColorFieldsAtY:(CGFloat)y {
-    CGFloat side = 18.0;
-    CGFloat width = _panelView.bounds.size.width;
-    CGFloat gap = 8.0;
-    CGFloat fieldWidth = floor((width - side * 2.0 - gap * 3.0) / 4.0);
-    NSArray<UILabel *> *captions = @[_thresholdCaptionLabel, _delayCaptionLabel, _repeatCaptionLabel, _intervalCaptionLabel];
-    NSArray<UITextField *> *fields = @[_thresholdField, _delayField, _repeatField, _intervalField];
-    NSArray<NSString *> *titles = @[@"容差", (_actionRandomDelayEnabled ? @"随机上限" : @"延时"), @"次数", @"间隔"];
-    for (NSUInteger i = 0; i < captions.count; i++) {
-        UILabel *caption = captions[i];
-        UITextField *field = fields[i];
-        CGFloat x = side + (fieldWidth + gap) * i;
-        caption.text = titles[i];
-        caption.hidden = NO;
-        caption.frame = CGRectMake(x, y, fieldWidth, 20);
-        field.hidden = NO;
-        field.frame = CGRectMake(x, y + 22.0, fieldWidth, 38);
-    }
-    CGFloat branchY = [self layoutRecognitionRetryControlsAtY:y + 68.0] + 4.0;
+    CGFloat branchY = [self layoutRecognitionRetryControlsAtY:[self layoutRecognitionMetricFieldsAtY:y firstTitle:@"容差"]] + 4.0;
     CGFloat randomY = [self layoutRecognitionBranchFieldsAtY:branchY] + 4.0;
     [self layoutRandomizationControlsAtY:randomY];
 }
@@ -9627,17 +9618,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSTimeInterval)durationForTaskMode:(AnClickActionMode)mode {
+    if (mode == AnClickActionModeTap) {
+        return 0.06;
+    }
+    if (mode == AnClickActionModeDoubleTap) {
+        return 0.14;
+    }
+    if (mode == AnClickActionModeTwoFingerTap) {
+        return 0.06;
+    }
     if (mode == AnClickActionModeLongPress) {
         return 5.35;
     }
     if (mode == AnClickActionModeSwipe) {
         return 0.78;
-    }
-    if (mode == AnClickActionModeDoubleTap) {
-        return 0.55;
-    }
-    if (mode == AnClickActionModeTwoFingerTap) {
-        return 0.34;
     }
     if (mode == AnClickActionModePinchIn || mode == AnClickActionModePinchOut) {
         return 0.72;
@@ -9682,7 +9676,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if ([value respondsToSelector:@selector(doubleValue)]) {
         return MIN(30.0, MAX(0.0, [value doubleValue]));
     }
-    return 0.10;
+    return 0.0;
 }
 
 - (CGFloat)jitterRadiusForTask:(NSDictionary *)task {

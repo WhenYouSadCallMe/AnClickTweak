@@ -40,6 +40,9 @@ static dispatch_source_t AnClickHoldTimer = nil;
 static NSUInteger AnClickHoldGeneration = 0;
 static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
 static const NSTimeInterval AnClickTouchUpDelay = 1.0 / 120.0;
+static const NSTimeInterval AnClickFastTapMoveDelay = 0.01;
+static const NSTimeInterval AnClickFastTapUpDelay = 0.045;
+static const NSTimeInterval AnClickFastDoubleTapDelay = 0.08;
 static const NSTimeInterval AnClickRecordedKeepAliveInterval = 1.0 / 30.0;
 static const NSTimeInterval AnClickRecordedMoveMinInterval = 1.0 / 90.0;
 static const NSTimeInterval AnClickRecordedPlaybackMaxDuration = 600.0;
@@ -50,10 +53,10 @@ static const NSUInteger AnClickMultiTapMaxPoints = 32;
 + (void)tapAtPoint:(CGPoint)point {
     NSInteger touchId = 1;
     [self touchDownAtPoint:point touchId:touchId];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.03 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickFastTapMoveDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self touchMoveAtPoint:point touchId:touchId];
     });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.14 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickFastTapUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self touchUpAtPoint:point touchId:touchId];
         [self triggerUIKitControlAtPoint:point];
     });
@@ -61,7 +64,7 @@ static const NSUInteger AnClickMultiTapMaxPoints = 32;
 
 + (void)doubleTapAtPoint:(CGPoint)point {
     [self tapAtPoint:point];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.22 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickFastDoubleTapDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self tapAtPoint:point];
     });
 }
@@ -93,10 +96,10 @@ static const NSUInteger AnClickMultiTapMaxPoints = 32;
     }
 
     [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:beganPhases];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.03 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickFastTapMoveDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:movePhases];
     });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.14 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickFastTapUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:endedPhases];
         for (NSValue *value in touchPoints) {
             [self triggerUIKitControlAtPoint:value.CGPointValue];
@@ -274,7 +277,7 @@ static const NSUInteger AnClickMultiTapMaxPoints = 32;
     }
 
     [control sendActionsForControlEvents:UIControlEventTouchDown];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickTouchUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [control sendActionsForControlEvents:UIControlEventTouchUpInside];
         NSLog(@"[AnClick] UIKit fallback tapped %@ screen=(%.1f, %.1f) window=(%.1f, %.1f)",
               control,
@@ -351,7 +354,7 @@ static const NSUInteger AnClickMultiTapMaxPoints = 32;
 + (void)twoFingerTapAtPoint:(CGPoint)point distance:(CGFloat)distance {
     NSArray<NSValue *> *points = [self twoFingerPointsAtCenter:point distance:MAX(distance, 24.0) angle:0];
     [self sendTwoFingerPoints:points phase:AnClickHammerTouchPhaseBegan];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickFastTapUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self sendTwoFingerPoints:points phase:AnClickHammerTouchPhaseEnded];
     });
 }
