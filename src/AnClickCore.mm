@@ -673,13 +673,45 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
         return nil;
     }
 
+    cv::Scalar templateMean;
+    cv::Scalar templateStdDev;
+    cv::meanStdDev(templ, templateMean, templateStdDev);
+    double averageTemplateStdDev = (templateStdDev[0] + templateStdDev[1] + templateStdDev[2]) / 3.0;
+    if (averageTemplateStdDev < 3.0) {
+        NSLog(@"[AnClick] Rejected low-detail template stddev %.3f", averageTemplateStdDev);
+        return nil;
+    }
+
     cv::Mat result;
     cv::matchTemplate(source, templ, result, cv::TM_CCOEFF_NORMED);
 
-    double bestScore = 0.0;
-    cv::Point bestLocation;
-    cv::minMaxLoc(result, NULL, &bestScore, NULL, &bestLocation);
-    if (bestScore < threshold) {
+    double maxScore = 0.0;
+    cv::Point maxLocation;
+    cv::minMaxLoc(result, NULL, &maxScore, NULL, &maxLocation);
+    cv::Point bestLocation = maxLocation;
+    double bestScore = maxScore;
+    if (!isfinite(bestScore) || bestScore < threshold) {
+        return nil;
+    }
+
+    cv::Rect matchedPixelRect(bestLocation.x, bestLocation.y, templ.cols, templ.rows);
+    if (matchedPixelRect.x < 0 ||
+        matchedPixelRect.y < 0 ||
+        matchedPixelRect.x + matchedPixelRect.width > source.cols ||
+        matchedPixelRect.y + matchedPixelRect.height > source.rows) {
+        return nil;
+    }
+    cv::Mat absoluteDifference;
+    cv::absdiff(source(matchedPixelRect), templ, absoluteDifference);
+    cv::Scalar meanDifference = cv::mean(absoluteDifference);
+    double averageDifference = (meanDifference[0] + meanDifference[1] + meanDifference[2]) / 3.0;
+    double pixelSimilarity = 1.0 - MIN(1.0, MAX(0.0, averageDifference / 255.0));
+    double minimumPixelSimilarity = MAX(0.58, MIN(0.90, threshold - 0.16));
+    if (!isfinite(pixelSimilarity) || pixelSimilarity < minimumPixelSimilarity) {
+        NSLog(@"[AnClick] Rejected template match score %.3f pixelSimilarity %.3f threshold %.3f",
+              bestScore,
+              pixelSimilarity,
+              threshold);
         return nil;
     }
 
@@ -712,8 +744,9 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
                                                      topLeftScreenPoint.y,
                                                      bottomRightScreenPoint.x - topLeftScreenPoint.x,
                                                      bottomRightScreenPoint.y - topLeftScreenPoint.y));
-    NSLog(@"[AnClick] OpenCV match score %.3f rect=(%.1f, %.1f, %.1f, %.1f) screen=(%.1f, %.1f)",
+    NSLog(@"[AnClick] OpenCV match score %.3f pixelSimilarity %.3f rect=(%.1f, %.1f, %.1f, %.1f) screen=(%.1f, %.1f)",
           bestScore,
+          pixelSimilarity,
           screenRect.origin.x,
           screenRect.origin.y,
           screenRect.size.width,
@@ -724,6 +757,7 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
         @"point": [NSValue valueWithCGPoint:screenPoint],
         @"rect": [NSValue valueWithCGRect:screenRect],
         @"score": @(bestScore),
+        @"pixelSimilarity": @(pixelSimilarity),
     };
 }
 
