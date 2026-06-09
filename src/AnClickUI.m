@@ -5,7 +5,6 @@
 #import <MediaPlayer/MediaPlayer.h>
 #import <objc/runtime.h>
 #import <sys/proc.h>
-#import <sys/ptrace.h>
 #import <sys/sysctl.h>
 #import <unistd.h>
 #import <math.h>
@@ -86,6 +85,8 @@ static void (*AnClickOriginalSpringBoardHandlePhysicalButtonEvent)(id self, SEL 
 #ifndef PT_DENY_ATTACH
 #define PT_DENY_ATTACH 31
 #endif
+
+extern int ptrace(int request, pid_t pid, void *addr, int data);
 
 static NSTimeInterval AnClickLocalExpiryUnixTime(void) {
     const uint8_t encoded[] = {0x26, 0xA4, 0x78, 0xF8, 0x0F, 0xC4, 0x78, 0xB3};
