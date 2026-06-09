@@ -74,6 +74,7 @@ static const NSInteger AnClickSpringBoardVolumeDownButtonType = 103;
 static const NSInteger AnClickColorPickMarkerTagBase = 43100;
 static const NSInteger AnClickColorPickRowTagBase = 43200;
 static const NSUInteger AnClickColorPickMaxSamples = 32;
+static const NSUInteger AnClickMultiTapMaxPoints = 32;
 static const NSUInteger ACPostPairLimit = 8;
 static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.10;
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
@@ -205,6 +206,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 @interface AnClickFakeTouch : NSObject
 + (void)tapAtPoint:(CGPoint)point;
 + (void)doubleTapAtPoint:(CGPoint)point;
++ (void)multiTapAtPoints:(NSArray<NSValue *> *)points;
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration;
 + (void)beginHoldAtPoint:(CGPoint)point;
 + (void)endHold;
@@ -300,6 +302,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_networkPostCustomButton;
     UIButton *_networkPostOCRResultButton;
     UIButton *_networkPostAddPairButton;
+    UIButton *_multiTapClearButton;
     UIButton *_previewActionButton;
     UIButton *_swipeRecordButton;
     UIButton *_macroRecordButton;
@@ -396,6 +399,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSMutableArray<UITextField *> *_networkPostValueFields;
     NSMutableArray<UIButton *> *_networkPostValueModeButtons;
     NSMutableArray<NSMutableDictionary *> *_networkPostPairs;
+    NSMutableArray<NSValue *> *_multiTapPoints;
     NSMutableArray<NSValue *> *_recordedSwipePoints;
     NSMutableArray<NSValue *> *_liveSwipePoints;
     NSArray<NSDictionary *> *_recordedMacroEvents;
@@ -1455,11 +1459,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     CGFloat gap = 12.0;
     CGFloat modeWidth = floor((panelWidth - gap * 4.0) / 3.0);
-    NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"滑动", @"识图", @"识字", @"识色", @"网络", @"录制"];
+    NSArray<NSString *> *modeTitles = @[@"点击", @"双击", @"长按", @"多指", @"滑动", @"识图", @"识字", @"识色", @"网络", @"录制"];
     NSArray<NSNumber *> *modeTags = @[
         @(AnClickActionModeTap),
         @(AnClickActionModeDoubleTap),
         @(AnClickActionModeLongPress),
+        @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeImage),
         @(AnClickActionModeOCR),
@@ -1604,6 +1609,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkPostAddPairButton = [self panelButtonWithTitle:@"添加键值" action:@selector(addNetworkPostPair)];
     _networkPostAddPairButton.frame = CGRectMake(gap, 272, buttonWidth, 32);
     [_panelView addSubview:_networkPostAddPairButton];
+
+    _multiTapClearButton = [self panelButtonWithTitle:@"清空触点" action:@selector(clearMultiTapPoints)];
+    _multiTapClearButton.frame = CGRectMake(gap, 272, buttonWidth, 32);
+    [_panelView addSubview:_multiTapClearButton];
 
     _networkRetryModeButton = [self panelButtonWithTitle:@"一直判断" action:@selector(toggleNetworkRetryMode)];
     _networkRetryModeButton.frame = CGRectMake(gap, 234, buttonWidth, 32);
@@ -2464,6 +2473,49 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [self path:path mappedFromScreenSize:sourceSize toScreenSize:targetSize];
 }
 
+- (NSArray<NSValue *> *)pointValuesArrayFromObject:(id)object maxCount:(NSUInteger)maxCount {
+    if (![object isKindOfClass:NSArray.class]) {
+        return @[];
+    }
+    NSMutableArray<NSValue *> *points = [NSMutableArray array];
+    for (id item in (NSArray *)object) {
+        if (![item isKindOfClass:NSValue.class]) {
+            continue;
+        }
+        [points addObject:item];
+        if (points.count >= maxCount) {
+            break;
+        }
+    }
+    return points;
+}
+
+- (NSArray<NSValue *> *)storedMultiTapPointsForTask:(NSDictionary *)task {
+    NSArray<NSValue *> *points = [self pointValuesArrayFromObject:task[@"multiPoints"] maxCount:AnClickMultiTapMaxPoints];
+    if (points.count > 0) {
+        return points;
+    }
+    NSValue *pointValue = task[@"point"];
+    if ([pointValue isKindOfClass:NSValue.class]) {
+        return @[pointValue];
+    }
+    return @[];
+}
+
+- (NSArray<NSValue *> *)resolvedMultiTapPointsForTask:(NSDictionary *)task {
+    NSArray<NSValue *> *points = [self storedMultiTapPointsForTask:task];
+    if (points.count == 0) {
+        return @[];
+    }
+    BOOL hasMultiPoints = [task[@"multiPoints"] isKindOfClass:NSArray.class];
+    CGSize sourceSize = [self screenCoordinateSizeFromObject:task[hasMultiPoints ? @"multiPointScreenSize" : @"pointScreenSize"]];
+    CGSize targetSize = [self currentScreenCoordinateSize];
+    if (![self screenCoordinateSizeIsValid:sourceSize]) {
+        sourceSize = [self inferredRotatedSourceSizeForPath:points targetSize:targetSize];
+    }
+    return [self path:points mappedFromScreenSize:sourceSize toScreenSize:targetSize];
+}
+
 - (NSArray<NSDictionary *> *)resolvedRecordedEvents:(NSArray<NSDictionary *> *)events fromScreenSize:(CGSize)sourceSize {
     CGSize targetSize = [self currentScreenCoordinateSize];
     if (![self screenCoordinateSizeIsValid:sourceSize]) {
@@ -2507,6 +2559,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_recordedSwipePoints.count > 0) {
         _recordedSwipePoints = [[self path:_recordedSwipePoints mappedFromScreenSize:sourceSize toScreenSize:targetSize] mutableCopy];
     }
+    if (_multiTapPoints.count > 0) {
+        _multiTapPoints = [[self path:_multiTapPoints mappedFromScreenSize:sourceSize toScreenSize:targetSize] mutableCopy];
+    }
     if (_targetColorSamples.count > 0) {
         _targetColorSamples = [[self colorSamples:_targetColorSamples mappedFromScreenSize:sourceSize toScreenSize:targetSize] mutableCopy];
     }
@@ -2518,6 +2573,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _hasManualActionPoint[(NSUInteger)AnClickActionModeOCR] ||
         _hasManualSwipeAnchor ||
         _hasFailureActionPoint ||
+        _multiTapPoints.count > 0 ||
         _recordedSwipePoints.count > 0 ||
         _targetColorSamples.count > 0) {
         _manualCoordinateScreenSize = targetSize;
@@ -3416,7 +3472,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _secondaryConfigLabel.hidden = YES;
     _tertiaryConfigLabel.hidden = YES;
     _failureActionCaptionLabel.hidden = YES;
-    _failureActionCaptionLabel.hidden = YES;
     _thresholdCaptionLabel.hidden = YES;
     _delayCaptionLabel.hidden = YES;
     _repeatCaptionLabel.hidden = YES;
@@ -3456,6 +3511,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkPostCustomButton.hidden = YES;
     _networkPostOCRResultButton.hidden = YES;
     _networkPostAddPairButton.hidden = YES;
+    _multiTapClearButton.hidden = YES;
     _previewActionButton.hidden = YES;
     _swipeRecordButton.hidden = YES;
     _macroRecordButton.hidden = YES;
@@ -3545,6 +3601,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _networkPostCustomButton,
         _networkPostOCRResultButton,
         _networkPostAddPairButton,
+        _multiTapClearButton,
         _previewActionButton,
         _swipeRecordButton,
         _macroRecordButton,
@@ -5044,6 +5101,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } else {
         _recordedSwipePoints = [NSMutableArray array];
     }
+    if (_multiTapPoints) {
+        [_multiTapPoints removeAllObjects];
+    } else {
+        _multiTapPoints = [NSMutableArray array];
+    }
     _currentTemplatePath = nil;
     _imageUsesMatchPoint = YES;
     _ocrUsesMatchPoint = YES;
@@ -5190,6 +5252,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     _actionMode = nextMode;
+    if (![self currentActionIsRecognitionMode]) {
+        _recognitionRetryDropdownVisible = NO;
+    }
     if ([self isReusablePointActionMode:nextMode] && ![self hasManualPointForMode:nextMode] && hasReusablePoint) {
         _manualActionPoints[(NSUInteger)nextMode] = reusablePoint;
         _hasManualActionPoint[(NSUInteger)nextMode] = YES;
@@ -5211,7 +5276,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)actionNameForMode:(AnClickActionMode)mode {
-    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动", @"二指", @"缩小", @"放大", @"旋转", @"识图", @"录制", @"识字", @"识色", @"网络"];
+    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动", @"多指", @"缩小", @"放大", @"旋转", @"识图", @"录制", @"识字", @"识色", @"网络"];
     if (mode < AnClickActionModeTap || mode >= AnClickActionModeCount) {
         return @"动作";
     }
@@ -5222,6 +5287,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return mode == AnClickActionModeTap ||
         mode == AnClickActionModeDoubleTap ||
         mode == AnClickActionModeLongPress ||
+        mode == AnClickActionModeTwoFingerTap ||
         mode == AnClickActionModeSwipe ||
         mode == AnClickActionModeImage ||
         mode == AnClickActionModeMacro ||
@@ -5969,6 +6035,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkPostCustomButton.hidden = YES;
     _networkPostOCRResultButton.hidden = YES;
     _networkPostAddPairButton.hidden = YES;
+    _multiTapClearButton.hidden = YES;
     _previewActionButton.hidden = YES;
     _swipeRecordButton.hidden = YES;
     _macroRecordButton.hidden = YES;
@@ -6457,6 +6524,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)pointSummaryForMode:(AnClickActionMode)mode emptyTitle:(NSString *)emptyTitle {
+    if (mode == AnClickActionModeTwoFingerTap) {
+        return [self multiTapPointSummary];
+    }
     if (mode == AnClickActionModeSwipe) {
         if (_hasManualSwipeAnchor && _hasManualSwipeEndPoint) {
             return [NSString stringWithFormat:@"起 %.0f,%.0f  终 %.0f,%.0f",
@@ -6476,6 +6546,24 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return [NSString stringWithFormat:@"已选 %.0f,%.0f", point.x, point.y];
     }
     return emptyTitle;
+}
+
+- (NSString *)multiTapPointSummary {
+    NSUInteger count = MIN(_multiTapPoints.count, AnClickMultiTapMaxPoints);
+    if (count == 0) {
+        return @"添加触点";
+    }
+    return [NSString stringWithFormat:@"已取%lu点 继续添加", (unsigned long)count];
+}
+
+- (void)clearMultiTapPoints {
+    if (_actionMode != AnClickActionModeTwoFingerTap) {
+        return;
+    }
+    [_multiTapPoints removeAllObjects];
+    [self refreshEditorConfigControls];
+    [self updateStatusForCurrentConfig];
+    [self autosaveSelectedTaskIfPossible];
 }
 
 - (BOOL)currentFailureActionNeedsPoint {
@@ -6949,6 +7037,32 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [self layoutButtons:@[_previewActionButton, _runManualButton] x:side y:conditionTopY + 74.0 width:contentWidth height:36 gap:10.0];
             [self layoutNetworkFieldsAtY:conditionTopY + 124.0];
         }
+    } else if (_actionMode == AnClickActionModeTwoFingerTap) {
+        _saveTaskButton.enabled = YES;
+        _saveTaskButton.alpha = 1.0;
+        CGFloat side = 18.0;
+        CGFloat width = _panelView.bounds.size.width;
+        CGFloat contentWidth = width - side * 2.0;
+        _primaryConfigLabel.text = @"同步点击位置";
+        _primaryConfigLabel.hidden = NO;
+        _primaryConfigLabel.frame = CGRectMake(side, configTopY, contentWidth, 20);
+        [_pickPointButton setTitle:[self multiTapPointSummary] forState:UIControlStateNormal];
+        [self styleNormalButton:_pickPointButton];
+        _pickPointButton.hidden = NO;
+        _pickPointButton.frame = CGRectMake(side, configTopY + 22.0, contentWidth, 40);
+        [self updateButtonShadowPath:_pickPointButton];
+
+        [_previewActionButton setTitle:@"预览触点" forState:UIControlStateNormal];
+        [_runManualButton setTitle:@"测试执行" forState:UIControlStateNormal];
+        [_multiTapClearButton setTitle:@"清空触点" forState:UIControlStateNormal];
+        [self styleNormalButton:_previewActionButton];
+        [self styleNormalButton:_runManualButton];
+        [self styleNormalButton:_multiTapClearButton];
+        [self layoutButtons:@[_previewActionButton, _runManualButton, _multiTapClearButton] x:side y:configTopY + 72.0 width:contentWidth height:36 gap:8.0];
+        _multiTapClearButton.enabled = _multiTapPoints.count > 0;
+        _multiTapClearButton.alpha = _multiTapClearButton.enabled ? 1.0 : 0.45;
+        [self layoutDoubleTimingFieldsAtY:configTopY + 124.0];
+        [self layoutRandomizationControlsAtY:configTopY + 194.0];
     } else if (_actionMode == AnClickActionModeMacro) {
         _saveTaskButton.enabled = YES;
         _saveTaskButton.alpha = 1.0;
@@ -7021,6 +7135,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)currentEditorFailureActionStatusSuffix {
+    if (![self currentActionIsRecognitionMode]) {
+        return @"";
+    }
     AnClickActionMode failureMode = [self normalizedFailureActionMode:_failureActionMode];
     if (failureMode == AnClickActionModeNone) {
         return @"";
@@ -7141,6 +7258,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
+    if (_actionMode == AnClickActionModeTwoFingerTap) {
+        NSUInteger count = MIN(_multiTapPoints.count, AnClickMultiTapMaxPoints);
+        _statusLabel.text = count >= 2
+            ? [NSString stringWithFormat:@"多指 已取%lu点", (unsigned long)count]
+            : [NSString stringWithFormat:@"多指 已取%lu点 至少2点", (unsigned long)count];
+        return;
+    }
+
     NSString *name = [self currentActionName];
     if ([self hasManualPointForMode:_actionMode]) {
         _statusLabel.text = [NSString stringWithFormat:@"%@ 已取点", name];
@@ -7191,6 +7316,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)selectFailureActionMode:(UIButton *)sender {
+    if (![self currentActionIsRecognitionMode]) {
+        _failureActionMode = AnClickActionModeNone;
+        _recognitionRetryDropdownVisible = NO;
+        [self refreshEditorConfigControls];
+        [self updateStatusForCurrentConfig];
+        return;
+    }
     _failureActionMode = [self normalizedFailureActionMode:(AnClickActionMode)sender.tag];
     if (_imageActionMode != AnClickActionModeNetwork &&
         _failureActionMode != AnClickActionModeNetwork) {
@@ -8111,6 +8243,57 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     });
 }
 
+- (void)showMultiTapMarkersForScreenPoints:(NSArray<NSValue *> *)points inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
+    [_operationTraceView removeFromSuperview];
+    if (points.count == 0 || !hostWindow) {
+        return;
+    }
+
+    UIView *overlay = [[UIView alloc] initWithFrame:hostWindow.bounds];
+    overlay.userInteractionEnabled = NO;
+    overlay.backgroundColor = UIColor.clearColor;
+    NSUInteger count = MIN(points.count, AnClickMultiTapMaxPoints);
+    for (NSUInteger i = 0; i < count; i++) {
+        NSValue *value = points[i];
+        if (![value isKindOfClass:NSValue.class]) {
+            continue;
+        }
+        CGPoint center = [hostWindow convertPoint:value.CGPointValue fromWindow:nil];
+        CGFloat size = 32.0;
+        UIView *marker = [[UIView alloc] initWithFrame:CGRectMake(0, 0, size, size)];
+        marker.center = center;
+        marker.userInteractionEnabled = NO;
+        marker.backgroundColor = [UIColor colorWithRed:1.0 green:0.55 blue:0.12 alpha:0.12];
+        marker.layer.cornerRadius = size * 0.5;
+        marker.layer.borderWidth = 2.0;
+        marker.layer.borderColor = UIColor.systemOrangeColor.CGColor;
+
+        UILabel *label = [[UILabel alloc] initWithFrame:marker.bounds];
+        label.text = [NSString stringWithFormat:@"%lu", (unsigned long)i + 1];
+        label.textColor = UIColor.whiteColor;
+        label.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightBold];
+        label.textAlignment = NSTextAlignmentCenter;
+        label.adjustsFontSizeToFitWidth = YES;
+        label.minimumScaleFactor = 0.65;
+        [marker addSubview:label];
+        [overlay addSubview:marker];
+    }
+
+    [hostWindow addSubview:overlay];
+    _operationTraceView = overlay;
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(duration, 0.4) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+        [overlay removeFromSuperview];
+        if (strongSelf->_operationTraceView == overlay) {
+            strongSelf->_operationTraceView = nil;
+        }
+    });
+}
+
 - (void)showOperationTraceForMode:(AnClickActionMode)mode atPoint:(CGPoint)screenPoint inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
     [_operationTraceView removeFromSuperview];
     if (!hostWindow) {
@@ -8643,6 +8826,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return task;
     }
 
+    if (_actionMode == AnClickActionModeTwoFingerTap) {
+        if (_multiTapPoints.count >= 2) {
+            task[@"multiPoints"] = [[_multiTapPoints subarrayWithRange:NSMakeRange(0, MIN(_multiTapPoints.count, AnClickMultiTapMaxPoints))] copy];
+            task[@"multiPointScreenSize"] = [self currentScreenCoordinateSizeValue];
+        } else if (requireComplete) {
+            _statusLabel.text = @"先取至少2个触点";
+            return nil;
+        }
+        return task;
+    }
+
     if (_actionMode == AnClickActionModeSwipe) {
         NSArray<NSValue *> *path = [self manualSwipePath];
         if (path.count >= 2) {
@@ -8744,6 +8938,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (desc.length == 0 && mode == AnClickActionModeMacro) {
         NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
         subtitle = events.count > 0 ? [NSString stringWithFormat:@"已录 %lu 步", (unsigned long)events.count] : @"未录制";
+    } else if (desc.length == 0 && mode == AnClickActionModeTwoFingerTap) {
+        NSUInteger count = [self storedMultiTapPointsForTask:task].count;
+        subtitle = count >= 2
+            ? [NSString stringWithFormat:@"同步点击 %lu 点", (unsigned long)count]
+            : ([task[@"point"] isKindOfClass:NSValue.class] ? @"中心二指点击" : @"未取触点");
     } else if (desc.length == 0 && mode == AnClickActionModeOCR) {
         NSString *text = [self trimmedActionDescription:task[@"ocrText"]];
         AnClickOCRMatchMode matchMode = [self ocrMatchModeForTask:task];
@@ -8823,6 +9022,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *detail = [self trimmedActionDescription:task[@"desc"]];
     if (mode == AnClickActionModeOCR) {
         detail = @"定位中";
+    } else if (detail.length == 0 && mode == AnClickActionModeTwoFingerTap) {
+        detail = [NSString stringWithFormat:@"%lu点同步", (unsigned long)[self storedMultiTapPointsForTask:task].count];
     } else if (detail.length == 0 && mode == AnClickActionModeColor) {
         detail = [self colorPatternSummaryForTask:task];
     } else if (detail.length == 0 && mode == AnClickActionModeNetwork) {
@@ -9072,6 +9273,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _hasFailureActionPoint = YES;
             [self rememberManualCoordinateScreenSize];
         }
+    } else if (mode == AnClickActionModeTwoFingerTap) {
+        NSArray<NSValue *> *points = [self resolvedMultiTapPointsForTask:task];
+        if (points.count > 0) {
+            _multiTapPoints = [points mutableCopy];
+            [self rememberManualCoordinateScreenSize];
+        }
     } else if (mode == AnClickActionModeSwipe) {
         NSArray<NSValue *> *path = [self resolvedPathForTask:task];
         if (path.count >= 2) {
@@ -9165,7 +9372,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _networkTimeout = [task[@"networkTimeout"] respondsToSelector:@selector(doubleValue)]
             ? MIN(60.0, MAX(1.0, [task[@"networkTimeout"] doubleValue]))
             : 8.0;
-    } else if ([self isSelectableActionMode:mode] && mode != AnClickActionModeSwipe && mode != AnClickActionModeImage) {
+    } else if ([self isSelectableActionMode:mode] && mode != AnClickActionModeSwipe && mode != AnClickActionModeImage && mode != AnClickActionModeTwoFingerTap) {
         NSValue *pointValue = task[@"point"];
         if (pointValue) {
             _manualActionPoints[(NSUInteger)mode] = [self resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
@@ -9429,6 +9636,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (mode == AnClickActionModeDoubleTap) {
         return 0.55;
     }
+    if (mode == AnClickActionModeTwoFingerTap) {
+        return 0.34;
+    }
     if (mode == AnClickActionModePinchIn || mode == AnClickActionModePinchOut) {
         return 0.72;
     }
@@ -9526,6 +9736,24 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [jitteredPath addObject:[NSValue valueWithCGPoint:point]];
     }
     return jitteredPath;
+}
+
+- (NSArray<NSValue *> *)points:(NSArray<NSValue *> *)points byApplyingJitterForTask:(NSDictionary *)task {
+    if (points.count == 0) {
+        return @[];
+    }
+    CGFloat radius = [self jitterRadiusForTask:task];
+    if (radius <= 0.001) {
+        return points;
+    }
+    NSMutableArray<NSValue *> *jitteredPoints = [NSMutableArray arrayWithCapacity:points.count];
+    for (NSValue *value in points) {
+        if (![value isKindOfClass:NSValue.class]) {
+            continue;
+        }
+        [jitteredPoints addObject:[NSValue valueWithCGPoint:[self point:value.CGPointValue byApplyingJitterForTask:task]]];
+    }
+    return jitteredPoints;
 }
 
 - (NSArray<NSDictionary *> *)recordedEvents:(NSArray<NSDictionary *> *)events byApplyingJitterForTask:(NSDictionary *)task {
@@ -11202,6 +11430,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
         return YES;
     }
+    if (mode == AnClickActionModeTwoFingerTap) {
+        NSArray<NSValue *> *points = [self storedMultiTapPointsForTask:task];
+        if (points.count >= 2 || [task[@"point"] isKindOfClass:NSValue.class]) {
+            return YES;
+        }
+        _statusLabel.text = @"任务多指未取点";
+        return NO;
+    }
 
     NSValue *pointValue = task[@"point"];
     if (!pointValue) {
@@ -11283,6 +11519,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     [strongSelf showTapMarkerAtScreenPoint:trajectory.firstObject.CGPointValue inWindow:currentHostWindow];
                 }
                 [AnClickFakeTouch playRecordedEvents:resolvedEvents];
+            } else if (mode == AnClickActionModeTwoFingerTap) {
+                NSArray<NSValue *> *points = [strongSelf points:[strongSelf resolvedMultiTapPointsForTask:task] byApplyingJitterForTask:task];
+                if (points.count >= 2) {
+                    [strongSelf showMultiTapMarkersForScreenPoints:points inWindow:currentHostWindow duration:0.75];
+                    [AnClickFakeTouch multiTapAtPoints:points];
+                } else {
+                    NSValue *pointValue = task[@"point"];
+                    CGPoint point = [strongSelf point:[strongSelf resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue] byApplyingJitterForTask:task];
+                    [strongSelf performPointActionMode:mode atPoint:point inWindow:currentHostWindow];
+                }
             } else {
                 NSValue *pointValue = task[@"point"];
                 CGPoint point = [strongSelf point:[strongSelf resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue] byApplyingJitterForTask:task];
@@ -12598,6 +12844,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_pickingFailureActionPoint && _hasFailureActionPoint && hostWindow) {
         return [self clampedPointPickPoint:[hostWindow convertPoint:_failureActionPoint fromWindow:nil] inOverlay:overlay];
     }
+    if (_actionMode == AnClickActionModeTwoFingerTap && _multiTapPoints.count > 0 && hostWindow) {
+        return [self clampedPointPickPoint:[hostWindow convertPoint:_multiTapPoints.lastObject.CGPointValue fromWindow:nil] inOverlay:overlay];
+    }
     if ([self hasManualPointForMode:_actionMode] && hostWindow) {
         return [self clampedPointPickPoint:[hostWindow convertPoint:_manualActionPoints[(NSUInteger)_actionMode] fromWindow:nil]
                                   inOverlay:overlay];
@@ -12664,9 +12913,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     CGPoint screenPoint = [self pointPickScreenPointFromImagePoint:_pendingPointPickPoint];
     BOOL pickingCustomClickPoint = _actionMode == AnClickActionModeImage || _actionMode == AnClickActionModeOCR;
-    NSString *stage = (_actionMode == AnClickActionModeSwipe)
-        ? (_pickingSwipeEndPoint ? @"终点" : @"起点")
-        : (pickingCustomClickPoint ? @"点击点" : [self currentActionName]);
+    NSString *stage = nil;
+    if (_pickingFailureActionPoint) {
+        stage = @"失败位置";
+    } else if (_actionMode == AnClickActionModeSwipe) {
+        stage = _pickingSwipeEndPoint ? @"终点" : @"起点";
+    } else if (_actionMode == AnClickActionModeTwoFingerTap) {
+        stage = [NSString stringWithFormat:@"触点%lu", (unsigned long)MIN(_multiTapPoints.count + 1, AnClickMultiTapMaxPoints)];
+    } else {
+        stage = pickingCustomClickPoint ? @"点击点" : [self currentActionName];
+    }
     _pointCoordinateLabel.text = [NSString stringWithFormat:@"%@  X %.0f  Y %.0f",
                                   stage,
                                   screenPoint.x,
@@ -12890,6 +13146,25 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
+    if (_actionMode == AnClickActionModeTwoFingerTap) {
+        if (!_multiTapPoints) {
+            _multiTapPoints = [NSMutableArray array];
+        }
+        if (_multiTapPoints.count >= AnClickMultiTapMaxPoints) {
+            [self finishPointPickingOverlay];
+            _statusLabel.text = [NSString stringWithFormat:@"最多%lu个触点", (unsigned long)AnClickMultiTapMaxPoints];
+            return;
+        }
+        [_multiTapPoints addObject:[NSValue valueWithCGPoint:screenPoint]];
+        [self rememberManualCoordinateScreenSize];
+        [self finishPointPickingOverlay];
+        [self refreshEditorConfigControls];
+        [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
+        [self updateStatusForCurrentConfig];
+        [self autosaveSelectedTaskIfPossible];
+        return;
+    }
+
     _manualActionPoints[(NSUInteger)_actionMode] = screenPoint;
     _hasManualActionPoint[(NSUInteger)_actionMode] = YES;
     [self rememberManualCoordinateScreenSize];
@@ -13104,6 +13379,33 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
                 });
             });
+        });
+        return;
+    }
+
+    if (_actionMode == AnClickActionModeTwoFingerTap) {
+        if (_multiTapPoints.count < 2) {
+            _statusLabel.text = @"先取至少2个触点";
+            return;
+        }
+        NSArray<NSValue *> *points = [_multiTapPoints copy];
+        NSTimeInterval previewDuration = 1.0;
+        [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+        NSUInteger geometryGeneration = _screenGeometryGeneration;
+        __weak typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            if (![strongSelf recognitionGeometryStillValidFromGeneration:geometryGeneration
+                                                            runGeneration:0
+                                                             restorePanel:YES]) {
+                return;
+            }
+            [strongSelf showMultiTapMarkersForScreenPoints:points inWindow:hostWindow duration:previewDuration];
+            strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览多指%lu点", (unsigned long)points.count];
+            [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
         });
         return;
     }

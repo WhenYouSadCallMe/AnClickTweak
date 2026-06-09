@@ -11,6 +11,7 @@
 @interface AnClickFakeTouch : NSObject
 + (void)tapAtPoint:(CGPoint)point;
 + (void)doubleTapAtPoint:(CGPoint)point;
++ (void)multiTapAtPoints:(NSArray<NSValue *> *)points;
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration;
 + (void)beginHoldAtPoint:(CGPoint)point;
 + (void)endHold;
@@ -44,6 +45,7 @@ static const NSTimeInterval AnClickRecordedMoveMinInterval = 1.0 / 90.0;
 static const NSTimeInterval AnClickRecordedPlaybackMaxDuration = 600.0;
 static const NSUInteger AnClickRecordedPlaybackMaxEvents = 24000;
 static const NSUInteger AnClickRecordedPlaybackMaxScheduledBlocks = 30000;
+static const NSUInteger AnClickMultiTapMaxPoints = 32;
 
 + (void)tapAtPoint:(CGPoint)point {
     NSInteger touchId = 1;
@@ -61,6 +63,44 @@ static const NSUInteger AnClickRecordedPlaybackMaxScheduledBlocks = 30000;
     [self tapAtPoint:point];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.22 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self tapAtPoint:point];
+    });
+}
+
++ (void)multiTapAtPoints:(NSArray<NSValue *> *)points {
+    if (points.count == 0) {
+        return;
+    }
+
+    NSUInteger maxCount = MIN(points.count, AnClickMultiTapMaxPoints);
+    NSMutableArray<NSNumber *> *touchIds = [NSMutableArray arrayWithCapacity:maxCount];
+    NSMutableArray<NSValue *> *touchPoints = [NSMutableArray arrayWithCapacity:maxCount];
+    NSMutableArray<NSNumber *> *beganPhases = [NSMutableArray arrayWithCapacity:maxCount];
+    NSMutableArray<NSNumber *> *movePhases = [NSMutableArray arrayWithCapacity:maxCount];
+    NSMutableArray<NSNumber *> *endedPhases = [NSMutableArray arrayWithCapacity:maxCount];
+    for (NSUInteger i = 0; i < maxCount; i++) {
+        NSValue *value = points[i];
+        if (![value isKindOfClass:NSValue.class]) {
+            continue;
+        }
+        [touchIds addObject:@(30 + (NSInteger)i)];
+        [touchPoints addObject:value];
+        [beganPhases addObject:@(AnClickHammerTouchPhaseBegan)];
+        [movePhases addObject:@(AnClickHammerTouchPhaseMoved)];
+        [endedPhases addObject:@(AnClickHammerTouchPhaseEnded)];
+    }
+    if (touchPoints.count == 0) {
+        return;
+    }
+
+    [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:beganPhases];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.03 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:movePhases];
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.14 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:endedPhases];
+        for (NSValue *value in touchPoints) {
+            [self triggerUIKitControlAtPoint:value.CGPointValue];
+        }
     });
 }
 
