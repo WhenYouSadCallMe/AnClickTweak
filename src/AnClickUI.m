@@ -287,6 +287,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_failureDoubleTapActionButton;
     UIButton *_failureLongPressActionButton;
     UIButton *_failureNetworkActionButton;
+    UIButton *_failurePointButton;
     UIButton *_randomDelayModeButton;
     UIButton *_ocrContainsMatchModeButton;
     UIButton *_ocrRegexMatchModeButton;
@@ -414,9 +415,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _hasManualSwipeAnchor;
     CGPoint _manualSwipeEndPoint;
     BOOL _hasManualSwipeEndPoint;
+    CGPoint _failureActionPoint;
+    BOOL _hasFailureActionPoint;
     CGSize _manualCoordinateScreenSize;
     BOOL _hasManualCoordinateScreenSize;
     BOOL _pickingSwipeEndPoint;
+    BOOL _pickingFailureActionPoint;
     BOOL _pointPickPanStartedOnToolbar;
     CGPoint _pendingPointPickPoint;
     BOOL _hasPendingPointPickPoint;
@@ -1489,6 +1493,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _pickPointButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 120, buttonWidth, 32);
     [_panelView addSubview:_pickPointButton];
 
+    _failurePointButton = [self panelButtonWithTitle:@"失败位置" action:@selector(beginFailureActionPointPicking)];
+    _failurePointButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 120, buttonWidth, 32);
+    [_panelView addSubview:_failurePointButton];
+
     _runManualButton = [self panelButtonWithTitle:@"执行" action:@selector(runManualAction)];
     _runManualButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 120, buttonWidth, 32);
     [_panelView addSubview:_runManualButton];
@@ -2493,6 +2501,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_hasManualSwipeEndPoint) {
         _manualSwipeEndPoint = [self point:_manualSwipeEndPoint mappedFromScreenSize:sourceSize toScreenSize:targetSize];
     }
+    if (_hasFailureActionPoint) {
+        _failureActionPoint = [self point:_failureActionPoint mappedFromScreenSize:sourceSize toScreenSize:targetSize];
+    }
     if (_recordedSwipePoints.count > 0) {
         _recordedSwipePoints = [[self path:_recordedSwipePoints mappedFromScreenSize:sourceSize toScreenSize:targetSize] mutableCopy];
     }
@@ -2506,6 +2517,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_hasManualActionPoint[(NSUInteger)AnClickActionModeImage] ||
         _hasManualActionPoint[(NSUInteger)AnClickActionModeOCR] ||
         _hasManualSwipeAnchor ||
+        _hasFailureActionPoint ||
         _recordedSwipePoints.count > 0 ||
         _targetColorSamples.count > 0) {
         _manualCoordinateScreenSize = targetSize;
@@ -3418,6 +3430,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _captureButton.hidden = YES;
     _playButton.hidden = YES;
     _pickPointButton.hidden = YES;
+    _failurePointButton.hidden = YES;
     _runManualButton.hidden = YES;
     _recordSwipeButton.hidden = YES;
     _previewSwipeButton.hidden = YES;
@@ -3509,6 +3522,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _captureButton,
         _playButton,
         _pickPointButton,
+        _failurePointButton,
         _runManualButton,
         _recordSwipeButton,
         _previewSwipeButton,
@@ -5020,6 +5034,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _manualSwipeEndPoint = CGPointZero;
     _hasManualSwipeAnchor = NO;
     _hasManualSwipeEndPoint = NO;
+    _failureActionPoint = CGPointZero;
+    _hasFailureActionPoint = NO;
+    _pickingFailureActionPoint = NO;
     _manualCoordinateScreenSize = CGSizeZero;
     _hasManualCoordinateScreenSize = NO;
     if (_recordedSwipePoints) {
@@ -5927,6 +5944,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _captureButton.hidden = YES;
     _playButton.hidden = YES;
     _pickPointButton.hidden = YES;
+    _failurePointButton.hidden = YES;
     _runManualButton.hidden = YES;
     _recordSwipeButton.hidden = YES;
     _previewSwipeButton.hidden = YES;
@@ -6460,6 +6478,30 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return emptyTitle;
 }
 
+- (BOOL)currentFailureActionNeedsPoint {
+    return [self currentActionIsRecognitionMode] &&
+        [self failureActionModeNeedsPoint:[self normalizedFailureActionMode:_failureActionMode]];
+}
+
+- (NSString *)failureActionPointSummary {
+    if (_hasFailureActionPoint) {
+        return [NSString stringWithFormat:@"失败位置 %.0f,%.0f", _failureActionPoint.x, _failureActionPoint.y];
+    }
+    return @"选择失败位置";
+}
+
+- (CGFloat)layoutFailurePointButtonAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
+    if (![self currentFailureActionNeedsPoint]) {
+        return y;
+    }
+    [_failurePointButton setTitle:[self failureActionPointSummary] forState:UIControlStateNormal];
+    [self styleNormalButton:_failurePointButton];
+    _failurePointButton.hidden = NO;
+    _failurePointButton.frame = CGRectMake(side, y, width, 36.0);
+    [self updateButtonShadowPath:_failurePointButton];
+    return y + 44.0;
+}
+
 - (void)layoutSingleField:(UITextField *)field caption:(UILabel *)caption title:(NSString *)title y:(CGFloat)y {
     CGFloat side = 18.0;
     CGFloat width = _panelView.bounds.size.width;
@@ -6737,7 +6779,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         CGFloat failureButtonY = failureLabelY + 22.0;
         [self layoutFailureActionButtonsAtY:failureButtonY side:side width:contentWidth];
 
-        CGFloat fieldsY = failureButtonY + 42.0;
+        CGFloat fieldsY = [self layoutFailurePointButtonAtY:failureButtonY + 42.0 side:side width:contentWidth];
         if ([self currentRecognitionEditorUsesNetworkAction]) {
             fieldsY = [self layoutRecognitionNetworkFieldsAtY:fieldsY side:side width:contentWidth];
         }
@@ -6791,7 +6833,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _failureActionCaptionLabel.frame = CGRectMake(side, failureLabelY, contentWidth, 20);
         CGFloat failureButtonY = failureLabelY + 22.0;
         [self layoutFailureActionButtonsAtY:failureButtonY side:side width:contentWidth];
-        CGFloat fieldsY = failureButtonY + 44.0;
+        CGFloat fieldsY = [self layoutFailurePointButtonAtY:failureButtonY + 44.0 side:side width:contentWidth];
         if ([self currentRecognitionEditorUsesNetworkAction]) {
             fieldsY = [self layoutRecognitionNetworkFieldsAtY:fieldsY side:side width:contentWidth];
         }
@@ -6831,7 +6873,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _failureActionCaptionLabel.frame = CGRectMake(side, failureLabelY, contentWidth, 20);
         CGFloat failureButtonY = failureLabelY + 22.0;
         [self layoutFailureActionButtonsAtY:failureButtonY side:side width:contentWidth];
-        CGFloat fieldsY = failureButtonY + 44.0;
+        CGFloat fieldsY = [self layoutFailurePointButtonAtY:failureButtonY + 44.0 side:side width:contentWidth];
         if ([self currentRecognitionEditorUsesNetworkAction]) {
             fieldsY = [self layoutRecognitionNetworkFieldsAtY:fieldsY side:side width:contentWidth];
         }
@@ -6986,7 +7028,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (failureMode == AnClickActionModeNetwork) {
         return [NSString stringWithFormat:@" 失败后%@网络", [self normalizedNetworkMethodFromPostFlag:_networkUsesPost]];
     }
-    return [NSString stringWithFormat:@" 失败后%@", [self actionNameForMode:failureMode]];
+    NSString *pointText = _hasFailureActionPoint ? @"已取失败位" : @"先取失败位";
+    return [NSString stringWithFormat:@" 失败后%@ %@", [self actionNameForMode:failureMode], pointText];
 }
 
 - (void)updateStatusForCurrentConfig {
@@ -8475,12 +8518,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
         BOOL successNeedsPoint = !_imageUsesMatchPoint && _imageActionMode != AnClickActionModeNetwork;
         BOOL failureNeedsPoint = [self failureActionModeNeedsPoint:[self normalizedFailureActionMode:_failureActionMode]];
-        if (successNeedsPoint || failureNeedsPoint) {
+        if (successNeedsPoint) {
             if ([self hasManualPointForMode:AnClickActionModeImage]) {
                 task[@"point"] = [NSValue valueWithCGPoint:_manualActionPoints[(NSUInteger)AnClickActionModeImage]];
                 task[@"pointScreenSize"] = [self currentScreenCoordinateSizeValue];
             } else if (requireComplete) {
-                _statusLabel.text = failureNeedsPoint ? @"先取失败点击点" : @"先取点击点";
+                _statusLabel.text = @"先取点击点";
+                return nil;
+            }
+        }
+        if (failureNeedsPoint) {
+            if (_hasFailureActionPoint) {
+                task[@"failurePoint"] = [NSValue valueWithCGPoint:_failureActionPoint];
+                task[@"failurePointScreenSize"] = [self currentScreenCoordinateSizeValue];
+            } else if (requireComplete) {
+                _statusLabel.text = @"先取失败动作位置";
                 return nil;
             }
         }
@@ -8515,12 +8567,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
         BOOL successNeedsPoint = !_ocrUsesMatchPoint && _imageActionMode != AnClickActionModeNetwork;
         BOOL failureNeedsPoint = [self failureActionModeNeedsPoint:[self normalizedFailureActionMode:_failureActionMode]];
-        if (successNeedsPoint || failureNeedsPoint) {
+        if (successNeedsPoint) {
             if ([self hasManualPointForMode:AnClickActionModeOCR]) {
                 task[@"point"] = [NSValue valueWithCGPoint:_manualActionPoints[(NSUInteger)AnClickActionModeOCR]];
                 task[@"pointScreenSize"] = [self currentScreenCoordinateSizeValue];
             } else if (requireComplete) {
-                _statusLabel.text = failureNeedsPoint ? @"先取失败点击点" : @"先取点击点";
+                _statusLabel.text = @"先取点击点";
+                return nil;
+            }
+        }
+        if (failureNeedsPoint) {
+            if (_hasFailureActionPoint) {
+                task[@"failurePoint"] = [NSValue valueWithCGPoint:_failureActionPoint];
+                task[@"failurePointScreenSize"] = [self currentScreenCoordinateSizeValue];
+            } else if (requireComplete) {
+                _statusLabel.text = @"先取失败动作位置";
                 return nil;
             }
         }
@@ -8548,6 +8609,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if ((_imageActionMode == AnClickActionModeNetwork || _failureActionMode == AnClickActionModeNetwork) &&
             ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
             return nil;
+        }
+        if ([self failureActionModeNeedsPoint:[self normalizedFailureActionMode:_failureActionMode]]) {
+            if (_hasFailureActionPoint) {
+                task[@"failurePoint"] = [NSValue valueWithCGPoint:_failureActionPoint];
+                task[@"failurePointScreenSize"] = [self currentScreenCoordinateSizeValue];
+            } else if (requireComplete) {
+                _statusLabel.text = @"先取失败动作位置";
+                return nil;
+            }
         }
         return task;
     }
@@ -8992,6 +9062,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _hasManualActionPoint[(NSUInteger)AnClickActionModeImage] = YES;
             [self rememberManualCoordinateScreenSize];
         }
+        NSValue *failurePointValue = task[@"failurePoint"];
+        if (failurePointValue) {
+            _failureActionPoint = [self resolvedPoint:failurePointValue.CGPointValue forTask:task screenSizeKey:@"failurePointScreenSize"];
+            _hasFailureActionPoint = YES;
+            [self rememberManualCoordinateScreenSize];
+        } else if ([self failureActionModeNeedsPoint:_failureActionMode] && pointValue) {
+            _failureActionPoint = [self resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
+            _hasFailureActionPoint = YES;
+            [self rememberManualCoordinateScreenSize];
+        }
     } else if (mode == AnClickActionModeSwipe) {
         NSArray<NSValue *> *path = [self resolvedPathForTask:task];
         if (path.count >= 2) {
@@ -9023,6 +9103,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (pointValue) {
             _manualActionPoints[(NSUInteger)AnClickActionModeOCR] = [self resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
             _hasManualActionPoint[(NSUInteger)AnClickActionModeOCR] = YES;
+            [self rememberManualCoordinateScreenSize];
+        }
+        NSValue *failurePointValue = task[@"failurePoint"];
+        if (failurePointValue) {
+            _failureActionPoint = [self resolvedPoint:failurePointValue.CGPointValue forTask:task screenSizeKey:@"failurePointScreenSize"];
+            _hasFailureActionPoint = YES;
+            [self rememberManualCoordinateScreenSize];
+        } else if ([self failureActionModeNeedsPoint:_failureActionMode] && pointValue) {
+            _failureActionPoint = [self resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
+            _hasFailureActionPoint = YES;
             [self rememberManualCoordinateScreenSize];
         }
     } else if (mode == AnClickActionModeColor) {
@@ -9058,6 +9148,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _failureActionMode = [self normalizedFailureActionMode:(AnClickActionMode)[task[@"failureActionMode"] integerValue]];
         if (_imageActionMode == AnClickActionModeNetwork || _failureActionMode == AnClickActionModeNetwork) {
             [self loadNetworkRequestConfigFromTask:task];
+        }
+        NSValue *failurePointValue = task[@"failurePoint"];
+        if (failurePointValue) {
+            _failureActionPoint = [self resolvedPoint:failurePointValue.CGPointValue forTask:task screenSizeKey:@"failurePointScreenSize"];
+            _hasFailureActionPoint = YES;
+            [self rememberManualCoordinateScreenSize];
         }
     } else if (mode == AnClickActionModeNetwork) {
         [self loadNetworkRequestConfigFromTask:task];
@@ -9522,7 +9618,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         mode == AnClickActionModeLongPress;
 }
 
+- (CGPoint)resolvedPoint:(CGPoint)point forTask:(NSDictionary *)task screenSizeKey:(NSString *)screenSizeKey {
+    CGSize sourceSize = [self screenCoordinateSizeFromObject:task[screenSizeKey]];
+    CGSize targetSize = [self currentScreenCoordinateSize];
+    if (![self screenCoordinateSizeIsValid:sourceSize]) {
+        sourceSize = [self inferredRotatedSourceSizeForPoint:point targetSize:targetSize];
+    }
+    return [self point:point mappedFromScreenSize:sourceSize toScreenSize:targetSize];
+}
+
 - (BOOL)failureActionPointForTask:(NSDictionary *)task point:(CGPoint *)point {
+    NSValue *failurePointValue = task[@"failurePoint"];
+    if (failurePointValue) {
+        if (point) {
+            *point = [self resolvedPoint:failurePointValue.CGPointValue forTask:task screenSizeKey:@"failurePointScreenSize"];
+        }
+        return YES;
+    }
     NSValue *pointValue = task[@"point"];
     if (pointValue) {
         if (point) {
@@ -12267,12 +12379,60 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _statusLabel.text = @"取消取色";
 }
 
+- (void)beginScreenPointPickingWithHostWindow:(UIWindow *)hostWindow {
+    [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+        UIWindow *capturedWindow = nil;
+        UIImage *image = [AnClickCore captureCurrentWindowImageWithWindow:&capturedWindow];
+        if (!image.CGImage) {
+            strongSelf->_statusLabel.text = @"截图失败";
+            [strongSelf restorePanelAfterExternalTap];
+            return;
+        }
+        UIWindow *overlayWindow = capturedWindow ?: hostWindow;
+        if (![strongSelf capturedImage:image matchesWindow:overlayWindow]) {
+            strongSelf->_statusLabel.text = @"截图方向异常 请重试";
+            [strongSelf showToast:strongSelf->_statusLabel.text];
+            [strongSelf restorePanelAfterExternalTap];
+            return;
+        }
+        [strongSelf showPointPickOverlayWithImage:image hostWindow:overlayWindow];
+    });
+}
+
+- (void)beginFailureActionPointPicking {
+    if (![self currentActionIsRecognitionMode]) {
+        _statusLabel.text = @"识别动作才有失败位置";
+        return;
+    }
+    if (![self currentFailureActionNeedsPoint]) {
+        _statusLabel.text = @"先选择失败后点击动作";
+        return;
+    }
+
+    UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        _statusLabel.text = @"无窗口";
+        return;
+    }
+
+    _pickingFailureActionPoint = YES;
+    _pickingSwipeEndPoint = NO;
+    [self beginScreenPointPickingWithHostWindow:hostWindow];
+}
+
 - (void)beginPointPicking {
     if (_actionMode == AnClickActionModeNone) {
         _statusLabel.text = @"先选择动作";
         return;
     }
 
+    _pickingFailureActionPoint = NO;
     if (_actionMode == AnClickActionModeColor) {
         [self beginColorPicking];
         return;
@@ -12302,29 +12462,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
     }
 
-    [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
-    __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) {
-            return;
-        }
-        UIWindow *capturedWindow = nil;
-        UIImage *image = [AnClickCore captureCurrentWindowImageWithWindow:&capturedWindow];
-        if (!image.CGImage) {
-            strongSelf->_statusLabel.text = @"截图失败";
-            [strongSelf restorePanelAfterExternalTap];
-            return;
-        }
-        UIWindow *overlayWindow = capturedWindow ?: hostWindow;
-        if (![strongSelf capturedImage:image matchesWindow:overlayWindow]) {
-            strongSelf->_statusLabel.text = @"截图方向异常 请重试";
-            [strongSelf showToast:strongSelf->_statusLabel.text];
-            [strongSelf restorePanelAfterExternalTap];
-            return;
-        }
-        [strongSelf showPointPickOverlayWithImage:image hostWindow:overlayWindow];
-    });
+    [self beginScreenPointPickingWithHostWindow:hostWindow];
 }
 
 - (void)showPointPickOverlayWithImage:(UIImage *)image hostWindow:(UIWindow *)hostWindow {
@@ -12449,13 +12587,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     _pointPickWindow.hidden = NO;
     [self updatePointPickCursor];
-    _statusLabel.text = _pickingSwipeEndPoint ? @"滑动取终点" : @"拖动取点";
+    _statusLabel.text = _pickingFailureActionPoint ? @"取失败动作位置" : (_pickingSwipeEndPoint ? @"滑动取终点" : @"拖动取点");
 }
 
 - (CGPoint)initialPointPickPointInOverlay:(UIView *)overlay {
     UIWindow *hostWindow = _pointPickHostWindow;
     if (_actionMode == AnClickActionModeSwipe && _pickingSwipeEndPoint && _hasManualSwipeAnchor && hostWindow) {
         return [self clampedPointPickPoint:[hostWindow convertPoint:_manualSwipeAnchor fromWindow:nil] inOverlay:overlay];
+    }
+    if (_pickingFailureActionPoint && _hasFailureActionPoint && hostWindow) {
+        return [self clampedPointPickPoint:[hostWindow convertPoint:_failureActionPoint fromWindow:nil] inOverlay:overlay];
     }
     if ([self hasManualPointForMode:_actionMode] && hostWindow) {
         return [self clampedPointPickPoint:[hostWindow convertPoint:_manualActionPoints[(NSUInteger)_actionMode] fromWindow:nil]
@@ -12630,6 +12771,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _pointPickWindow = nil;
     _pointPickHostWindow = nil;
     _pickingSwipeEndPoint = NO;
+    _pickingFailureActionPoint = NO;
     [self restorePanelAfterExternalTap];
 }
 
@@ -12693,6 +12835,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_actionMode == AnClickActionModeNone) {
         [self cancelPointPicking];
         _statusLabel.text = @"先选择动作";
+        return;
+    }
+
+    if (_pickingFailureActionPoint) {
+        _failureActionPoint = screenPoint;
+        _hasFailureActionPoint = YES;
+        [self rememberManualCoordinateScreenSize];
+        [self finishPointPickingOverlay];
+        [self refreshEditorConfigControls];
+        [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
+        _statusLabel.text = [NSString stringWithFormat:@"失败位置 %.0f,%.0f", screenPoint.x, screenPoint.y];
+        [self updateStatusForCurrentConfig];
+        [self autosaveSelectedTaskIfPossible];
         return;
     }
 
