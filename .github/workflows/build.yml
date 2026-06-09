@@ -1,4 +1,4 @@
-name: Build AnClick dylib
+name: Build UIKitBridge dylib
 
 on:
   workflow_dispatch:
@@ -75,20 +75,20 @@ jobs:
             exit "$build_status"
           fi
           mkdir -p build-artifacts
-          dylib_path="$(find .theos/obj -name 'AnClick.dylib' -type f ! -path '*.dSYM/*' -print -quit)"
+          dylib_path="$(find .theos/obj -name 'UIKitBridge.dylib' -type f ! -path '*.dSYM/*' -print -quit)"
           test -n "$dylib_path"
-          cp "$dylib_path" build-artifacts/AnClick.dylib
-          test -f build-artifacts/AnClick.dylib
-          file build-artifacts/AnClick.dylib
-          otool -hv build-artifacts/AnClick.dylib
-          otool -L build-artifacts/AnClick.dylib
-          ldid -S build-artifacts/AnClick.dylib
+          cp "$dylib_path" build-artifacts/UIKitBridge.dylib
+          test -f build-artifacts/UIKitBridge.dylib
+          file build-artifacts/UIKitBridge.dylib
+          otool -hv build-artifacts/UIKitBridge.dylib
+          otool -L build-artifacts/UIKitBridge.dylib
+          ldid -S build-artifacts/UIKitBridge.dylib
 
       - name: Upload build diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: AnClick-build-diagnostics
+          name: UIKitBridge-build-diagnostics
           path: |
             .theos/**
             opencv-ios/**
@@ -99,5 +99,5 @@ jobs:
       - name: Upload dylib
         uses: actions/upload-artifact@v4
         with:
-          name: AnClick-dylib
-          path: build-artifacts/AnClick.dylib
+          name: UIKitBridge-dylib
+          path: build-artifacts/UIKitBridge.dylib

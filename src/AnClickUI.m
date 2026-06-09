@@ -4,7 +4,16 @@
 #import <AVFoundation/AVFoundation.h>
 #import <MediaPlayer/MediaPlayer.h>
 #import <objc/runtime.h>
+#import <sys/proc.h>
+#import <sys/ptrace.h>
+#import <sys/sysctl.h>
+#import <unistd.h>
 #import <math.h>
+
+#if ANCLICK_RELEASE_SILENT
+#undef NSLog
+#define NSLog(...) do {} while (0)
+#endif
 
 typedef NS_ENUM(NSInteger, AnClickActionMode) {
     AnClickActionModeNone = -1,
@@ -66,12 +75,99 @@ static const NSInteger AnClickSpringBoardVolumeDownButtonType = 103;
 static const NSInteger AnClickColorPickMarkerTagBase = 43100;
 static const NSInteger AnClickColorPickRowTagBase = 43200;
 static const NSUInteger AnClickColorPickMaxSamples = 32;
-static const NSUInteger AnClickNetworkPostMaxPairs = 8;
+static const NSUInteger ACPostPairLimit = 8;
 static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.10;
-static CFStringRef const AnClickVolumeShortcutDownNotification = CFSTR("com.anclick.volume.down");
-static CFStringRef const AnClickVolumeShortcutUpNotification = CFSTR("com.anclick.volume.up");
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
 static void (*AnClickOriginalSpringBoardHandlePhysicalButtonEvent)(id self, SEL _cmd, id event);
+
+#ifndef P_TRACED
+#define P_TRACED 0x00000800
+#endif
+#ifndef PT_DENY_ATTACH
+#define PT_DENY_ATTACH 31
+#endif
+
+static NSTimeInterval AnClickLocalExpiryUnixTime(void) {
+    const uint8_t encoded[] = {0x26, 0xA4, 0x78, 0xF8, 0x0F, 0xC4, 0x78, 0xB3};
+    const uint8_t masks[] = {0xA6, 0x31, 0x5D, 0x92, 0x0F, 0xC4, 0x78, 0xB3};
+    uint64_t value = 0;
+    for (size_t i = 0; i < sizeof(encoded); i++) {
+        value |= ((uint64_t)(encoded[i] ^ masks[i])) << (8 * i);
+    }
+    if (((uint32_t)value ^ 0xA70C91EFu) != 0xCD29046Fu ||
+        value < 1600000000ULL ||
+        value > 2200000000ULL) {
+        return 1.0;
+    }
+    return (NSTimeInterval)value;
+}
+
+static NSString *AnClickLocalClockKey(void) {
+    static NSString *clockKey = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        const uint8_t encoded[] = {
+            0x39, 0x35, 0x37, 0x74, 0x3B, 0x34, 0x39, 0x36, 0x33,
+            0x39, 0x31, 0x74, 0x36, 0x35, 0x39, 0x3B, 0x36, 0x74,
+            0x3D, 0x2F, 0x3B, 0x28, 0x3E, 0x74, 0x37, 0x3B, 0x22,
+        };
+        char decoded[sizeof(encoded) + 1];
+        for (size_t i = 0; i < sizeof(encoded); i++) {
+            decoded[i] = (char)(encoded[i] ^ 0x5A);
+        }
+        decoded[sizeof(encoded)] = '\0';
+        clockKey = [[NSString alloc] initWithBytes:decoded length:sizeof(encoded) encoding:NSUTF8StringEncoding];
+    });
+    return clockKey;
+}
+
+static CFStringRef AnClickDecodedCFString(const uint8_t *encoded, size_t length, uint8_t mask) {
+    if (!encoded || length == 0 || length > 96) {
+        return CFSTR("");
+    }
+    UInt8 decoded[96];
+    for (size_t i = 0; i < length; i++) {
+        decoded[i] = (UInt8)(encoded[i] ^ mask);
+    }
+    return CFStringCreateWithBytes(kCFAllocatorDefault, decoded, (CFIndex)length, kCFStringEncodingUTF8, false);
+}
+
+static CFStringRef AnClickVolumeShortcutNotification(NSInteger direction) {
+    static CFStringRef downName = NULL;
+    static CFStringRef upName = NULL;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        const uint8_t down[] = {
+            0x48, 0x44, 0x46, 0x05, 0x4A, 0x45, 0x48, 0x47, 0x42, 0x48, 0x40, 0x05,
+            0x5D, 0x44, 0x47, 0x5E, 0x46, 0x4E, 0x05, 0x4F, 0x44, 0x5C, 0x45,
+        };
+        const uint8_t up[] = {
+            0x48, 0x44, 0x46, 0x05, 0x4A, 0x45, 0x48, 0x47, 0x42, 0x48, 0x40, 0x05,
+            0x5D, 0x44, 0x47, 0x5E, 0x46, 0x4E, 0x05, 0x5E, 0x5B,
+        };
+        downName = AnClickDecodedCFString(down, sizeof(down), 0x2B);
+        upName = AnClickDecodedCFString(up, sizeof(up), 0x2B);
+    });
+    return direction < 0 ? downName : upName;
+}
+
+static BOOL AnClickDebuggerAttached(void) {
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
+    struct kinfo_proc info;
+    size_t size = sizeof(info);
+    memset(&info, 0, sizeof(info));
+    if (sysctl(mib, 4, &info, &size, NULL, 0) != 0) {
+        return NO;
+    }
+    return (info.kp_proc.p_flag & P_TRACED) != 0;
+}
+
+static void AnClickHardenLocalRuntime(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        (void)ptrace(PT_DENY_ATTACH, 0, NULL, 0);
+    });
+}
 
 @class AnClickUI;
 static void AnClickHardwareButtonEventCallback(void *target, void *refcon, IOHIDServiceClientRef service, IOHIDEventRef event);
@@ -157,6 +253,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)cleanupScreenInteractionStateRestoringPanel:(BOOL)restorePanel;
 - (void)showToast:(NSString *)message;
 - (void)performSelectedActionAtPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow preparePanel:(BOOL)preparePanel;
+- (BOOL)panelCanUseCurrentScene;
+- (void)clearTaskRunPauseState;
+- (void)stopTaskRunWithStatus:(NSString *)status showToast:(BOOL)showToast;
 @end
 
 @implementation AnClickUI {
@@ -413,6 +512,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     AnClickOCRMode _ocrMode;
     AnClickOCRMatchMode _ocrMatchMode;
     UIWindow *_pointPickHostWindow;
+    BOOL _panelSceneUnavailable;
 }
 
 - (UIColor *)themeHighlightColor {
@@ -425,6 +525,60 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSString *)toolDisplayName {
     return @"安姐连点器v1.0";
+}
+
+- (void)markPanelSceneUnavailable {
+    _panelSceneUnavailable = YES;
+    _volumeShortcutRunSuppressToasts = NO;
+    if ([AnClickFakeTouch isHolding]) {
+        [AnClickFakeTouch cancelHold];
+    }
+    if (_taskRunActive || _taskRunPausedForForeground) {
+        _taskRunActive = NO;
+        [self clearTaskRunPauseState];
+        _currentGlobalRunCycle = 0;
+        _taskRunGeneration++;
+    }
+    _panelWindow.hidden = YES;
+    _toastWindow.hidden = YES;
+    _toastView.hidden = YES;
+    _hostToastView.hidden = YES;
+    [self refreshCollapsedButtonTitle];
+    [self refreshTaskList];
+}
+
+- (BOOL)panelCanUseCurrentScene {
+    BOOL blocked = NO;
+    if (AnClickDebuggerAttached()) {
+        blocked = YES;
+    } else {
+        NSTimeInterval expiry = AnClickLocalExpiryUnixTime();
+        NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+        if (expiry <= 1.0 || now < 978307200.0) {
+            blocked = YES;
+        } else {
+            NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+            NSString *clockKey = AnClickLocalClockKey();
+            NSTimeInterval maxSeen = [defaults doubleForKey:clockKey];
+            if (now > maxSeen + 30.0) {
+                [defaults setDouble:now forKey:clockKey];
+                [defaults synchronize];
+                maxSeen = now;
+            }
+            if (maxSeen >= expiry) {
+                blocked = YES;
+            } else if (maxSeen > 0.0 && now + 600.0 < maxSeen) {
+                blocked = YES;
+            } else if (now >= expiry) {
+                blocked = YES;
+            }
+        }
+    }
+    if (blocked || _panelSceneUnavailable) {
+        [self markPanelSceneUnavailable];
+        return NO;
+    }
+    return YES;
 }
 
 - (NSMutableArray<NSDictionary *> *)mutableColorSamplesArrayFromObject:(id)object {
@@ -626,7 +780,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     static dispatch_queue_t queue;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        queue = dispatch_queue_create("com.anclick.disk-io", DISPATCH_QUEUE_SERIAL);
+        queue = dispatch_queue_create(NULL, DISPATCH_QUEUE_SERIAL);
     });
     return queue;
 }
@@ -672,6 +826,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)show {
     void (^showBlock)(void) = ^{
+        if (![self panelCanUseCurrentScene]) {
+            return;
+        }
         if (self->_panelWindow) {
             [self attachPanelWindowToActiveSceneIfNeeded];
             [self registerVolumeShortcutObserver];
@@ -720,13 +877,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CFNotificationCenterAddObserver(center,
                                     (__bridge const void *)self,
                                     AnClickVolumeDarwinNotificationCallback,
-                                    AnClickVolumeShortcutDownNotification,
+                                    AnClickVolumeShortcutNotification(-1),
                                     NULL,
                                     CFNotificationSuspensionBehaviorDeliverImmediately);
     CFNotificationCenterAddObserver(center,
                                     (__bridge const void *)self,
                                     AnClickVolumeDarwinNotificationCallback,
-                                    AnClickVolumeShortcutUpNotification,
+                                    AnClickVolumeShortcutNotification(1),
                                     NULL,
                                     CFNotificationSuspensionBehaviorDeliverImmediately);
 }
@@ -851,6 +1008,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)handleVolumeShortcutPlay {
+    if (![self panelCanUseCurrentScene]) {
+        [self refreshCollapsedButtonTitle];
+        return;
+    }
     if ([AnClickRecorder shared].isRecording) {
         _statusLabel.text = @"录制中无法播放";
         [self showVolumeShortcutToast:@"音量- 录制中无法播放"];
@@ -1565,7 +1726,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkPostValueFields = [NSMutableArray array];
     _networkPostValueModeButtons = [NSMutableArray array];
     _networkPostPairs = [NSMutableArray array];
-    for (NSUInteger i = 0; i < AnClickNetworkPostMaxPairs; i++) {
+    for (NSUInteger i = 0; i < ACPostPairLimit; i++) {
         UITextField *keyField = [[UITextField alloc] initWithFrame:CGRectZero];
         keyField.keyboardType = UIKeyboardTypeDefault;
         keyField.autocapitalizationType = UITextAutocapitalizationTypeNone;
@@ -5263,7 +5424,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     [self syncNetworkFieldsFromEditor];
     [self ensureNetworkPostPairs];
-    if (_networkPostPairs.count >= AnClickNetworkPostMaxPairs) {
+    if (_networkPostPairs.count >= ACPostPairLimit) {
         _statusLabel.text = @"最多8组键值";
         [self showToast:_statusLabel.text];
         return;
@@ -5510,7 +5671,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (!_networkPostPairs) {
         _networkPostPairs = [NSMutableArray array];
     }
-    while (_networkPostPairs.count > AnClickNetworkPostMaxPairs) {
+    while (_networkPostPairs.count > ACPostPairLimit) {
         [_networkPostPairs removeLastObject];
     }
     if (_networkPostPairs.count == 0) {
@@ -5650,7 +5811,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             @"value": usesResult ? @"" : (value ?: @""),
             @"useResult": @(usesResult),
         }];
-        if (pairs.count >= AnClickNetworkPostMaxPairs) {
+        if (pairs.count >= ACPostPairLimit) {
             break;
         }
     }
@@ -5673,7 +5834,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 @"value": usesResult ? @"" : [self networkPostSelfFilledValueFromText:value],
                 @"useResult": @(usesResult),
             } mutableCopy]];
-            if (pairs.count >= AnClickNetworkPostMaxPairs) {
+            if (pairs.count >= ACPostPairLimit) {
                 break;
             }
         }
@@ -5775,7 +5936,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     CGFloat nextY = y + (rowHeight + 8.0) * count;
-    _networkPostAddPairButton.hidden = count >= AnClickNetworkPostMaxPairs;
+    _networkPostAddPairButton.hidden = count >= ACPostPairLimit;
     if (!_networkPostAddPairButton.hidden) {
         [_networkPostAddPairButton setTitle:@"添加键值" forState:UIControlStateNormal];
         [self styleNormalButton:_networkPostAddPairButton];
@@ -6803,6 +6964,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)beginTemplateCapture {
+    if (![self panelCanUseCurrentScene]) {
+        return;
+    }
     if (_actionMode == AnClickActionModeNone) {
         _actionMode = AnClickActionModeImage;
         _imageUsesMatchPoint = YES;
@@ -7483,6 +7647,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)performSelectedActionAtPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow preparePanel:(BOOL)preparePanel {
+    if (![self panelCanUseCurrentScene]) {
+        return;
+    }
     if (_actionMode == AnClickActionModeNone) {
         _statusLabel.text = @"先选择动作";
         return;
@@ -7991,7 +8158,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         CGFloat rowY = 8.0 + rowHeight * i;
         UIButton *deleteButton = [UIButton buttonWithType:UIButtonTypeSystem];
         deleteButton.tag = 50000 + (NSInteger)i;
-        deleteButton.accessibilityIdentifier = @"AnClickTaskDelete";
         deleteButton.frame = CGRectMake(width - 88.0, rowY, 82.0, 68.0);
         [deleteButton setTitle:@"删除" forState:UIControlStateNormal];
         [deleteButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
@@ -8012,7 +8178,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
         UIButton *row = [UIButton buttonWithType:UIButtonTypeSystem];
         row.tag = (NSInteger)i;
-        row.accessibilityIdentifier = @"AnClickTaskRow";
         row.frame = CGRectMake(6.0, rowY, width - 12.0, 68.0);
         [row setTitle:[self titleForTask:_taskItems[i] index:i] forState:UIControlStateNormal];
         [row setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
@@ -8279,11 +8444,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return;
         }
         for (UIView *view in strongSelf->_taskListView.subviews) {
-            if ([view.accessibilityIdentifier isEqualToString:@"AnClickTaskRow"]) {
+            if ([view isKindOfClass:UIButton.class] && view.tag >= 0 && view.tag < (NSInteger)strongSelf->_taskItems.count) {
                 if (view.tag != index) {
                     view.transform = CGAffineTransformIdentity;
                 }
-            } else if ([view.accessibilityIdentifier isEqualToString:@"AnClickTaskDelete"]) {
+            } else if ([view isKindOfClass:UIButton.class] && view.tag >= 50000) {
                 NSInteger taskIndex = view.tag - 50000;
                 if (taskIndex != index) {
                     view.alpha = 0.0;
@@ -8363,7 +8528,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 return NO;
             }
         }
-        if ([gestureRecognizer.view.accessibilityIdentifier isEqualToString:@"AnClickTaskRow"]) {
+        if (gestureRecognizer.view.superview == _taskListView &&
+            gestureRecognizer.view.tag >= 0 &&
+            gestureRecognizer.view.tag < (NSInteger)_taskItems.count) {
             CGPoint velocity = [(UIPanGestureRecognizer *)gestureRecognizer velocityInView:_taskListView];
             return fabs(velocity.x) > fabs(velocity.y) * 1.25;
         }
@@ -8971,8 +9138,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSURL *url = normalizedURLString.length > 0 ? [NSURL URLWithString:normalizedURLString] : nil;
     if (!url) {
         if (completion) {
-            NSError *error = [NSError errorWithDomain:@"AnClickNetwork"
-                                                 code:-1
+            NSError *error = [NSError errorWithDomain:NSURLErrorDomain
+                                                 code:NSURLErrorBadURL
                                              userInfo:@{NSLocalizedDescriptionKey: @"链接无效"}];
             completion(NO, NO, @"", 0, error);
         }
@@ -9036,6 +9203,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)performNetworkRequestTask:(NSDictionary *)task
                      runGeneration:(NSUInteger)runGeneration
                         completion:(void (^)(BOOL matched, BOOL requestSucceeded, BOOL blocked))completion {
+    if (![self panelCanUseCurrentScene]) {
+        return;
+    }
     NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
     NSString *contains = [self trimmedActionDescription:task[@"networkContains"]];
     NSString *falseText = [self trimmedActionDescription:task[@"networkFalse"]];
@@ -9147,6 +9317,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)runNetworkTask:(NSDictionary *)task atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
     if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+        return;
+    }
+    if (![self panelCanUseCurrentScene]) {
         return;
     }
     NSTimeInterval delay = [self delayForTask:task];
@@ -9295,6 +9468,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
         return;
     }
+    if (![self panelCanUseCurrentScene]) {
+        return;
+    }
 
     BOOL retryUntilFound = [self recognitionRetryUntilFoundForTask:task];
     NSInteger repeatCount = [self repeatCountForTask:task];
@@ -9368,6 +9544,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)performPointActionMode:(AnClickActionMode)mode atPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow {
+    if (![self panelCanUseCurrentScene]) {
+        return;
+    }
     NSTimeInterval duration = [self durationForTaskMode:mode];
     [self showOperationTraceForMode:mode atPoint:point inWindow:hostWindow duration:duration];
     if (mode == AnClickActionModeDoubleTap) {
@@ -9949,6 +10128,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSTimeInterval)performTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow runGeneration:(NSUInteger)runGeneration {
+    if (![self panelCanUseCurrentScene]) {
+        return 0;
+    }
     if (![self taskIsComplete:task]) {
         return 0;
     }
@@ -9986,6 +10168,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                                           runGeneration:runGeneration
                                                                                  status:@"窗口变化停止"];
             if (!currentHostWindow) {
+                return;
+            }
+            if (![strongSelf panelCanUseCurrentScene]) {
                 return;
             }
             if (mode == AnClickActionModeSwipe) {
@@ -10027,6 +10212,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self stopTaskRunWithStatus:@"已停止"];
         return;
     }
+    if (![self panelCanUseCurrentScene]) {
+        return;
+    }
     [self clearTaskRunPauseState];
     _volumeShortcutRunSuppressToasts = NO;
     [self startTaskListRunScheduled:NO];
@@ -10034,6 +10222,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)monitorGlobalNetworkGateWithHostWindow:(UIWindow *)hostWindow scheduled:(BOOL)scheduled generation:(NSUInteger)runGeneration {
     if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+        return;
+    }
+    if (![self panelCanUseCurrentScene]) {
         return;
     }
     [self rememberTaskRunResumePointAtIndex:0 inGlobalNetworkGate:YES scheduled:scheduled];
@@ -10080,6 +10271,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)startTaskListRunScheduled:(BOOL)scheduled {
+    if (![self panelCanUseCurrentScene]) {
+        return;
+    }
     if (_taskItems.count == 0) {
         _volumeShortcutRunSuppressToasts = NO;
         _statusLabel.text = scheduled ? @"定时启动无任务" : @"先加任务";
@@ -10155,6 +10349,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)runTaskAtIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
     if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+        return;
+    }
+    if (![self panelCanUseCurrentScene]) {
         return;
     }
     UIWindow *currentHostWindow = [self currentUsableHostWindowForTaskRunFallback:hostWindow];
@@ -11567,6 +11764,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)runManualAction {
+    if (![self panelCanUseCurrentScene]) {
+        return;
+    }
     UIWindow *hostWindow = [self hostWindow];
     if (!hostWindow) {
         _statusLabel.text = @"无窗口";
@@ -11585,6 +11785,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)previewCurrentAction {
+    if (![self panelCanUseCurrentScene]) {
+        return;
+    }
     if (_actionMode == AnClickActionModeNone) {
         _statusLabel.text = @"先选择动作";
         return;
@@ -11816,6 +12019,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
+    if (![self panelCanUseCurrentScene]) {
+        return;
+    }
+
     _actionMode = AnClickActionModeMacro;
     _recordedMacroEvents = nil;
     _recordedMacroScreenSize = CGSizeZero;
@@ -11831,6 +12038,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)playRecordedMacro {
+    if (![self panelCanUseCurrentScene]) {
+        return;
+    }
     if (_recordedMacroEvents.count == 0) {
         _statusLabel.text = @"无录制";
         return;
@@ -11955,12 +12165,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     static dispatch_queue_t queue;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        queue = dispatch_queue_create("com.anclick.template-search", DISPATCH_QUEUE_SERIAL);
+        queue = dispatch_queue_create(NULL, DISPATCH_QUEUE_SERIAL);
     });
     return queue;
 }
 
 - (void)playTemplateTap {
+    if (![self panelCanUseCurrentScene]) {
+        return;
+    }
     if (_templateSearchInProgress) {
         _statusLabel.text = @"识图中";
         return;
@@ -12093,9 +12306,9 @@ static void AnClickVolumeDarwinNotificationCallback(CFNotificationCenterRef cent
     (void)object;
     (void)userInfo;
     NSInteger direction = 0;
-    if (CFStringCompare(name, AnClickVolumeShortcutDownNotification, 0) == kCFCompareEqualTo) {
+    if (CFStringCompare(name, AnClickVolumeShortcutNotification(-1), 0) == kCFCompareEqualTo) {
         direction = -1;
-    } else if (CFStringCompare(name, AnClickVolumeShortcutUpNotification, 0) == kCFCompareEqualTo) {
+    } else if (CFStringCompare(name, AnClickVolumeShortcutNotification(1), 0) == kCFCompareEqualTo) {
         direction = 1;
     }
     if (direction == 0) {
@@ -12187,7 +12400,7 @@ static void AnClickPostVolumeShortcutDirection(NSInteger direction) {
     }
 
     CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
-                                         direction < 0 ? AnClickVolumeShortcutDownNotification : AnClickVolumeShortcutUpNotification,
+                                         AnClickVolumeShortcutNotification(direction),
                                          NULL,
                                          NULL,
                                          true);
@@ -12361,6 +12574,7 @@ __attribute__((constructor)) static void AnClickUIInit(void) {
         });
         return;
     }
+    AnClickHardenLocalRuntime();
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [[AnClickUI shared] show];

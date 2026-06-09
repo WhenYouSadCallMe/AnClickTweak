@@ -3,6 +3,11 @@
 #import <math.h>
 #import "../include/HammerTouch.h"
 
+#if ANCLICK_RELEASE_SILENT
+#undef NSLog
+#define NSLog(...) do {} while (0)
+#endif
+
 @interface AnClickFakeTouch : NSObject
 + (void)tapAtPoint:(CGPoint)point;
 + (void)doubleTapAtPoint:(CGPoint)point;

@@ -1,6 +1,14 @@
 #import "../include/HammerTouch.h"
 #import <dlfcn.h>
 #import <mach/mach_time.h>
+#import <sys/proc.h>
+#import <sys/sysctl.h>
+#import <unistd.h>
+
+#if ANCLICK_RELEASE_SILENT
+#undef NSLog
+#define NSLog(...) do {} while (0)
+#endif
 
 typedef struct __IOHIDEvent *IOHIDEventRef;
 
@@ -97,6 +105,97 @@ typedef struct {
 static AnClickHammerTouchSlot AnClickHammerTouchSlots[64];
 static uint32_t AnClickHammerNextIdentity = 1000;
 static const uint64_t AnClickHammerSenderID = 0x0000000123456789ULL;
+
+#ifndef P_TRACED
+#define P_TRACED 0x00000800
+#endif
+
+static NSTimeInterval AnClickHammerExpiryUnixTime(void) {
+    const uint8_t encoded[] = {0x26, 0xA4, 0x78, 0xF8, 0x0F, 0xC4, 0x78, 0xB3};
+    const uint8_t masks[] = {0xA6, 0x31, 0x5D, 0x92, 0x0F, 0xC4, 0x78, 0xB3};
+    uint64_t value = 0;
+    for (size_t i = 0; i < sizeof(encoded); i++) {
+        value |= ((uint64_t)(encoded[i] ^ masks[i])) << (8 * i);
+    }
+    if (((uint32_t)value ^ 0xA70C91EFu) != 0xCD29046Fu ||
+        value < 1600000000ULL ||
+        value > 2200000000ULL) {
+        return 1.0;
+    }
+    return (NSTimeInterval)value;
+}
+
+static NSString *AnClickHammerClockKey(void) {
+    static NSString *clockKey = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        const uint8_t encoded[] = {
+            0x39, 0x35, 0x37, 0x74, 0x3B, 0x34, 0x39, 0x36, 0x33,
+            0x39, 0x31, 0x74, 0x36, 0x35, 0x39, 0x3B, 0x36, 0x74,
+            0x3D, 0x2F, 0x3B, 0x28, 0x3E, 0x74, 0x37, 0x3B, 0x22,
+        };
+        char decoded[sizeof(encoded) + 1];
+        for (size_t i = 0; i < sizeof(encoded); i++) {
+            decoded[i] = (char)(encoded[i] ^ 0x5A);
+        }
+        decoded[sizeof(encoded)] = '\0';
+        clockKey = [[NSString alloc] initWithBytes:decoded length:sizeof(encoded) encoding:NSUTF8StringEncoding];
+    });
+    return clockKey;
+}
+
+static BOOL AnClickHammerDebuggerAttached(void) {
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
+    struct kinfo_proc info;
+    size_t size = sizeof(info);
+    memset(&info, 0, sizeof(info));
+    if (sysctl(mib, 4, &info, &size, NULL, 0) != 0) {
+        return NO;
+    }
+    return (info.kp_proc.p_flag & P_TRACED) != 0;
+}
+
+static BOOL AnClickHammerRuntimeAllowed(void) {
+    if (AnClickHammerDebuggerAttached()) {
+        return NO;
+    }
+    NSTimeInterval expiry = AnClickHammerExpiryUnixTime();
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    if (expiry <= 1.0 || now < 978307200.0) {
+        return NO;
+    }
+
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSString *clockKey = AnClickHammerClockKey();
+    NSTimeInterval maxSeen = [defaults doubleForKey:clockKey];
+    if (now > maxSeen + 30.0) {
+        [defaults setDouble:now forKey:clockKey];
+        [defaults synchronize];
+        maxSeen = now;
+    }
+    if (maxSeen >= expiry) {
+        return NO;
+    }
+    if (maxSeen > 0.0 && now + 600.0 < maxSeen) {
+        return NO;
+    }
+    return now < expiry;
+}
+
+static BOOL AnClickHammerPayloadIsCleanup(NSArray<NSNumber *> *phases) {
+    if (phases.count == 0) {
+        return NO;
+    }
+    for (NSNumber *phaseNumber in phases) {
+        AnClickHammerTouchPhase phase = (AnClickHammerTouchPhase)phaseNumber.integerValue;
+        if (phase == AnClickHammerTouchPhaseBegan ||
+            phase == AnClickHammerTouchPhaseMoved ||
+            phase == AnClickHammerTouchPhaseStationary) {
+            return NO;
+        }
+    }
+    return YES;
+}
 
 static AnClickBKSHIDEventSetDigitizerInfoFunction AnClickBKSHIDEventSetDigitizerInfo(void) {
     static AnClickBKSHIDEventSetDigitizerInfoFunction function = NULL;
@@ -315,6 +414,10 @@ static void AnClickHammerPrepareEventForWindow(IOHIDEventRef event, UIWindow *wi
         dispatch_async(dispatch_get_main_queue(), ^{
             [self sendTouchIds:touchIds points:points phases:phases];
         });
+        return;
+    }
+
+    if (!AnClickHammerRuntimeAllowed() && !AnClickHammerPayloadIsCleanup(phases)) {
         return;
     }
 

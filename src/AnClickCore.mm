@@ -9,6 +9,11 @@
 #include <string.h>
 #include <vector>
 
+#if ANCLICK_RELEASE_SILENT
+#undef NSLog
+#define NSLog(...) do {} while (0)
+#endif
+
 @interface AnClickFakeTouch : NSObject
 + (void)tapAtPoint:(CGPoint)point;
 @end

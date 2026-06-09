@@ -4,6 +4,11 @@
 #import <ImageIO/ImageIO.h>
 #include <math.h>
 
+#if ANCLICK_RELEASE_SILENT
+#undef NSLog
+#define NSLog(...) do {} while (0)
+#endif
+
 @interface AnClickCore : NSObject
 + (UIImage *)captureCurrentWindowImage;
 + (UIImage *)captureCurrentWindowImageWithWindow:(UIWindow **)capturedWindow;
