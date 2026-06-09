@@ -1753,7 +1753,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_repeatField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_repeatField];
 
-    _intervalField = [self configTextFieldWithPlaceholder:@"空=最快"];
+    _intervalField = [self configTextFieldWithPlaceholder:@"空=0.03"];
     _intervalField.keyboardType = UIKeyboardTypeDecimalPad;
     [_intervalField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
     [_intervalField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
@@ -9622,13 +9622,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSTimeInterval)durationForTaskMode:(AnClickActionMode)mode {
     if (mode == AnClickActionModeTap) {
-        return 0.025;
+        return 0.030;
     }
     if (mode == AnClickActionModeDoubleTap) {
         return 0.070;
     }
     if (mode == AnClickActionModeTwoFingerTap) {
-        return 0.025;
+        return 0.030;
     }
     if (mode == AnClickActionModeLongPress) {
         return 1.10;
@@ -11467,13 +11467,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL intervalWasSet = [task[@"interval"] respondsToSelector:@selector(doubleValue)];
     NSTimeInterval configuredInterval = [self actionIntervalForTask:task];
     BOOL hasExtraInterval = intervalWasSet && configuredInterval > 0.001;
+    BOOL pointTapRepeatMode = mode == AnClickActionModeTap ||
+        mode == AnClickActionModeDoubleTap ||
+        mode == AnClickActionModeTwoFingerTap;
+    BOOL turboPointTapRepeat = repeatCount > 1 && pointTapRepeatMode;
     BOOL suppressFastTrace = repeatCount > 1 &&
-        !hasExtraInterval &&
-        (mode == AnClickActionModeTap ||
-         mode == AnClickActionModeDoubleTap ||
-         mode == AnClickActionModeTwoFingerTap ||
-         mode == AnClickActionModeSwipe ||
-         mode == AnClickActionModeMacro);
+        (turboPointTapRepeat ||
+         (!hasExtraInterval &&
+          (mode == AnClickActionModeSwipe ||
+           mode == AnClickActionModeMacro)));
     NSTimeInterval delay = [self delayForTask:task];
     NSTimeInterval duration = [self durationForTaskMode:mode];
     if (mode == AnClickActionModeImage) {
@@ -11491,12 +11493,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
         duration = [self durationForRecordedEvents:events];
     }
-    if (suppressFastTrace &&
-        (mode == AnClickActionModeTap ||
-         mode == AnClickActionModeDoubleTap ||
-         mode == AnClickActionModeTwoFingerTap)) {
+    if (turboPointTapRepeat) {
         __weak typeof(self) weakSelf = self;
-        NSTimeInterval step = duration;
+        NSTimeInterval minimumStep = (mode == AnClickActionModeDoubleTap) ? 0.070 : 0.030;
+        NSTimeInterval step = MAX(minimumStep, configuredInterval);
         if (mode == AnClickActionModeTwoFingerTap) {
             NSArray<NSValue *> *basePoints = [[self resolvedMultiTapPointsForTask:task] copy];
             for (NSInteger i = 0; i < repeatCount; i++) {
