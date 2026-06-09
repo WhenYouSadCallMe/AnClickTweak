@@ -10,8 +10,11 @@
 
 @interface AnClickFakeTouch : NSObject
 + (void)tapAtPoint:(CGPoint)point;
++ (void)fastTapAtPoint:(CGPoint)point;
 + (void)doubleTapAtPoint:(CGPoint)point;
++ (void)fastDoubleTapAtPoint:(CGPoint)point;
 + (void)multiTapAtPoints:(NSArray<NSValue *> *)points;
++ (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points;
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration;
 + (void)beginHoldAtPoint:(CGPoint)point;
 + (void)endHold;
@@ -43,12 +46,24 @@ static const NSTimeInterval AnClickTouchUpDelay = 1.0 / 120.0;
 static const NSTimeInterval AnClickFastTapMoveDelay = 0.005;
 static const NSTimeInterval AnClickFastTapUpDelay = 0.025;
 static const NSTimeInterval AnClickFastDoubleTapDelay = 0.055;
+static const NSTimeInterval AnClickTurboTapUpDelay = 0.010;
+static const NSTimeInterval AnClickTurboDoubleTapDelay = 0.035;
 static const NSTimeInterval AnClickRecordedKeepAliveInterval = 1.0 / 30.0;
 static const NSTimeInterval AnClickRecordedMoveMinInterval = 1.0 / 90.0;
 static const NSTimeInterval AnClickRecordedPlaybackMaxDuration = 600.0;
 static const NSUInteger AnClickRecordedPlaybackMaxEvents = 24000;
 static const NSUInteger AnClickRecordedPlaybackMaxScheduledBlocks = 30000;
 static const NSUInteger AnClickMultiTapMaxPoints = 32;
+static NSInteger AnClickTurboTapNextTouchId = 40;
+
++ (NSInteger)nextTurboTapTouchId {
+    NSInteger touchId = AnClickTurboTapNextTouchId;
+    AnClickTurboTapNextTouchId++;
+    if (AnClickTurboTapNextTouchId > 64) {
+        AnClickTurboTapNextTouchId = 40;
+    }
+    return touchId;
+}
 
 + (void)tapAtPoint:(CGPoint)point {
     NSInteger touchId = 1;
@@ -62,10 +77,25 @@ static const NSUInteger AnClickMultiTapMaxPoints = 32;
     });
 }
 
++ (void)fastTapAtPoint:(CGPoint)point {
+    NSInteger touchId = [self nextTurboTapTouchId];
+    [self touchDownAtPoint:point touchId:touchId];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickTurboTapUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self touchUpAtPoint:point touchId:touchId];
+    });
+}
+
 + (void)doubleTapAtPoint:(CGPoint)point {
     [self tapAtPoint:point];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickFastDoubleTapDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self tapAtPoint:point];
+    });
+}
+
++ (void)fastDoubleTapAtPoint:(CGPoint)point {
+    [self fastTapAtPoint:point];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickTurboDoubleTapDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self fastTapAtPoint:point];
     });
 }
 
@@ -104,6 +134,36 @@ static const NSUInteger AnClickMultiTapMaxPoints = 32;
         for (NSValue *value in touchPoints) {
             [self triggerUIKitControlAtPoint:value.CGPointValue];
         }
+    });
+}
+
++ (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points {
+    if (points.count == 0) {
+        return;
+    }
+
+    NSUInteger maxCount = MIN(points.count, AnClickMultiTapMaxPoints);
+    NSMutableArray<NSNumber *> *touchIds = [NSMutableArray arrayWithCapacity:maxCount];
+    NSMutableArray<NSValue *> *touchPoints = [NSMutableArray arrayWithCapacity:maxCount];
+    NSMutableArray<NSNumber *> *beganPhases = [NSMutableArray arrayWithCapacity:maxCount];
+    NSMutableArray<NSNumber *> *endedPhases = [NSMutableArray arrayWithCapacity:maxCount];
+    for (NSUInteger i = 0; i < maxCount; i++) {
+        NSValue *value = points[i];
+        if (![value isKindOfClass:NSValue.class]) {
+            continue;
+        }
+        [touchIds addObject:@(30 + (NSInteger)i)];
+        [touchPoints addObject:value];
+        [beganPhases addObject:@(AnClickHammerTouchPhaseBegan)];
+        [endedPhases addObject:@(AnClickHammerTouchPhaseEnded)];
+    }
+    if (touchPoints.count == 0) {
+        return;
+    }
+
+    [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:beganPhases];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickTurboTapUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:endedPhases];
     });
 }
 

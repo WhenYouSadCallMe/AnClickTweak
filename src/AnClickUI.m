@@ -205,8 +205,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 @interface AnClickFakeTouch : NSObject
 + (void)tapAtPoint:(CGPoint)point;
++ (void)fastTapAtPoint:(CGPoint)point;
 + (void)doubleTapAtPoint:(CGPoint)point;
++ (void)fastDoubleTapAtPoint:(CGPoint)point;
 + (void)multiTapAtPoints:(NSArray<NSValue *> *)points;
++ (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points;
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration;
 + (void)beginHoldAtPoint:(CGPoint)point;
 + (void)endHold;
@@ -9619,13 +9622,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSTimeInterval)durationForTaskMode:(AnClickActionMode)mode {
     if (mode == AnClickActionModeTap) {
-        return 0.035;
+        return 0.025;
     }
     if (mode == AnClickActionModeDoubleTap) {
-        return 0.09;
+        return 0.070;
     }
     if (mode == AnClickActionModeTwoFingerTap) {
-        return 0.035;
+        return 0.025;
     }
     if (mode == AnClickActionModeLongPress) {
         return 1.10;
@@ -11462,8 +11465,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     AnClickActionMode mode = [self modeForTask:task];
     NSInteger repeatCount = [self repeatCountForTask:task];
     BOOL intervalWasSet = [task[@"interval"] respondsToSelector:@selector(doubleValue)];
+    NSTimeInterval configuredInterval = [self actionIntervalForTask:task];
+    BOOL hasExtraInterval = intervalWasSet && configuredInterval > 0.001;
     BOOL suppressFastTrace = repeatCount > 1 &&
-        !intervalWasSet &&
+        !hasExtraInterval &&
         (mode == AnClickActionModeTap ||
          mode == AnClickActionModeDoubleTap ||
          mode == AnClickActionModeTwoFingerTap ||
@@ -11486,7 +11491,50 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
         duration = [self durationForRecordedEvents:events];
     }
-    NSTimeInterval interval = duration + [self actionIntervalForTask:task];
+    if (suppressFastTrace &&
+        (mode == AnClickActionModeTap ||
+         mode == AnClickActionModeDoubleTap ||
+         mode == AnClickActionModeTwoFingerTap)) {
+        __weak typeof(self) weakSelf = self;
+        NSTimeInterval step = duration;
+        if (mode == AnClickActionModeTwoFingerTap) {
+            NSArray<NSValue *> *basePoints = [[self resolvedMultiTapPointsForTask:task] copy];
+            for (NSInteger i = 0; i < repeatCount; i++) {
+                NSTimeInterval fireDelay = delay + step * i;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(fireDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
+                    if (!strongSelf || (runGeneration != 0 && (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration))) {
+                        return;
+                    }
+                    NSArray<NSValue *> *points = [strongSelf points:basePoints byApplyingJitterForTask:task];
+                    if (points.count >= 2) {
+                        [AnClickFakeTouch fastMultiTapAtPoints:points];
+                    }
+                });
+            }
+        } else {
+            NSValue *pointValue = task[@"point"];
+            CGPoint basePoint = [self resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
+            for (NSInteger i = 0; i < repeatCount; i++) {
+                NSTimeInterval fireDelay = delay + step * i;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(fireDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
+                    if (!strongSelf || (runGeneration != 0 && (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration))) {
+                        return;
+                    }
+                    CGPoint point = [strongSelf point:basePoint byApplyingJitterForTask:task];
+                    if (mode == AnClickActionModeDoubleTap) {
+                        [AnClickFakeTouch fastDoubleTapAtPoint:point];
+                    } else {
+                        [AnClickFakeTouch fastTapAtPoint:point];
+                    }
+                });
+            }
+        }
+        return delay + step * repeatCount;
+    }
+
+    NSTimeInterval interval = duration + configuredInterval;
 
     __weak typeof(self) weakSelf = self;
     for (NSInteger i = 0; i < repeatCount; i++) {
