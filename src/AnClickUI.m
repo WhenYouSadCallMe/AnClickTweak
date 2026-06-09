@@ -9619,13 +9619,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSTimeInterval)durationForTaskMode:(AnClickActionMode)mode {
     if (mode == AnClickActionModeTap) {
-        return 0.06;
+        return 0.035;
     }
     if (mode == AnClickActionModeDoubleTap) {
-        return 0.14;
+        return 0.09;
     }
     if (mode == AnClickActionModeTwoFingerTap) {
-        return 0.06;
+        return 0.035;
     }
     if (mode == AnClickActionModeLongPress) {
         return 5.35;
@@ -10780,11 +10780,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)performPointActionMode:(AnClickActionMode)mode atPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow {
+    [self performPointActionMode:mode atPoint:point inWindow:hostWindow showTrace:YES];
+}
+
+- (void)performPointActionMode:(AnClickActionMode)mode atPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow showTrace:(BOOL)showTrace {
     if (![self panelCanUseCurrentScene]) {
         return;
     }
     NSTimeInterval duration = [self durationForTaskMode:mode];
-    [self showOperationTraceForMode:mode atPoint:point inWindow:hostWindow duration:duration];
+    if (showTrace) {
+        [self showOperationTraceForMode:mode atPoint:point inWindow:hostWindow duration:duration];
+    }
     if (mode == AnClickActionModeDoubleTap) {
         [AnClickFakeTouch doubleTapAtPoint:point];
     } else if (mode == AnClickActionModeLongPress) {
@@ -11455,6 +11461,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     AnClickActionMode mode = [self modeForTask:task];
     NSInteger repeatCount = [self repeatCountForTask:task];
+    BOOL intervalWasSet = [task[@"interval"] respondsToSelector:@selector(doubleValue)];
+    BOOL suppressFastTrace = repeatCount > 1 &&
+        !intervalWasSet &&
+        (mode == AnClickActionModeTap ||
+         mode == AnClickActionModeDoubleTap ||
+         mode == AnClickActionModeTwoFingerTap);
     NSTimeInterval delay = [self delayForTask:task];
     NSTimeInterval duration = [self durationForTaskMode:mode];
     if (mode == AnClickActionModeImage) {
@@ -11516,17 +11528,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             } else if (mode == AnClickActionModeTwoFingerTap) {
                 NSArray<NSValue *> *points = [strongSelf points:[strongSelf resolvedMultiTapPointsForTask:task] byApplyingJitterForTask:task];
                 if (points.count >= 2) {
-                    [strongSelf showMultiTapMarkersForScreenPoints:points inWindow:currentHostWindow duration:0.75];
+                    if (!suppressFastTrace) {
+                        [strongSelf showMultiTapMarkersForScreenPoints:points inWindow:currentHostWindow duration:0.75];
+                    }
                     [AnClickFakeTouch multiTapAtPoints:points];
                 } else {
                     NSValue *pointValue = task[@"point"];
                     CGPoint point = [strongSelf point:[strongSelf resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue] byApplyingJitterForTask:task];
-                    [strongSelf performPointActionMode:mode atPoint:point inWindow:currentHostWindow];
+                    [strongSelf performPointActionMode:mode atPoint:point inWindow:currentHostWindow showTrace:!suppressFastTrace];
                 }
             } else {
                 NSValue *pointValue = task[@"point"];
                 CGPoint point = [strongSelf point:[strongSelf resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue] byApplyingJitterForTask:task];
-                [strongSelf performPointActionMode:mode atPoint:point inWindow:currentHostWindow];
+                [strongSelf performPointActionMode:mode atPoint:point inWindow:currentHostWindow showTrace:!suppressFastTrace];
             }
         });
     }
