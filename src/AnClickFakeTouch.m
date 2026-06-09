@@ -119,7 +119,7 @@ static const NSUInteger AnClickMultiTapMaxPoints = 32;
 }
 
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration {
-    NSTimeInterval holdDuration = MAX(duration, 2.5);
+    NSTimeInterval holdDuration = MAX(duration, 0.55);
     [self beginHoldAtPoint:point];
     NSUInteger generation = AnClickHoldGeneration;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -289,7 +289,7 @@ static const NSUInteger AnClickMultiTapMaxPoints = 32;
 }
 
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end {
-    [self swipeFrom:start to:end duration:0.45 steps:18];
+    [self swipeFrom:start to:end duration:0.30 steps:14];
 }
 
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end duration:(NSTimeInterval)duration steps:(NSUInteger)steps {

@@ -8459,24 +8459,24 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _statusLabel.text = _hasManualSwipeAnchor ? @"先取终点" : @"先取起点";
             return;
         }
-        [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:1.1];
-        [AnClickFakeTouch playPath:path duration:0.55];
+        [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:0.45];
+        [AnClickFakeTouch playPath:path duration:0.30];
         _statusLabel.text = [NSString stringWithFormat:@"滑 %.0f,%.0f", point.x, point.y];
         return;
     }
 
-    NSTimeInterval operationTraceDuration = (_actionMode == AnClickActionModeLongPress) ? 5.2 : 1.0;
+    NSTimeInterval operationTraceDuration = (_actionMode == AnClickActionModeLongPress) ? 1.1 : 0.6;
     [self showOperationTraceForMode:_actionMode atPoint:point inWindow:hostWindow duration:operationTraceDuration];
     if (_actionMode == AnClickActionModeDoubleTap) {
         [AnClickFakeTouch doubleTapAtPoint:point];
         _statusLabel.text = [NSString stringWithFormat:@"双 %.0f,%.0f", point.x, point.y];
     } else if (_actionMode == AnClickActionModeLongPress) {
         _longPressHolding = YES;
-        [AnClickFakeTouch longPressAtPoint:point duration:5.0];
-        _statusLabel.text = [NSString stringWithFormat:@"长按5秒 %.0f,%.0f", point.x, point.y];
+        [AnClickFakeTouch longPressAtPoint:point duration:1.0];
+        _statusLabel.text = [NSString stringWithFormat:@"长按1秒 %.0f,%.0f", point.x, point.y];
         [self refreshModeButtons];
         __weak typeof(self) weakSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) {
                 return;
@@ -8491,13 +8491,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [AnClickFakeTouch twoFingerTapAtPoint:point distance:72.0];
         _statusLabel.text = [NSString stringWithFormat:@"二指 %.0f,%.0f", point.x, point.y];
     } else if (_actionMode == AnClickActionModePinchIn) {
-        [AnClickFakeTouch pinchAtPoint:point fromDistance:168.0 toDistance:58.0 duration:0.46];
+        [AnClickFakeTouch pinchAtPoint:point fromDistance:168.0 toDistance:58.0 duration:0.30];
         _statusLabel.text = [NSString stringWithFormat:@"缩小 %.0f,%.0f", point.x, point.y];
     } else if (_actionMode == AnClickActionModePinchOut) {
-        [AnClickFakeTouch pinchAtPoint:point fromDistance:58.0 toDistance:168.0 duration:0.46];
+        [AnClickFakeTouch pinchAtPoint:point fromDistance:58.0 toDistance:168.0 duration:0.30];
         _statusLabel.text = [NSString stringWithFormat:@"放大 %.0f,%.0f", point.x, point.y];
     } else if (_actionMode == AnClickActionModeRotate) {
-        [AnClickFakeTouch rotateAtPoint:point radius:64.0 startAngle:(CGFloat)(-M_PI / 4.0) endAngle:(CGFloat)(M_PI * 0.75) duration:0.58];
+        [AnClickFakeTouch rotateAtPoint:point radius:64.0 startAngle:(CGFloat)(-M_PI / 4.0) endAngle:(CGFloat)(M_PI * 0.75) duration:0.36];
         _statusLabel.text = [NSString stringWithFormat:@"旋转 %.0f,%.0f", point.x, point.y];
     } else {
         [AnClickFakeTouch tapAtPoint:point];
@@ -9628,16 +9628,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return 0.035;
     }
     if (mode == AnClickActionModeLongPress) {
-        return 5.35;
+        return 1.10;
     }
     if (mode == AnClickActionModeSwipe) {
-        return 0.78;
+        return 0.34;
     }
     if (mode == AnClickActionModePinchIn || mode == AnClickActionModePinchOut) {
-        return 0.72;
+        return 0.36;
     }
     if (mode == AnClickActionModeRotate) {
-        return 0.86;
+        return 0.42;
     }
     if (mode == AnClickActionModeImage) {
         return 1.45;
@@ -10795,9 +10795,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [AnClickFakeTouch doubleTapAtPoint:point];
     } else if (mode == AnClickActionModeLongPress) {
         _longPressHolding = YES;
-        [AnClickFakeTouch longPressAtPoint:point duration:5.0];
+        [AnClickFakeTouch longPressAtPoint:point duration:1.0];
         __weak typeof(self) weakSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) {
                 return;
@@ -10807,11 +10807,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } else if (mode == AnClickActionModeTwoFingerTap) {
         [AnClickFakeTouch twoFingerTapAtPoint:point distance:72.0];
     } else if (mode == AnClickActionModePinchIn) {
-        [AnClickFakeTouch pinchAtPoint:point fromDistance:168.0 toDistance:58.0 duration:0.46];
+        [AnClickFakeTouch pinchAtPoint:point fromDistance:168.0 toDistance:58.0 duration:0.30];
     } else if (mode == AnClickActionModePinchOut) {
-        [AnClickFakeTouch pinchAtPoint:point fromDistance:58.0 toDistance:168.0 duration:0.46];
+        [AnClickFakeTouch pinchAtPoint:point fromDistance:58.0 toDistance:168.0 duration:0.30];
     } else if (mode == AnClickActionModeRotate) {
-        [AnClickFakeTouch rotateAtPoint:point radius:64.0 startAngle:(CGFloat)(-M_PI / 4.0) endAngle:(CGFloat)(M_PI * 0.75) duration:0.58];
+        [AnClickFakeTouch rotateAtPoint:point radius:64.0 startAngle:(CGFloat)(-M_PI / 4.0) endAngle:(CGFloat)(M_PI * 0.75) duration:0.36];
     } else {
         [AnClickFakeTouch tapAtPoint:point];
     }
@@ -11007,7 +11007,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                  actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                   delay:[strongSelf durationForTaskMode:imageActionMode] + 0.10];
+                                                                   delay:[strongSelf durationForTaskMode:imageActionMode] + 0.03];
                 if (completion) {
                     completion(YES);
                 }
@@ -11152,7 +11152,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                  actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                   delay:[strongSelf durationForTaskMode:actionMode] + 0.10];
+                                                                   delay:[strongSelf durationForTaskMode:actionMode] + 0.03];
                 if (completion) {
                     completion(YES);
                 }
@@ -11268,7 +11268,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                  actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                   delay:[strongSelf durationForTaskMode:actionMode] + 0.10];
+                                                                   delay:[strongSelf durationForTaskMode:actionMode] + 0.03];
                 if (completion) {
                     completion(YES);
                 }
@@ -11466,7 +11466,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         !intervalWasSet &&
         (mode == AnClickActionModeTap ||
          mode == AnClickActionModeDoubleTap ||
-         mode == AnClickActionModeTwoFingerTap);
+         mode == AnClickActionModeTwoFingerTap ||
+         mode == AnClickActionModeSwipe ||
+         mode == AnClickActionModeMacro);
     NSTimeInterval delay = [self delayForTask:task];
     NSTimeInterval duration = [self durationForTaskMode:mode];
     if (mode == AnClickActionModeImage) {
@@ -11505,8 +11507,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             }
             if (mode == AnClickActionModeSwipe) {
                 NSArray<NSValue *> *path = [strongSelf path:[strongSelf resolvedPathForTask:task] byApplyingJitterForTask:task];
-                [strongSelf showTrajectoryForScreenPoints:path inWindow:currentHostWindow duration:0.75];
-                [AnClickFakeTouch playPath:path duration:0.55];
+                if (!suppressFastTrace) {
+                    [strongSelf showTrajectoryForScreenPoints:path inWindow:currentHostWindow duration:0.45];
+                }
+                [AnClickFakeTouch playPath:path duration:0.30];
             } else if (mode == AnClickActionModeImage) {
                 [strongSelf performImageTask:task inWindow:currentHostWindow runGeneration:runGeneration];
             } else if (mode == AnClickActionModeOCR) {
@@ -11519,9 +11523,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 NSArray<NSDictionary *> *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
                 NSArray<NSDictionary *> *resolvedEvents = [strongSelf recordedEvents:[strongSelf resolvedRecordedEventsForTask:task] byApplyingJitterForTask:task];
                 NSArray<NSValue *> *trajectory = [strongSelf trajectoryPointsForRecordedEvents:resolvedEvents];
-                if (trajectory.count >= 2) {
+                if (!suppressFastTrace && trajectory.count >= 2) {
                     [strongSelf showTrajectoryForScreenPoints:trajectory inWindow:currentHostWindow duration:[strongSelf durationForRecordedEvents:events]];
-                } else if (trajectory.count == 1) {
+                } else if (!suppressFastTrace && trajectory.count == 1) {
                     [strongSelf showTapMarkerAtScreenPoint:trajectory.firstObject.CGPointValue inWindow:currentHostWindow];
                 }
                 [AnClickFakeTouch playRecordedEvents:resolvedEvents];
