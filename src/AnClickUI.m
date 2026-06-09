@@ -8471,7 +8471,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSTimeInterval operationTraceDuration = (_actionMode == AnClickActionModeLongPress) ? 1.1 : 0.6;
     [self showOperationTraceForMode:_actionMode atPoint:point inWindow:hostWindow duration:operationTraceDuration];
     if (_actionMode == AnClickActionModeDoubleTap) {
-        [AnClickFakeTouch doubleTapAtPoint:point];
+        [AnClickFakeTouch fastDoubleTapAtPoint:point];
         _statusLabel.text = [NSString stringWithFormat:@"双 %.0f,%.0f", point.x, point.y];
     } else if (_actionMode == AnClickActionModeLongPress) {
         _longPressHolding = YES;
@@ -8503,7 +8503,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [AnClickFakeTouch rotateAtPoint:point radius:64.0 startAngle:(CGFloat)(-M_PI / 4.0) endAngle:(CGFloat)(M_PI * 0.75) duration:0.36];
         _statusLabel.text = [NSString stringWithFormat:@"旋转 %.0f,%.0f", point.x, point.y];
     } else {
-        [AnClickFakeTouch tapAtPoint:point];
+        [AnClickFakeTouch fastTapAtPoint:point];
         _statusLabel.text = [NSString stringWithFormat:@"点 %.0f,%.0f", point.x, point.y];
     }
 }
@@ -10795,7 +10795,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self showOperationTraceForMode:mode atPoint:point inWindow:hostWindow duration:duration];
     }
     if (mode == AnClickActionModeDoubleTap) {
-        [AnClickFakeTouch doubleTapAtPoint:point];
+        [AnClickFakeTouch fastDoubleTapAtPoint:point];
     } else if (mode == AnClickActionModeLongPress) {
         _longPressHolding = YES;
         [AnClickFakeTouch longPressAtPoint:point duration:1.0];
@@ -10816,7 +10816,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } else if (mode == AnClickActionModeRotate) {
         [AnClickFakeTouch rotateAtPoint:point radius:64.0 startAngle:(CGFloat)(-M_PI / 4.0) endAngle:(CGFloat)(M_PI * 0.75) duration:0.36];
     } else {
-        [AnClickFakeTouch tapAtPoint:point];
+        [AnClickFakeTouch fastTapAtPoint:point];
     }
 }
 
@@ -11583,7 +11583,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     if (!suppressFastTrace) {
                         [strongSelf showMultiTapMarkersForScreenPoints:points inWindow:currentHostWindow duration:0.75];
                     }
-                    [AnClickFakeTouch multiTapAtPoints:points];
+                    [AnClickFakeTouch fastMultiTapAtPoints:points];
                 } else {
                     NSValue *pointValue = task[@"point"];
                     CGPoint point = [strongSelf point:[strongSelf resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue] byApplyingJitterForTask:task];

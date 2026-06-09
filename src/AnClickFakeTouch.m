@@ -43,9 +43,6 @@ static dispatch_source_t AnClickHoldTimer = nil;
 static NSUInteger AnClickHoldGeneration = 0;
 static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
 static const NSTimeInterval AnClickTouchUpDelay = 1.0 / 120.0;
-static const NSTimeInterval AnClickFastTapMoveDelay = 0.005;
-static const NSTimeInterval AnClickFastTapUpDelay = 0.025;
-static const NSTimeInterval AnClickFastDoubleTapDelay = 0.055;
 static const NSTimeInterval AnClickTurboTapUpDelay = 0.010;
 static const NSTimeInterval AnClickTurboDoubleTapDelay = 0.035;
 static const NSTimeInterval AnClickRecordedKeepAliveInterval = 1.0 / 30.0;
@@ -66,15 +63,7 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
 }
 
 + (void)tapAtPoint:(CGPoint)point {
-    NSInteger touchId = 1;
-    [self touchDownAtPoint:point touchId:touchId];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickFastTapMoveDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self touchMoveAtPoint:point touchId:touchId];
-    });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickFastTapUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self touchUpAtPoint:point touchId:touchId];
-        [self triggerUIKitControlAtPoint:point];
-    });
+    [self fastTapAtPoint:point];
 }
 
 + (void)fastTapAtPoint:(CGPoint)point {
@@ -86,10 +75,7 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
 }
 
 + (void)doubleTapAtPoint:(CGPoint)point {
-    [self tapAtPoint:point];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickFastDoubleTapDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self tapAtPoint:point];
-    });
+    [self fastDoubleTapAtPoint:point];
 }
 
 + (void)fastDoubleTapAtPoint:(CGPoint)point {
@@ -100,41 +86,7 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
 }
 
 + (void)multiTapAtPoints:(NSArray<NSValue *> *)points {
-    if (points.count == 0) {
-        return;
-    }
-
-    NSUInteger maxCount = MIN(points.count, AnClickMultiTapMaxPoints);
-    NSMutableArray<NSNumber *> *touchIds = [NSMutableArray arrayWithCapacity:maxCount];
-    NSMutableArray<NSValue *> *touchPoints = [NSMutableArray arrayWithCapacity:maxCount];
-    NSMutableArray<NSNumber *> *beganPhases = [NSMutableArray arrayWithCapacity:maxCount];
-    NSMutableArray<NSNumber *> *movePhases = [NSMutableArray arrayWithCapacity:maxCount];
-    NSMutableArray<NSNumber *> *endedPhases = [NSMutableArray arrayWithCapacity:maxCount];
-    for (NSUInteger i = 0; i < maxCount; i++) {
-        NSValue *value = points[i];
-        if (![value isKindOfClass:NSValue.class]) {
-            continue;
-        }
-        [touchIds addObject:@(30 + (NSInteger)i)];
-        [touchPoints addObject:value];
-        [beganPhases addObject:@(AnClickHammerTouchPhaseBegan)];
-        [movePhases addObject:@(AnClickHammerTouchPhaseMoved)];
-        [endedPhases addObject:@(AnClickHammerTouchPhaseEnded)];
-    }
-    if (touchPoints.count == 0) {
-        return;
-    }
-
-    [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:beganPhases];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickFastTapMoveDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:movePhases];
-    });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickFastTapUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:endedPhases];
-        for (NSValue *value in touchPoints) {
-            [self triggerUIKitControlAtPoint:value.CGPointValue];
-        }
-    });
+    [self fastMultiTapAtPoints:points];
 }
 
 + (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points {
@@ -278,76 +230,6 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     return AnClickHolding;
 }
 
-+ (UIWindow *)activeApplicationWindow {
-    UIWindow *fallback = nil;
-    if (@available(iOS 13.0, *)) {
-        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-            if (scene.activationState != UISceneActivationStateForegroundActive || ![scene isKindOfClass:UIWindowScene.class]) {
-                continue;
-            }
-            UIWindowScene *windowScene = (UIWindowScene *)scene;
-            for (UIWindow *window in windowScene.windows) {
-                if (window.windowLevel >= UIWindowLevelAlert || window.hidden || window.alpha <= 0.01) {
-                    continue;
-                }
-                if (window.isKeyWindow) {
-                    return window;
-                }
-                if (!fallback) {
-                    fallback = window;
-                }
-            }
-        }
-    }
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    if (UIApplication.sharedApplication.keyWindow && UIApplication.sharedApplication.keyWindow.windowLevel < UIWindowLevelAlert) {
-        return UIApplication.sharedApplication.keyWindow;
-    }
-    for (UIWindow *window in UIApplication.sharedApplication.windows) {
-        if (window.windowLevel < UIWindowLevelAlert && !window.hidden && window.alpha > 0.01) {
-            return window;
-        }
-    }
-#pragma clang diagnostic pop
-    return fallback;
-}
-
-+ (void)triggerUIKitControlAtPoint:(CGPoint)point {
-    UIWindow *window = [self activeApplicationWindow];
-    CGPoint windowPoint = [window convertPoint:point fromWindow:nil];
-    UIView *view = [window hitTest:windowPoint withEvent:nil];
-    UIControl *control = nil;
-    for (UIView *current = view; current; current = current.superview) {
-        if ([current isKindOfClass:UIControl.class]) {
-            control = (UIControl *)current;
-            break;
-        }
-    }
-
-    if (!control || !control.enabled || control.hidden || control.alpha <= 0.01) {
-        NSLog(@"[AnClick] UIKit fallback missed screen=(%.1f, %.1f) window=(%.1f, %.1f) view=%@",
-              point.x,
-              point.y,
-              windowPoint.x,
-              windowPoint.y,
-              view);
-        return;
-    }
-
-    [control sendActionsForControlEvents:UIControlEventTouchDown];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickTouchUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [control sendActionsForControlEvents:UIControlEventTouchUpInside];
-        NSLog(@"[AnClick] UIKit fallback tapped %@ screen=(%.1f, %.1f) window=(%.1f, %.1f)",
-              control,
-              point.x,
-              point.y,
-              windowPoint.x,
-              windowPoint.y);
-    });
-}
-
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end {
     [self swipeFrom:start to:end duration:0.30 steps:14];
 }
@@ -405,18 +287,9 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     ];
 }
 
-+ (void)sendTwoFingerPoints:(NSArray<NSValue *> *)points phase:(AnClickHammerTouchPhase)phase {
-    [AnClickHammerTouch sendTouchIds:@[@20, @21]
-                              points:points
-                              phases:@[@(phase), @(phase)]];
-}
-
 + (void)twoFingerTapAtPoint:(CGPoint)point distance:(CGFloat)distance {
     NSArray<NSValue *> *points = [self twoFingerPointsAtCenter:point distance:MAX(distance, 24.0) angle:0];
-    [self sendTwoFingerPoints:points phase:AnClickHammerTouchPhaseBegan];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickFastTapUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self sendTwoFingerPoints:points phase:AnClickHammerTouchPhaseEnded];
-    });
+    [self fastMultiTapAtPoints:points];
 }
 
 + (void)pinchAtPoint:(CGPoint)center fromDistance:(CGFloat)fromDistance toDistance:(CGFloat)toDistance duration:(NSTimeInterval)duration {
