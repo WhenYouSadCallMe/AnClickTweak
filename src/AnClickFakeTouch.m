@@ -16,6 +16,7 @@
 + (void)beginHoldAtPoint:(CGPoint)point;
 + (void)endHold;
 + (void)cancelHold;
++ (void)cancelAll;
 + (BOOL)isHolding;
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end;
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end duration:(NSTimeInterval)duration steps:(NSUInteger)steps;
@@ -39,6 +40,7 @@ static BOOL AnClickHolding = NO;
 static CGPoint AnClickHoldPoint = {0, 0};
 static dispatch_source_t AnClickHoldTimer = nil;
 static NSUInteger AnClickHoldGeneration = 0;
+static NSUInteger AnClickTouchGeneration = 0;
 static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
 static const NSTimeInterval AnClickTouchUpDelay = 1.0 / 120.0;
 static const NSTimeInterval AnClickTurboTapUpDelay = 0.030;
@@ -62,17 +64,47 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     return touchId;
 }
 
++ (BOOL)touchGenerationIsCurrent:(NSUInteger)generation {
+    return generation == AnClickTouchGeneration;
+}
+
++ (void)cancelAll {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self cancelAll];
+        });
+        return;
+    }
+
+    AnClickTouchGeneration++;
+    if (AnClickHoldTimer) {
+        dispatch_source_cancel(AnClickHoldTimer);
+        AnClickHoldTimer = nil;
+    }
+    AnClickHolding = NO;
+    AnClickHoldGeneration++;
+    [AnClickHammerTouch cancelAllActiveTouches];
+}
+
 + (void)fastTapAtPoint:(CGPoint)point {
+    NSUInteger generation = AnClickTouchGeneration;
     NSInteger touchId = [self nextTurboTapTouchId];
     [self touchDownAtPoint:point touchId:touchId];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickTurboTapUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (![self touchGenerationIsCurrent:generation]) {
+            return;
+        }
         [self touchUpAtPoint:point touchId:touchId];
     });
 }
 
 + (void)fastDoubleTapAtPoint:(CGPoint)point {
+    NSUInteger generation = AnClickTouchGeneration;
     [self fastTapAtPoint:point];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickTurboDoubleTapDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (![self touchGenerationIsCurrent:generation]) {
+            return;
+        }
         [self fastTapAtPoint:point];
     });
 }
@@ -101,15 +133,23 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
         return;
     }
 
+    NSUInteger generation = AnClickTouchGeneration;
     [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:beganPhases];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickTurboTapUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (![self touchGenerationIsCurrent:generation]) {
+            return;
+        }
         [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:endedPhases];
     });
 }
 
 + (void)finishTouchId:(NSInteger)touchId atPoint:(CGPoint)point cancelled:(BOOL)cancelled {
+    NSUInteger generation = AnClickTouchGeneration;
     [self touchMoveAtPoint:point touchId:touchId];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickTouchUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (![self touchGenerationIsCurrent:generation]) {
+            return;
+        }
         if (cancelled) {
             [self touchCancelAtPoint:point touchId:touchId];
         } else {
@@ -122,8 +162,9 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     NSTimeInterval holdDuration = MAX(duration, 0.55);
     [self beginHoldAtPoint:point];
     NSUInteger generation = AnClickHoldGeneration;
+    NSUInteger touchGeneration = AnClickTouchGeneration;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (AnClickHolding && generation == AnClickHoldGeneration) {
+        if ([self touchGenerationIsCurrent:touchGeneration] && AnClickHolding && generation == AnClickHoldGeneration) {
             [self endHold];
         }
     });
@@ -150,6 +191,7 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     }
     AnClickHoldGeneration++;
     NSUInteger generation = AnClickHoldGeneration;
+    NSUInteger touchGeneration = AnClickTouchGeneration;
     NSInteger touchId = AnClickHoldTouchId;
     CGPoint holdPoint = AnClickHoldPoint;
     [self touchDownAtPoint:point touchId:touchId];
@@ -160,7 +202,7 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
                               (uint64_t)(AnClickHoldTickInterval * NSEC_PER_SEC),
                               (uint64_t)(0.002 * NSEC_PER_SEC));
     dispatch_source_set_event_handler(AnClickHoldTimer, ^{
-        if (!AnClickHolding || generation != AnClickHoldGeneration) {
+        if (![self touchGenerationIsCurrent:touchGeneration] || !AnClickHolding || generation != AnClickHoldGeneration) {
             return;
         }
         [self touchMoveAtPoint:holdPoint touchId:touchId];
@@ -226,6 +268,7 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     NSUInteger safeSteps = MAX(steps, 2);
     NSInteger touchId = 2;
     NSTimeInterval stepDuration = duration / (NSTimeInterval)safeSteps;
+    NSUInteger generation = AnClickTouchGeneration;
 
     [self touchDownAtPoint:start touchId:touchId];
     for (NSUInteger i = 1; i < safeSteps; i++) {
@@ -233,11 +276,17 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
         CGPoint point = CGPointMake(start.x + (end.x - start.x) * progress,
                                     start.y + (end.y - start.y) * progress);
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(stepDuration * i * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (![self touchGenerationIsCurrent:generation]) {
+                return;
+            }
             [self touchMoveAtPoint:point touchId:touchId];
         });
     }
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (![self touchGenerationIsCurrent:generation]) {
+            return;
+        }
         [self finishTouchId:touchId atPoint:end cancelled:NO];
     });
 }
@@ -250,17 +299,24 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     NSInteger touchId = 4;
     NSTimeInterval safeDuration = MAX(duration, 0.16);
     NSUInteger lastIndex = points.count - 1;
+    NSUInteger generation = AnClickTouchGeneration;
     [self touchDownAtPoint:points.firstObject.CGPointValue touchId:touchId];
 
     for (NSUInteger i = 1; i < lastIndex; i++) {
         NSTimeInterval delay = safeDuration * ((NSTimeInterval)i / (NSTimeInterval)lastIndex);
         CGPoint point = points[i].CGPointValue;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (![self touchGenerationIsCurrent:generation]) {
+                return;
+            }
             [self touchMoveAtPoint:point touchId:touchId];
         });
     }
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(safeDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (![self touchGenerationIsCurrent:generation]) {
+            return;
+        }
         [self finishTouchId:touchId atPoint:points.lastObject.CGPointValue cancelled:NO];
     });
 }
@@ -286,6 +342,7 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     NSUInteger steps = 18;
     NSTimeInterval safeDuration = MAX(duration, 0.18);
     NSTimeInterval stepDuration = safeDuration / (NSTimeInterval)steps;
+    NSUInteger generation = AnClickTouchGeneration;
     NSArray<NSValue *> *startPoints = [self twoFingerPointsAtCenter:center distance:MAX(fromDistance, 10.0) angle:0];
     [AnClickHammerTouch sendTouchIds:@[@(touchIdA), @(touchIdB)]
                               points:startPoints
@@ -296,6 +353,9 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
         CGFloat distance = fromDistance + (toDistance - fromDistance) * progress;
         NSArray<NSValue *> *points = [self twoFingerPointsAtCenter:center distance:MAX(distance, 8.0) angle:0];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(stepDuration * i * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (![self touchGenerationIsCurrent:generation]) {
+                return;
+            }
             [AnClickHammerTouch sendTouchIds:@[@(touchIdA), @(touchIdB)]
                                       points:points
                                       phases:@[@(AnClickHammerTouchPhaseMoved), @(AnClickHammerTouchPhaseMoved)]];
@@ -303,6 +363,9 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     }
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((safeDuration + AnClickTouchUpDelay) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (![self touchGenerationIsCurrent:generation]) {
+            return;
+        }
         NSArray<NSValue *> *endPoints = [self twoFingerPointsAtCenter:center distance:MAX(toDistance, 8.0) angle:0];
         [AnClickHammerTouch sendTouchIds:@[@(touchIdA), @(touchIdB)]
                                   points:endPoints
@@ -317,6 +380,7 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     NSTimeInterval safeDuration = MAX(duration, 0.24);
     NSTimeInterval stepDuration = safeDuration / (NSTimeInterval)steps;
     CGFloat distance = MAX(radius * 2.0, 24.0);
+    NSUInteger generation = AnClickTouchGeneration;
     NSArray<NSValue *> *startPoints = [self twoFingerPointsAtCenter:center distance:distance angle:startAngle];
     [AnClickHammerTouch sendTouchIds:@[@(touchIdA), @(touchIdB)]
                               points:startPoints
@@ -327,6 +391,9 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
         CGFloat angle = startAngle + (endAngle - startAngle) * progress;
         NSArray<NSValue *> *points = [self twoFingerPointsAtCenter:center distance:distance angle:angle];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(stepDuration * i * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (![self touchGenerationIsCurrent:generation]) {
+                return;
+            }
             [AnClickHammerTouch sendTouchIds:@[@(touchIdA), @(touchIdB)]
                                       points:points
                                       phases:@[@(AnClickHammerTouchPhaseMoved), @(AnClickHammerTouchPhaseMoved)]];
@@ -334,6 +401,9 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     }
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((safeDuration + AnClickTouchUpDelay) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (![self touchGenerationIsCurrent:generation]) {
+            return;
+        }
         NSArray<NSValue *> *endPoints = [self twoFingerPointsAtCenter:center distance:distance angle:endAngle];
         [AnClickHammerTouch sendTouchIds:@[@(touchIdA), @(touchIdB)]
                                   points:endPoints
@@ -358,6 +428,7 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     }
 
     NSTimeInterval speed = [self normalizedRecordedPlaybackSpeed:playbackSpeed];
+    NSUInteger generation = AnClickTouchGeneration;
     NSInteger touchId = 6;
     BOOL touchIsDown = NO;
     NSTimeInterval previousTimestamp = 0;
@@ -399,6 +470,9 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
                 NSInteger keepAliveTouchId = touchId;
                 scheduledBlocks++;
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(tick * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    if (![self touchGenerationIsCurrent:generation]) {
+                        return;
+                    }
                     [self touchMoveAtPoint:keepAlivePoint touchId:keepAliveTouchId];
                 });
             }
@@ -421,6 +495,9 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
             NSInteger eventTouchId = touchId;
             scheduledBlocks++;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                if (![self touchGenerationIsCurrent:generation]) {
+                    return;
+                }
                 if (eventType == 0) {
                     [self touchDownAtPoint:eventPoint touchId:eventTouchId];
                 } else if (eventType == 1) {
@@ -449,6 +526,9 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
         NSInteger cancelTouchId = touchId;
         CGPoint cancelPoint = previousPoint;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(cancelTimestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (![self touchGenerationIsCurrent:generation]) {
+                return;
+            }
             [self finishTouchId:cancelTouchId atPoint:cancelPoint cancelled:YES];
         });
     }
