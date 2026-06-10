@@ -204,11 +204,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 @end
 
 @interface AnClickFakeTouch : NSObject
-+ (void)tapAtPoint:(CGPoint)point;
 + (void)fastTapAtPoint:(CGPoint)point;
-+ (void)doubleTapAtPoint:(CGPoint)point;
 + (void)fastDoubleTapAtPoint:(CGPoint)point;
-+ (void)multiTapAtPoints:(NSArray<NSValue *> *)points;
 + (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points;
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration;
 + (void)beginHoldAtPoint:(CGPoint)point;

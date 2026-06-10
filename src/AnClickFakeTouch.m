@@ -9,11 +9,8 @@
 #endif
 
 @interface AnClickFakeTouch : NSObject
-+ (void)tapAtPoint:(CGPoint)point;
 + (void)fastTapAtPoint:(CGPoint)point;
-+ (void)doubleTapAtPoint:(CGPoint)point;
 + (void)fastDoubleTapAtPoint:(CGPoint)point;
-+ (void)multiTapAtPoints:(NSArray<NSValue *> *)points;
 + (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points;
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration;
 + (void)beginHoldAtPoint:(CGPoint)point;
@@ -62,10 +59,6 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     return touchId;
 }
 
-+ (void)tapAtPoint:(CGPoint)point {
-    [self fastTapAtPoint:point];
-}
-
 + (void)fastTapAtPoint:(CGPoint)point {
     NSInteger touchId = [self nextTurboTapTouchId];
     [self touchDownAtPoint:point touchId:touchId];
@@ -74,19 +67,11 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     });
 }
 
-+ (void)doubleTapAtPoint:(CGPoint)point {
-    [self fastDoubleTapAtPoint:point];
-}
-
 + (void)fastDoubleTapAtPoint:(CGPoint)point {
     [self fastTapAtPoint:point];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickTurboDoubleTapDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self fastTapAtPoint:point];
     });
-}
-
-+ (void)multiTapAtPoints:(NSArray<NSValue *> *)points {
-    [self fastMultiTapAtPoints:points];
 }
 
 + (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points {
