@@ -29,7 +29,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     AnClickActionModeOCR = 10,
     AnClickActionModeColor = 11,
     AnClickActionModeNetwork = 12,
-    AnClickActionModeCount = 13,
+    AnClickActionModeJump = 13,
+    AnClickActionModeCount = 14,
 };
 
 typedef NS_ENUM(NSInteger, AnClickOCRMode) {
@@ -299,6 +300,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_failureLongPressActionButton;
     UIButton *_failureNetworkActionButton;
     UIButton *_failurePointButton;
+    UIButton *_failureActionTaskEditButton;
     UIButton *_randomDelayModeButton;
     UIButton *_ocrContainsMatchModeButton;
     UIButton *_ocrRegexMatchModeButton;
@@ -321,9 +323,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_successImageActionButton;
     UIButton *_successOCRActionButton;
     UIButton *_successColorActionButton;
+    UIButton *_successJumpActionButton;
     UIButton *_failureImageActionButton;
     UIButton *_failureOCRActionButton;
     UIButton *_failureColorActionButton;
+    UIButton *_failureJumpActionButton;
     NSArray<UIButton *> *_modeButtons;
     UIScrollView *_taskListView;
     UIScrollView *_editorContentScrollView;
@@ -348,6 +352,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UILabel *_jitterCaptionLabel;
     UILabel *_successBranchCaptionLabel;
     UILabel *_failureBranchCaptionLabel;
+    UILabel *_failureActionTaskCaptionLabel;
     UILabel *_recognitionRetryModeCaptionLabel;
     UILabel *_recognitionIntervalCaptionLabel;
     UILabel *_collapsedRuntimeLabel;
@@ -360,6 +365,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UITextField *_jitterField;
     UITextField *_successBranchField;
     UITextField *_failureBranchField;
+    UITextField *_failureActionTaskField;
     UITextField *_recognitionIntervalField;
     UITextField *_thresholdField;
     UITextField *_ocrTargetField;
@@ -549,6 +555,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSInteger _actionRepeatCount;
     NSInteger _recognitionSuccessBranchIndex;
     NSInteger _recognitionFailureBranchIndex;
+    NSInteger _recognitionFailureActionTaskIndex;
     NSString *_currentTemplatePath;
     NSString *_actionDescription;
     NSString *_ocrTargetText;
@@ -576,8 +583,24 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [UIColor colorWithRed:0.00 green:0.48 blue:1.00 alpha:1.0];
 }
 
+- (UIColor *)themeDangerColor {
+    return [UIColor colorWithRed:1.00 green:0.23 blue:0.19 alpha:1.0];
+}
+
+- (UIColor *)floatingButtonIdleColor {
+    return [UIColor colorWithRed:0.03 green:0.78 blue:0.28 alpha:0.98];
+}
+
+- (UIColor *)floatingButtonIdleBorderColor {
+    return [UIColor colorWithRed:0.82 green:1.00 blue:0.28 alpha:0.95];
+}
+
+- (UIColor *)floatingButtonIdleShadowColor {
+    return [UIColor colorWithRed:0.08 green:0.95 blue:0.34 alpha:1.0];
+}
+
 - (UIColor *)themePanelDarkColor {
-    return [UIColor colorWithRed:0.95 green:0.95 blue:0.97 alpha:1.0];
+    return [UIColor colorWithRed:0.96 green:0.96 blue:0.98 alpha:1.0];
 }
 
 - (UIColor *)themeSurfaceColor {
@@ -585,19 +608,53 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (UIColor *)themeControlFillColor {
-    return [UIColor colorWithRed:0.95 green:0.95 blue:0.97 alpha:1.0];
+    return [UIColor colorWithRed:0.96 green:0.97 blue:0.98 alpha:1.0];
 }
 
 - (UIColor *)themePrimaryTextColor {
-    return [UIColor colorWithRed:0.08 green:0.08 blue:0.10 alpha:1.0];
+    return [UIColor colorWithRed:0.07 green:0.07 blue:0.09 alpha:1.0];
 }
 
 - (UIColor *)themeSecondaryTextColor {
-    return [UIColor colorWithRed:0.42 green:0.42 blue:0.46 alpha:1.0];
+    return [UIColor colorWithRed:0.36 green:0.36 blue:0.40 alpha:1.0];
 }
 
 - (UIColor *)themeSeparatorColor {
-    return [UIColor colorWithRed:0.82 green:0.82 blue:0.86 alpha:1.0];
+    return [UIColor colorWithRed:0.84 green:0.84 blue:0.88 alpha:1.0];
+}
+
+- (UIColor *)editorSectionTintColorAtIndex:(NSUInteger)index {
+    switch (index % 6) {
+        case 1:
+            return [UIColor colorWithRed:0.985 green:0.990 blue:1.000 alpha:1.0];
+        case 2:
+            return [UIColor colorWithRed:0.985 green:1.000 blue:0.992 alpha:1.0];
+        case 3:
+            return [UIColor colorWithRed:1.000 green:0.988 blue:0.980 alpha:1.0];
+        case 4:
+            return [UIColor colorWithRed:0.985 green:0.998 blue:1.000 alpha:1.0];
+        case 5:
+            return [UIColor colorWithRed:1.000 green:0.998 blue:0.982 alpha:1.0];
+        default:
+            return [self themeSurfaceColor];
+    }
+}
+
+- (UIColor *)editorSectionBorderColorAtIndex:(NSUInteger)index {
+    switch (index % 6) {
+        case 1:
+            return [UIColor colorWithRed:0.82 green:0.89 blue:1.00 alpha:1.0];
+        case 2:
+            return [UIColor colorWithRed:0.82 green:0.92 blue:0.86 alpha:1.0];
+        case 3:
+            return [UIColor colorWithRed:1.00 green:0.88 blue:0.80 alpha:1.0];
+        case 4:
+            return [UIColor colorWithRed:0.80 green:0.91 blue:0.92 alpha:1.0];
+        case 5:
+            return [UIColor colorWithRed:0.94 green:0.88 blue:0.70 alpha:1.0];
+        default:
+            return [[self themeSeparatorColor] colorWithAlphaComponent:0.72];
+    }
 }
 
 - (NSString *)toolDisplayName {
@@ -746,6 +803,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [NSString stringWithFormat:@"#%02lX%02lX%02lX", (long)red, (long)green, (long)blue];
 }
 
+- (UIColor *)uiColorForColorSample:(NSDictionary *)sample fallback:(UIColor *)fallback {
+    if (![sample isKindOfClass:NSDictionary.class]) {
+        return fallback ?: [UIColor colorWithWhite:1 alpha:0.10];
+    }
+    NSInteger red = MIN(255, MAX(0, [sample[@"red"] integerValue]));
+    NSInteger green = MIN(255, MAX(0, [sample[@"green"] integerValue]));
+    NSInteger blue = MIN(255, MAX(0, [sample[@"blue"] integerValue]));
+    return [UIColor colorWithRed:red / 255.0
+                           green:green / 255.0
+                            blue:blue / 255.0
+                           alpha:1.0];
+}
+
 - (NSString *)targetColorShortDescription {
     NSArray<NSDictionary *> *samples = [self effectiveTargetColorSamples];
     if (samples.count == 0) {
@@ -868,8 +938,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     [[view viewWithTag:AnClickBackdropBlurViewTag] removeFromSuperview];
-    view.backgroundColor = [[self themeSurfaceColor] colorWithAlphaComponent:0.96];
-    UIVisualEffectView *blurView = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleExtraLight]];
+    view.backgroundColor = [[self themeSurfaceColor] colorWithAlphaComponent:0.92];
+    UIBlurEffect *effect = nil;
+    if (@available(iOS 13.0, *)) {
+        effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterialLight];
+    } else {
+        effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleExtraLight];
+    }
+    UIVisualEffectView *blurView = [[UIVisualEffectView alloc] initWithEffect:effect];
     blurView.tag = AnClickBackdropBlurViewTag;
     blurView.frame = view.bounds;
     blurView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -885,8 +961,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     button.layer.borderColor = [self themeSeparatorColor].CGColor;
     button.layer.shadowColor = UIColor.blackColor.CGColor;
     button.layer.shadowOffset = CGSizeMake(0, 1);
-    button.layer.shadowRadius = 3.0;
-    button.layer.shadowOpacity = 0.10;
+    button.layer.shadowRadius = 2.0;
+    button.layer.shadowOpacity = 0.05;
     [button setTitleColor:[self themeHighlightColor] forState:UIControlStateNormal];
     button.tintColor = [self themeHighlightColor];
     [self updateButtonShadowPath:button];
@@ -1384,9 +1460,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _matchThreshold = 0.80;
     _actionDelay = 0;
     _actionRepeatCount = 1;
-    _actionInterval = -1.0;
+    _actionInterval = AnClickDefaultTapPressDuration;
     _recognitionSuccessBranchIndex = -1;
     _recognitionFailureBranchIndex = -1;
+    _recognitionFailureActionTaskIndex = -1;
     _globalDelayMilliseconds = 0;
     _globalRunRepeatCount = 1;
     _globalStartEnabled = NO;
@@ -1450,11 +1527,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     _collapsedButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _collapsedButton.frame = CGRectMake(0, 0, 48, 48);
-    _collapsedButton.backgroundColor = [UIColor colorWithRed:0.03 green:0.78 blue:0.28 alpha:0.98];
+    _collapsedButton.backgroundColor = [self floatingButtonIdleColor];
     _collapsedButton.layer.cornerRadius = 24;
-    _collapsedButton.layer.borderWidth = 2;
-    _collapsedButton.layer.borderColor = [UIColor colorWithRed:0.82 green:1.0 blue:0.28 alpha:0.95].CGColor;
-    _collapsedButton.layer.shadowColor = [UIColor colorWithRed:0.08 green:0.95 blue:0.34 alpha:1.0].CGColor;
+    _collapsedButton.layer.borderWidth = 2.0;
+    _collapsedButton.layer.borderColor = [self floatingButtonIdleBorderColor].CGColor;
+    _collapsedButton.layer.shadowColor = [self floatingButtonIdleShadowColor].CGColor;
     _collapsedButton.layer.shadowOpacity = 0.58;
     _collapsedButton.layer.shadowRadius = 10.0;
     _collapsedButton.layer.shadowOffset = CGSizeZero;
@@ -1482,14 +1559,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_collapsedButton addGestureRecognizer:collapsedPan];
 
     _panelView = [[UIView alloc] initWithFrame:_panelWindow.bounds];
-    [self installDarkBlurInView:_panelView cornerRadius:12.0];
-    _panelView.layer.cornerRadius = 12.0;
+    [self installDarkBlurInView:_panelView cornerRadius:16.0];
+    _panelView.layer.cornerRadius = 16.0;
     _panelView.layer.borderWidth = 1.0;
-    _panelView.layer.borderColor = [self themeSeparatorColor].CGColor;
+    _panelView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72].CGColor;
     _panelView.layer.shadowColor = UIColor.blackColor.CGColor;
-    _panelView.layer.shadowOpacity = 0.16;
-    _panelView.layer.shadowRadius = 24.0;
-    _panelView.layer.shadowOffset = CGSizeMake(0, 10);
+    _panelView.layer.shadowOpacity = 0.12;
+    _panelView.layer.shadowRadius = 22.0;
+    _panelView.layer.shadowOffset = CGSizeMake(0, 8);
     [controller.view addSubview:_panelView];
 
     UIPanGestureRecognizer *panelPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelPan:)];
@@ -1540,7 +1617,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _pickPointButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 120, buttonWidth, 32);
     [_panelView addSubview:_pickPointButton];
 
-    _failurePointButton = [self panelButtonWithTitle:@"失败位置" action:@selector(beginFailureActionPointPicking)];
+    _failurePointButton = [self panelButtonWithTitle:@"失败坐标" action:@selector(beginFailureActionPointPicking)];
     _failurePointButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 120, buttonWidth, 32);
     [_panelView addSubview:_failurePointButton];
 
@@ -1612,6 +1689,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _successColorActionButton.tag = AnClickActionModeColor;
     [_panelView addSubview:_successColorActionButton];
 
+    _successJumpActionButton = [self panelButtonWithTitle:@"跳转" action:@selector(selectImageActionMode:)];
+    _successJumpActionButton.tag = AnClickActionModeJump;
+    [_panelView addSubview:_successJumpActionButton];
+
     _failureNoneActionButton = [self panelButtonWithTitle:@"无" action:@selector(selectFailureActionMode:)];
     _failureNoneActionButton.tag = AnClickActionModeNone;
     [_panelView addSubview:_failureNoneActionButton];
@@ -1643,6 +1724,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _failureColorActionButton = [self panelButtonWithTitle:@"识色" action:@selector(selectFailureActionMode:)];
     _failureColorActionButton.tag = AnClickActionModeColor;
     [_panelView addSubview:_failureColorActionButton];
+
+    _failureJumpActionButton = [self panelButtonWithTitle:@"跳转" action:@selector(selectFailureActionMode:)];
+    _failureJumpActionButton.tag = AnClickActionModeJump;
+    [_panelView addSubview:_failureJumpActionButton];
 
     _ocrContainsMatchModeButton = [self panelButtonWithTitle:@"文字匹配" action:@selector(selectOCRMatchMode:)];
     _ocrContainsMatchModeButton.tag = AnClickOCRMatchModeContains;
@@ -1767,9 +1852,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         sectionView.layer.borderWidth = 1.0;
         sectionView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72].CGColor;
         sectionView.layer.shadowColor = UIColor.blackColor.CGColor;
-        sectionView.layer.shadowOffset = CGSizeMake(0, 2);
-        sectionView.layer.shadowRadius = 7.0;
-        sectionView.layer.shadowOpacity = 0.045;
+        sectionView.layer.shadowOffset = CGSizeMake(0, 1);
+        sectionView.layer.shadowRadius = 5.0;
+        sectionView.layer.shadowOpacity = 0.025;
         [_editorSectionViews addObject:sectionView];
     }
 
@@ -1793,11 +1878,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_panelView addSubview:_failureActionCaptionLabel];
     _thresholdCaptionLabel = [self configCaptionLabelWithText:@"匹配阈值（0.0~1.0）"];
     [_panelView addSubview:_thresholdCaptionLabel];
-    _delayCaptionLabel = [self configCaptionLabelWithText:@"延时执行（秒）"];
+    _delayCaptionLabel = [self configCaptionLabelWithText:@"延时执行（毫秒）"];
     [_panelView addSubview:_delayCaptionLabel];
     _repeatCaptionLabel = [self configCaptionLabelWithText:@"执行次数（次数）"];
     [_panelView addSubview:_repeatCaptionLabel];
-    _intervalCaptionLabel = [self configCaptionLabelWithText:@"循环间隔（秒）"];
+    _intervalCaptionLabel = [self configCaptionLabelWithText:@"循环间隔（毫秒）"];
     [_panelView addSubview:_intervalCaptionLabel];
     _macroSpeedCaptionLabel = [self configCaptionLabelWithText:@"录制速度"];
     [_panelView addSubview:_macroSpeedCaptionLabel];
@@ -1807,13 +1892,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_panelView addSubview:_randomDelayCaptionLabel];
     _jitterCaptionLabel = [self configCaptionLabelWithText:@"随机抖动"];
     [_panelView addSubview:_jitterCaptionLabel];
-    _successBranchCaptionLabel = [self configCaptionLabelWithText:@"成功任务号"];
+    _successBranchCaptionLabel = [self configCaptionLabelWithText:@"成功跳任务"];
     [_panelView addSubview:_successBranchCaptionLabel];
-    _failureBranchCaptionLabel = [self configCaptionLabelWithText:@"失败任务号"];
+    _failureBranchCaptionLabel = [self configCaptionLabelWithText:@"失败跳任务"];
     [_panelView addSubview:_failureBranchCaptionLabel];
+    _failureActionTaskCaptionLabel = [self configCaptionLabelWithText:@"失败动作任务号"];
+    [_panelView addSubview:_failureActionTaskCaptionLabel];
     _recognitionRetryModeCaptionLabel = [self configCaptionLabelWithText:@"识别策略"];
     [_panelView addSubview:_recognitionRetryModeCaptionLabel];
-    _recognitionIntervalCaptionLabel = [self configCaptionLabelWithText:@"循环间隔（秒）"];
+    _recognitionIntervalCaptionLabel = [self configCaptionLabelWithText:@"循环间隔（毫秒）"];
     [_panelView addSubview:_recognitionIntervalCaptionLabel];
 
     _descriptionField = [[UITextField alloc] initWithFrame:CGRectMake(8, 142, panelWidth - 16, 34)];
@@ -1823,7 +1910,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_descriptionField addTarget:self action:@selector(actionDescriptionChanged:) forControlEvents:UIControlEventEditingChanged];
     [_panelView addSubview:_descriptionField];
 
-    _delayField = [self configTextFieldWithPlaceholder:@"延时(秒)"];
+    _delayField = [self configTextFieldWithPlaceholder:@"0"];
     _delayField.keyboardType = UIKeyboardTypeDecimalPad;
     [_delayField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
     [_delayField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
@@ -1835,7 +1922,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_repeatField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_repeatField];
 
-    _intervalField = [self configTextFieldWithPlaceholder:@"空=0.03"];
+    _intervalField = [self configTextFieldWithPlaceholder:@"30"];
     _intervalField.keyboardType = UIKeyboardTypeDecimalPad;
     [_intervalField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
     [_intervalField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
@@ -1862,19 +1949,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_jitterField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_jitterField];
 
-    _successBranchField = [self configTextFieldWithPlaceholder:@"留空顺序"];
+    _successBranchField = [self configTextFieldWithPlaceholder:@"任务号"];
     _successBranchField.keyboardType = UIKeyboardTypeNumberPad;
     [_successBranchField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
     [_successBranchField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_successBranchField];
 
-    _failureBranchField = [self configTextFieldWithPlaceholder:@"留空顺序"];
+    _failureBranchField = [self configTextFieldWithPlaceholder:@"任务号"];
     _failureBranchField.keyboardType = UIKeyboardTypeNumberPad;
     [_failureBranchField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
     [_failureBranchField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_failureBranchField];
 
-    _recognitionIntervalField = [self configTextFieldWithPlaceholder:@"1.0"];
+    _failureActionTaskField = [self configTextFieldWithPlaceholder:@"任务号"];
+    _failureActionTaskField.keyboardType = UIKeyboardTypeNumberPad;
+    [_failureActionTaskField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
+    [_failureActionTaskField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+    [_panelView addSubview:_failureActionTaskField];
+
+    _failureActionTaskEditButton = [self panelButtonWithTitle:@"设置配置" action:@selector(editFailureRecognitionActionTask)];
+    [_panelView addSubview:_failureActionTaskEditButton];
+
+    _recognitionIntervalField = [self configTextFieldWithPlaceholder:@"1000"];
     _recognitionIntervalField.keyboardType = UIKeyboardTypeDecimalPad;
     [_recognitionIntervalField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
     [_recognitionIntervalField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
@@ -2018,17 +2114,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)applyObsidian3DStyleToButton:(UIButton *)button selected:(BOOL)selected {
-    button.layer.cornerRadius = 8;
+    button.layer.cornerRadius = 8.0;
     button.layer.masksToBounds = NO;
+    button.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
 
     if (selected) {
         button.backgroundColor = [self themeHighlightColor];
-        button.layer.borderWidth = 0.0;
-        button.layer.borderColor = UIColor.clearColor.CGColor;
+        button.layer.borderWidth = 1.0;
+        button.layer.borderColor = [[self themeHighlightColor] colorWithAlphaComponent:0.85].CGColor;
         button.layer.shadowColor = UIColor.blackColor.CGColor;
         button.layer.shadowOffset = CGSizeMake(0, 2);
         button.layer.shadowRadius = 4.0;
-        button.layer.shadowOpacity = 0.14;
+        button.layer.shadowOpacity = 0.10;
         [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
         button.tintColor = UIColor.whiteColor;
     } else {
@@ -2038,7 +2135,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         button.layer.shadowColor = UIColor.blackColor.CGColor;
         button.layer.shadowOffset = CGSizeMake(0, 1);
         button.layer.shadowRadius = 2.0;
-        button.layer.shadowOpacity = 0.06;
+        button.layer.shadowOpacity = 0.035;
         [button setTitleColor:[self themePrimaryTextColor] forState:UIControlStateNormal];
         button.tintColor = [self themeHighlightColor];
     }
@@ -2056,23 +2153,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)applyObsidianInputStyleToField:(UITextField *)field placeholder:(NSString *)placeholder monospaced:(BOOL)monospaced {
-    field.textColor = monospaced ? [self themeHighlightColor] : [self themePrimaryTextColor];
+    field.textColor = [self themePrimaryTextColor];
     field.tintColor = [self themeHighlightColor];
     field.font = monospaced
-        ? [UIFont monospacedDigitSystemFontOfSize:16 weight:UIFontWeightBold]
-        : [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+        ? [UIFont monospacedDigitSystemFontOfSize:15 weight:UIFontWeightSemibold]
+        : [UIFont systemFontOfSize:15 weight:UIFontWeightRegular];
     field.backgroundColor = [self themeControlFillColor];
-    field.layer.cornerRadius = 6;
+    field.layer.cornerRadius = 8.0;
     field.layer.borderWidth = 1.0;
-    field.layer.borderColor = [self themeSeparatorColor].CGColor;
+    field.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.92].CGColor;
     field.layer.shadowColor = UIColor.blackColor.CGColor;
     field.layer.shadowOffset = CGSizeMake(0, 1);
     field.layer.shadowRadius = 2.0;
-    field.layer.shadowOpacity = 0.04;
+    field.layer.shadowOpacity = 0.025;
     field.clearButtonMode = UITextFieldViewModeWhileEditing;
-    field.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 10, 1)];
+    field.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 12, 1)];
     field.leftViewMode = UITextFieldViewModeAlways;
-    [self setStyledPlaceholder:placeholder forField:field alpha:0.25];
+    [self setStyledPlaceholder:placeholder forField:field alpha:0.42];
 }
 
 - (void)setCenteredIconForButton:(UIButton *)button systemName:(NSString *)systemName fallbackTitle:(NSString *)fallbackTitle fontSize:(CGFloat)fontSize {
@@ -2287,8 +2384,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (UILabel *)configCaptionLabelWithText:(NSString *)text {
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
     label.text = text;
-    label.textColor = [self themeSecondaryTextColor];
-    label.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
+    label.textColor = [[self themeSecondaryTextColor] colorWithAlphaComponent:0.90];
+    label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     label.adjustsFontSizeToFitWidth = YES;
     label.minimumScaleFactor = 0.7;
     return label;
@@ -3471,6 +3568,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _collapsedButton.layer.shadowRadius = 10.0;
         _collapsedButton.layer.shadowOffset = CGSizeZero;
         [self setCenteredIconForButton:_collapsedButton systemName:@"stop.fill" fallbackTitle:@"■" fontSize:20];
+        _collapsedButton.tintColor = UIColor.whiteColor;
+        [_collapsedButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
         [self updateButtonShadowPath:_collapsedButton];
         return;
     }
@@ -3484,18 +3583,22 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _collapsedButton.layer.shadowRadius = 10.0;
         _collapsedButton.layer.shadowOffset = CGSizeZero;
         [self setCenteredIconForButton:_collapsedButton systemName:@"stop.fill" fallbackTitle:@"■" fontSize:20];
+        _collapsedButton.tintColor = UIColor.whiteColor;
+        [_collapsedButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
         [self updateButtonShadowPath:_collapsedButton];
         return;
     }
     _collapsedButton.layer.cornerRadius = CGRectGetWidth(_collapsedButton.bounds) * 0.5;
     _collapsedButton.layer.borderWidth = 2.0;
-    _collapsedButton.backgroundColor = [UIColor colorWithRed:0.03 green:0.78 blue:0.28 alpha:0.98];
-    _collapsedButton.layer.borderColor = [UIColor colorWithRed:0.82 green:1.0 blue:0.28 alpha:0.95].CGColor;
-    _collapsedButton.layer.shadowColor = [UIColor colorWithRed:0.08 green:0.95 blue:0.34 alpha:1.0].CGColor;
+    _collapsedButton.backgroundColor = [self floatingButtonIdleColor];
+    _collapsedButton.layer.borderColor = [self floatingButtonIdleBorderColor].CGColor;
+    _collapsedButton.layer.shadowColor = [self floatingButtonIdleShadowColor].CGColor;
     _collapsedButton.layer.shadowOpacity = 0.58;
     _collapsedButton.layer.shadowRadius = 10.0;
     _collapsedButton.layer.shadowOffset = CGSizeZero;
     [self setCenteredIconForButton:_collapsedButton systemName:@"play.circle.fill" fallbackTitle:@"▶" fontSize:25];
+    _collapsedButton.tintColor = UIColor.whiteColor;
+    [_collapsedButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     [self updateButtonShadowPath:_collapsedButton];
 }
 
@@ -3581,12 +3684,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _jitterCaptionLabel.hidden = YES;
     _successBranchCaptionLabel.hidden = YES;
     _failureBranchCaptionLabel.hidden = YES;
+    _failureActionTaskCaptionLabel.hidden = YES;
     _recognitionRetryModeCaptionLabel.hidden = YES;
     _recognitionIntervalCaptionLabel.hidden = YES;
     _captureButton.hidden = YES;
     _playButton.hidden = YES;
     _pickPointButton.hidden = YES;
     _failurePointButton.hidden = YES;
+    _failureActionTaskEditButton.hidden = YES;
     _runManualButton.hidden = YES;
     _recordSwipeButton.hidden = YES;
     _previewSwipeButton.hidden = YES;
@@ -3599,6 +3704,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _successImageActionButton.hidden = YES;
     _successOCRActionButton.hidden = YES;
     _successColorActionButton.hidden = YES;
+    _successJumpActionButton.hidden = YES;
     _failureNoneActionButton.hidden = YES;
     _failureTapActionButton.hidden = YES;
     _failureDoubleTapActionButton.hidden = YES;
@@ -3607,6 +3713,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _failureImageActionButton.hidden = YES;
     _failureOCRActionButton.hidden = YES;
     _failureColorActionButton.hidden = YES;
+    _failureJumpActionButton.hidden = YES;
     _randomDelayModeButton.hidden = YES;
     _ocrContainsMatchModeButton.hidden = YES;
     _ocrRegexMatchModeButton.hidden = YES;
@@ -3633,6 +3740,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _jitterField.hidden = YES;
     _successBranchField.hidden = YES;
     _failureBranchField.hidden = YES;
+    _failureActionTaskField.hidden = YES;
     _recognitionIntervalField.hidden = YES;
     _ocrTargetField.hidden = YES;
     _networkURLField.hidden = YES;
@@ -3687,12 +3795,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _jitterCaptionLabel,
         _successBranchCaptionLabel,
         _failureBranchCaptionLabel,
+        _failureActionTaskCaptionLabel,
         _recognitionRetryModeCaptionLabel,
         _recognitionIntervalCaptionLabel,
         _captureButton,
         _playButton,
         _pickPointButton,
         _failurePointButton,
+        _failureActionTaskEditButton,
         _runManualButton,
         _recordSwipeButton,
         _previewSwipeButton,
@@ -3702,6 +3812,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _successImageActionButton,
         _successOCRActionButton,
         _successColorActionButton,
+        _successJumpActionButton,
         _failureNoneActionButton,
         _failureTapActionButton,
         _failureDoubleTapActionButton,
@@ -3710,6 +3821,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _failureImageActionButton,
         _failureOCRActionButton,
         _failureColorActionButton,
+        _failureJumpActionButton,
         _randomDelayModeButton,
         _ocrContainsMatchModeButton,
         _ocrRegexMatchModeButton,
@@ -3734,6 +3846,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _jitterField,
         _successBranchField,
         _failureBranchField,
+        _failureActionTaskField,
         _recognitionIntervalField,
         _thresholdField,
         _ocrTargetField,
@@ -3807,6 +3920,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat y = MAX(0.0, topY - [self editorSectionTopPadding]);
     CGFloat height = bottomY - topY + [self editorSectionTopPadding] + [self editorSectionBottomPadding];
     sectionView.hidden = NO;
+    sectionView.backgroundColor = [self editorSectionTintColorAtIndex:index];
+    sectionView.layer.borderColor = [self editorSectionBorderColorAtIndex:index].CGColor;
     sectionView.frame = CGRectMake(side, y, _editorContentScrollView.bounds.size.width - side * 2.0, height);
     sectionView.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:sectionView.bounds cornerRadius:sectionView.layer.cornerRadius].CGPath;
     [_editorContentScrollView sendSubviewToBack:sectionView];
@@ -3867,24 +3982,31 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self setCenteredIconForButton:_collapseButton systemName:@"square.and.arrow.down.fill" fallbackTitle:@"存" fontSize:22];
     [self setCenteredIconForButton:_runTasksButton systemName:_taskRunActive ? @"stop.fill" : @"play.fill" fallbackTitle:_taskRunActive ? @"■" : @"▶" fontSize:24];
     NSArray<UIButton *> *toolbarButtons = @[_addTaskButton, _deleteTaskButton, _collapseButton, _runTasksButton];
-    NSArray<UIColor *> *colors = @[
-        [UIColor colorWithRed:0.02 green:0.50 blue:0.95 alpha:0.95],
-        [UIColor colorWithRed:0.88 green:0.12 blue:0.10 alpha:0.95],
-        [UIColor colorWithRed:0.68 green:0.24 blue:0.86 alpha:0.95],
-        _taskRunActive ? [UIColor colorWithRed:0.84 green:0.12 blue:0.10 alpha:0.95] : [UIColor colorWithRed:0.12 green:0.74 blue:0.30 alpha:0.95],
+    NSArray<UIColor *> *iconColors = @[
+        [self themeHighlightColor],
+        [self themeDangerColor],
+        [self themeHighlightColor],
+        UIColor.whiteColor,
     ];
     for (NSUInteger i = 0; i < toolbarButtons.count; i++) {
         UIButton *button = toolbarButtons[i];
+        BOOL primaryRunButton = button == _runTasksButton;
         button.frame = CGRectMake(startX + (buttonSize + 26.0) * i, buttonY, buttonSize, buttonSize);
         button.layer.cornerRadius = buttonSize * 0.5;
-        button.layer.borderWidth = 0;
+        button.layer.borderWidth = 1.0;
+        button.layer.borderColor = (primaryRunButton
+            ? UIColor.clearColor
+            : [[self themeSeparatorColor] colorWithAlphaComponent:0.82]).CGColor;
         button.layer.shadowColor = UIColor.blackColor.CGColor;
-        button.layer.shadowOffset = CGSizeMake(0, 4);
-        button.layer.shadowRadius = 7.0;
-        button.layer.shadowOpacity = 0.32;
-        button.backgroundColor = colors[i];
-        [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-        button.tintColor = UIColor.whiteColor;
+        button.layer.shadowOffset = CGSizeMake(0, primaryRunButton ? 3 : 2);
+        button.layer.shadowRadius = primaryRunButton ? 7.0 : 4.0;
+        button.layer.shadowOpacity = primaryRunButton ? 0.16 : 0.07;
+        button.backgroundColor = primaryRunButton
+            ? (_taskRunActive ? [self themeDangerColor] : [self themeHighlightColor])
+            : [self themeControlFillColor];
+        UIColor *iconColor = primaryRunButton ? UIColor.whiteColor : iconColors[i];
+        [button setTitleColor:iconColor forState:UIControlStateNormal];
+        button.tintColor = iconColor;
         [self updateButtonShadowPath:button];
     }
 
@@ -4019,7 +4141,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                   modeTopY + (modeButtonHeight + modeRowGap) * row,
                                   buttonWidth,
                                   modeButtonHeight);
-        button.titleLabel.font = [UIFont systemFontOfSize:(compactHeight ? 14 : 15) weight:UIFontWeightBold];
+        button.titleLabel.font = [UIFont systemFontOfSize:(compactHeight ? 14 : 15) weight:UIFontWeightSemibold];
     }
 
     CGFloat modeRowGapCount = modeRows > 0 ? (CGFloat)(modeRows - 1) : 0.0;
@@ -4563,15 +4685,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     UIButton *followButton = [UIButton buttonWithType:UIButtonTypeSystem];
     followButton.frame = CGRectMake(18.0, 196.0, width - 36.0, 46.0);
-    followButton.backgroundColor = [UIColor colorWithRed:0.85 green:0.12 blue:0.28 alpha:0.98];
+    followButton.backgroundColor = [self themeHighlightColor];
     followButton.layer.cornerRadius = 8.0;
-    followButton.titleLabel.font = [UIFont systemFontOfSize:21 weight:UIFontWeightBold];
+    followButton.layer.shadowColor = UIColor.blackColor.CGColor;
+    followButton.layer.shadowOffset = CGSizeMake(0, 3);
+    followButton.layer.shadowRadius = 8.0;
+    followButton.layer.shadowOpacity = 0.12;
+    followButton.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
     followButton.titleLabel.adjustsFontSizeToFitWidth = YES;
     followButton.titleLabel.minimumScaleFactor = 0.72;
     [followButton setTitle:@"关注作者DooRoo" forState:UIControlStateNormal];
     [followButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     [followButton addTarget:self action:@selector(openDooRooBilibiliProfile) forControlEvents:UIControlEventTouchUpInside];
     [panel addSubview:followButton];
+    [self updateButtonShadowPath:followButton];
 
     return panel;
 }
@@ -4888,7 +5015,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *text = subtitle.length > 0 ? [NSString stringWithFormat:@"%@\n%@", title, subtitle] : title;
     NSMutableAttributedString *attributed = [[NSMutableAttributedString alloc] initWithString:text];
     [attributed addAttribute:NSForegroundColorAttributeName value:[self themePrimaryTextColor] range:NSMakeRange(0, title.length)];
-    [attributed addAttribute:NSFontAttributeName value:[UIFont systemFontOfSize:19 weight:UIFontWeightBold] range:NSMakeRange(0, title.length)];
+    [attributed addAttribute:NSFontAttributeName value:[UIFont systemFontOfSize:17 weight:UIFontWeightSemibold] range:NSMakeRange(0, title.length)];
     if (subtitle.length > 0) {
         NSRange subtitleRange = NSMakeRange(title.length + 1, subtitle.length);
         [attributed addAttribute:NSForegroundColorAttributeName value:[self themeSecondaryTextColor] range:subtitleRange];
@@ -4897,9 +5024,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [button setAttributedTitle:attributed forState:UIControlStateNormal];
     button.titleEdgeInsets = UIEdgeInsetsMake(0, 18, 0, 34);
     button.backgroundColor = color;
-    button.layer.cornerRadius = 8;
+    button.layer.cornerRadius = 10;
     button.layer.borderWidth = 1;
-    button.layer.borderColor = [self themeSeparatorColor].CGColor;
+    button.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.82].CGColor;
+    button.layer.shadowColor = UIColor.blackColor.CGColor;
+    button.layer.shadowOffset = CGSizeMake(0, 1);
+    button.layer.shadowRadius = 3.0;
+    button.layer.shadowOpacity = 0.035;
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
 
     UILabel *chevron = [[UILabel alloc] initWithFrame:CGRectZero];
@@ -4923,6 +5054,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         row.frame = CGRectMake(side, startY + (rowHeight + gap) * i, width, rowHeight);
         UILabel *chevron = (UILabel *)[row viewWithTag:9001];
         chevron.frame = CGRectMake(width - 44.0, 0, 34.0, rowHeight);
+        [self updateButtonShadowPath:row];
     }
 }
 
@@ -4991,8 +5123,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (UIButton *)configPromptButtonWithTitle:(NSString *)title action:(SEL)action destructive:(BOOL)destructive {
     UIButton *button = [self panelButtonWithTitle:title action:action];
     if (destructive) {
-        button.backgroundColor = [UIColor colorWithRed:0.78 green:0.10 blue:0.07 alpha:0.96];
-        button.layer.borderColor = [UIColor colorWithRed:1.0 green:0.42 blue:0.32 alpha:0.92].CGColor;
+        button.backgroundColor = [self themeDangerColor];
+        button.layer.borderColor = [[self themeDangerColor] colorWithAlphaComponent:0.85].CGColor;
+        button.layer.shadowColor = UIColor.blackColor.CGColor;
+        button.layer.shadowOffset = CGSizeMake(0, 2);
+        button.layer.shadowRadius = 4.0;
+        button.layer.shadowOpacity = 0.12;
         [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
         button.tintColor = UIColor.whiteColor;
     }
@@ -5328,9 +5464,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _actionDescription = nil;
     _actionDelay = 0;
     _actionRepeatCount = 1;
-    _actionInterval = -1.0;
+    _actionInterval = AnClickDefaultTapPressDuration;
     _recognitionSuccessBranchIndex = -1;
     _recognitionFailureBranchIndex = -1;
+    _recognitionFailureActionTaskIndex = -1;
 }
 
 - (void)resetCurrentActionConfiguration {
@@ -5458,7 +5595,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)actionNameForMode:(AnClickActionMode)mode {
-    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动", @"多指", @"缩小", @"放大", @"旋转", @"识图", @"录制", @"识字", @"识色", @"网络"];
+    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动", @"多指", @"缩小", @"放大", @"旋转", @"识图", @"录制", @"识字", @"识色", @"网络", @"跳转"];
     if (mode < AnClickActionModeTap || mode >= AnClickActionModeCount) {
         return @"动作";
     }
@@ -5594,6 +5731,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeImage),
         @(AnClickActionModeOCR),
         @(AnClickActionModeColor),
+        @(AnClickActionModeJump),
     ];
 }
 
@@ -5616,6 +5754,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeImage),
         @(AnClickActionModeOCR),
         @(AnClickActionModeColor),
+        @(AnClickActionModeJump),
     ];
 }
 
@@ -5687,7 +5826,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _intervalField, _macroSpeedField, _longPressDurationField, _jitterField, _thresholdField, _ocrTargetField, _successBranchField, _failureBranchField, _recognitionIntervalField, _networkURLField, _networkContainsField, _networkFalseField, _networkPostBodyField, nil];
+    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _intervalField, _macroSpeedField, _longPressDurationField, _jitterField, _thresholdField, _ocrTargetField, _successBranchField, _failureBranchField, _failureActionTaskField, _recognitionIntervalField, _networkURLField, _networkContainsField, _networkFalseField, _networkPostBodyField, nil];
     [fields addObjectsFromArray:_networkPostKeyFields ?: @[]];
     [fields addObjectsFromArray:_networkPostValueFields ?: @[]];
     if (_globalDelayField) {
@@ -5777,11 +5916,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSString *)commonConfigSummary {
     NSString *intervalText = _actionInterval >= 0.0
-        ? [NSString stringWithFormat:@" 间%.2fs", _actionInterval]
+        ? [NSString stringWithFormat:@" 间%@", [self millisecondsSummaryTextForDuration:_actionInterval]]
         : @"";
     NSString *delayText = _actionRandomDelayEnabled && _actionDelay > 0.001
-        ? [NSString stringWithFormat:@"随机%@-%.1fs", _actionDelay >= 1.0 ? @"1" : @"0", _actionDelay]
-        : [NSString stringWithFormat:@"延%.1fs", _actionDelay];
+        ? [NSString stringWithFormat:@"随机%@-%@", _actionDelay >= 1.0 ? @"1000毫秒" : @"0毫秒", [self millisecondsSummaryTextForDuration:_actionDelay]]
+        : [NSString stringWithFormat:@"延%@", [self millisecondsSummaryTextForDuration:_actionDelay]];
     NSString *jitterText = _actionJitterRadius > 0.001
         ? [NSString stringWithFormat:@" 抖%.0fpx", _actionJitterRadius]
         : @"";
@@ -5808,20 +5947,35 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSString *)delayFieldText {
     if (_actionDelay <= 0.001) {
-        return @"";
+        return @"0";
     }
-    return [NSString stringWithFormat:@"%.1f", _actionDelay];
+    return [NSString stringWithFormat:@"%ld", (long)llround(_actionDelay * 1000.0)];
 }
 
 - (NSString *)repeatFieldText {
     return [NSString stringWithFormat:@"%ld", (long)MAX(1, _actionRepeatCount)];
 }
 
+- (NSString *)millisecondsFieldTextForDuration:(NSTimeInterval)duration
+                               defaultDuration:(NSTimeInterval)defaultDuration
+                                       minimum:(NSTimeInterval)minimum
+                                       maximum:(NSTimeInterval)maximum {
+    NSTimeInterval safeDuration = (!isfinite(duration) || duration < 0.0) ? defaultDuration : duration;
+    NSTimeInterval clamped = MIN(maximum, MAX(minimum, safeDuration));
+    return [NSString stringWithFormat:@"%ld", (long)llround(clamped * 1000.0)];
+}
+
+- (NSString *)millisecondsSummaryTextForDuration:(NSTimeInterval)duration {
+    NSTimeInterval safeDuration = (!isfinite(duration) || duration < 0.0) ? 0.0 : duration;
+    NSInteger milliseconds = (NSInteger)llround(safeDuration * 1000.0);
+    return [NSString stringWithFormat:@"%ld毫秒", (long)MAX(0, milliseconds)];
+}
+
 - (NSString *)actionIntervalFieldText {
-    if (_actionInterval < 0.0) {
-        return @"";
-    }
-    return [NSString stringWithFormat:@"%.2f", MIN(30.0, MAX(0.0, _actionInterval))];
+    return [self millisecondsFieldTextForDuration:_actionInterval
+                                  defaultDuration:AnClickDefaultTapPressDuration
+                                          minimum:AnClickDefaultTapPressDuration
+                                          maximum:30.0];
 }
 
 - (double)normalizedMacroPlaybackSpeed:(double)speed {
@@ -5899,10 +6053,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (NSString *)longPressDurationSummaryText:(NSTimeInterval)duration {
     NSTimeInterval normalizedDuration = [self normalizedLongPressDuration:duration];
     NSInteger milliseconds = (NSInteger)llround(normalizedDuration * 1000.0);
-    if (milliseconds % 1000 == 0) {
-        return [NSString stringWithFormat:@"%lds", (long)(milliseconds / 1000)];
-    }
-    return [NSString stringWithFormat:@"%ldms", (long)milliseconds];
+    return [NSString stringWithFormat:@"%ld毫秒", (long)milliseconds];
 }
 
 - (NSString *)jitterFieldText {
@@ -5921,7 +6072,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSString *)recognitionRetryIntervalFieldText {
     NSTimeInterval interval = MIN(30.0, MAX(0.2, _recognitionRetryInterval));
-    return [NSString stringWithFormat:@"%.1f", interval];
+    return [self millisecondsFieldTextForDuration:interval
+                                  defaultDuration:1.0
+                                          minimum:0.2
+                                          maximum:30.0];
 }
 
 - (NSString *)recognitionRetryModeTitle {
@@ -5930,7 +6084,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSString *)recognitionRetryStatusSummary {
     return _recognitionRetryUntilFound
-        ? [NSString stringWithFormat:@" 识别到为止 间%.1fs", MIN(30.0, MAX(0.2, _recognitionRetryInterval))]
+        ? [NSString stringWithFormat:@" 识别到为止 间%@", [self millisecondsSummaryTextForDuration:MIN(30.0, MAX(0.2, _recognitionRetryInterval))]]
         : [NSString stringWithFormat:@" 次%ld", (long)MAX(1, _actionRepeatCount)];
 }
 
@@ -5953,9 +6107,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *jitterText = [_jitterField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *successBranchText = [_successBranchField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *failureBranchText = [_failureBranchField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *failureActionTaskText = [_failureActionTaskField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if (delayText.length > 0) {
-        _actionDelay = MIN(30.0, MAX(0.0, delayText.doubleValue));
-        _actionDelay = round(_actionDelay * 10.0) / 10.0;
+        NSTimeInterval delayMilliseconds = MIN(30000.0, MAX(0.0, delayText.doubleValue));
+        _actionDelay = round(delayMilliseconds) / 1000.0;
     } else {
         _actionDelay = 0.0;
     }
@@ -5965,10 +6120,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _actionRepeatCount = 1;
     }
     if (intervalText.length > 0) {
-        _actionInterval = MIN(30.0, MAX(0.0, intervalText.doubleValue));
-        _actionInterval = round(_actionInterval * 100.0) / 100.0;
+        NSTimeInterval intervalMilliseconds = MIN(30000.0, MAX(30.0, intervalText.doubleValue));
+        _actionInterval = round(intervalMilliseconds) / 1000.0;
     } else {
-        _actionInterval = -1.0;
+        _actionInterval = AnClickDefaultTapPressDuration;
     }
     if (macroSpeedText.length > 0) {
         _macroPlaybackSpeed = [self normalizedMacroPlaybackSpeed:macroSpeedText.doubleValue];
@@ -5995,10 +6150,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _recognitionFailureBranchIndex = failureBranchText.length > 0 && failureBranchNumber > 0
         ? failureBranchNumber - 1
         : -1;
+    NSInteger failureActionTaskNumber = failureActionTaskText.integerValue;
+    _recognitionFailureActionTaskIndex = failureActionTaskText.length > 0 && failureActionTaskNumber > 0
+        ? failureActionTaskNumber - 1
+        : -1;
     NSString *recognitionIntervalText = [_recognitionIntervalField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if (recognitionIntervalText.length > 0) {
-        _recognitionRetryInterval = MIN(30.0, MAX(0.2, recognitionIntervalText.doubleValue));
-        _recognitionRetryInterval = round(_recognitionRetryInterval * 10.0) / 10.0;
+        NSTimeInterval recognitionIntervalMilliseconds = MIN(30000.0, MAX(200.0, recognitionIntervalText.doubleValue));
+        _recognitionRetryInterval = round(recognitionIntervalMilliseconds) / 1000.0;
     } else {
         _recognitionRetryInterval = 1.0;
     }
@@ -6079,6 +6238,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     if (!_failureBranchField.isFirstResponder) {
         _failureBranchField.text = [self recognitionBranchFieldTextForIndex:_recognitionFailureBranchIndex];
+    }
+    if (!_failureActionTaskField.isFirstResponder) {
+        _failureActionTaskField.text = [self recognitionBranchFieldTextForIndex:_recognitionFailureActionTaskIndex];
     }
     if (!_recognitionIntervalField.isFirstResponder) {
         _recognitionIntervalField.text = [self recognitionRetryIntervalFieldText];
@@ -6315,12 +6477,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _jitterCaptionLabel.hidden = YES;
     _successBranchCaptionLabel.hidden = YES;
     _failureBranchCaptionLabel.hidden = YES;
+    _failureActionTaskCaptionLabel.hidden = YES;
     _recognitionRetryModeCaptionLabel.hidden = YES;
     _recognitionIntervalCaptionLabel.hidden = YES;
     _captureButton.hidden = YES;
     _playButton.hidden = YES;
     _pickPointButton.hidden = YES;
     _failurePointButton.hidden = YES;
+    _failureActionTaskEditButton.hidden = YES;
     _runManualButton.hidden = YES;
     _recordSwipeButton.hidden = YES;
     _previewSwipeButton.hidden = YES;
@@ -6330,6 +6494,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _successImageActionButton.hidden = YES;
     _successOCRActionButton.hidden = YES;
     _successColorActionButton.hidden = YES;
+    _successJumpActionButton.hidden = YES;
     _failureNoneActionButton.hidden = YES;
     _failureTapActionButton.hidden = YES;
     _failureDoubleTapActionButton.hidden = YES;
@@ -6338,6 +6503,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _failureImageActionButton.hidden = YES;
     _failureOCRActionButton.hidden = YES;
     _failureColorActionButton.hidden = YES;
+    _failureJumpActionButton.hidden = YES;
     _randomDelayModeButton.hidden = YES;
     _ocrContainsMatchModeButton.hidden = YES;
     _ocrRegexMatchModeButton.hidden = YES;
@@ -6364,6 +6530,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _jitterField.hidden = YES;
     _successBranchField.hidden = YES;
     _failureBranchField.hidden = YES;
+    _failureActionTaskField.hidden = YES;
     _recognitionIntervalField.hidden = YES;
     _thresholdField.hidden = YES;
     _ocrTargetField.hidden = YES;
@@ -6415,18 +6582,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)styleRecordButton:(UIButton *)button active:(BOOL)active {
-    button.layer.cornerRadius = 7;
-    button.layer.borderWidth = 1;
+    button.layer.cornerRadius = 8.0;
+    button.layer.borderWidth = 1.0;
     button.layer.masksToBounds = NO;
     button.backgroundColor = active
-        ? [UIColor colorWithRed:0.84 green:0.12 blue:0.10 alpha:0.96]
-        : [UIColor colorWithRed:0.58 green:0.08 blue:0.07 alpha:0.94];
-    button.layer.borderColor = [UIColor colorWithRed:1.0 green:0.30 blue:0.24 alpha:0.92].CGColor;
-    button.layer.shadowColor = [UIColor colorWithRed:0.90 green:0.10 blue:0.08 alpha:1.0].CGColor;
-    button.layer.shadowOffset = CGSizeMake(0, active ? 0 : 2.5);
-    button.layer.shadowRadius = active ? 8.0 : 5.0;
-    button.layer.shadowOpacity = active ? 0.40 : 0.28;
-    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        ? [self themeDangerColor]
+        : [self themeControlFillColor];
+    button.layer.borderColor = active
+        ? [[self themeDangerColor] colorWithAlphaComponent:0.85].CGColor
+        : [[self themeSeparatorColor] colorWithAlphaComponent:0.92].CGColor;
+    button.layer.shadowColor = UIColor.blackColor.CGColor;
+    button.layer.shadowOffset = CGSizeMake(0, active ? 3.0 : 1.0);
+    button.layer.shadowRadius = active ? 6.0 : 2.0;
+    button.layer.shadowOpacity = active ? 0.16 : 0.035;
+    [button setTitleColor:(active ? UIColor.whiteColor : [self themeHighlightColor]) forState:UIControlStateNormal];
+    button.tintColor = active ? UIColor.whiteColor : [self themeHighlightColor];
     [self updateButtonShadowPath:button];
 }
 
@@ -6480,6 +6650,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_successImageActionButton setTitle:@"识图" forState:UIControlStateNormal];
     [_successOCRActionButton setTitle:@"识字" forState:UIControlStateNormal];
     [_successColorActionButton setTitle:@"识色" forState:UIControlStateNormal];
+    [_successJumpActionButton setTitle:@"跳转" forState:UIControlStateNormal];
 }
 
 - (CGFloat)layoutSuccessActionButtonsAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
@@ -6492,6 +6663,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _successImageActionButton,
         _successOCRActionButton,
         _successColorActionButton,
+        _successJumpActionButton,
     ] x:side y:y width:width columns:3 height:36.0 columnGap:8.0 rowGap:8.0];
     [self styleSegmentButton:_recordSwipeButton selected:_imageActionMode == AnClickActionModeTap];
     [self styleSegmentButton:_previewSwipeButton selected:_imageActionMode == AnClickActionModeDoubleTap];
@@ -6500,6 +6672,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self styleSegmentButton:_successImageActionButton selected:_imageActionMode == AnClickActionModeImage];
     [self styleSegmentButton:_successOCRActionButton selected:_imageActionMode == AnClickActionModeOCR];
     [self styleSegmentButton:_successColorActionButton selected:_imageActionMode == AnClickActionModeColor];
+    [self styleSegmentButton:_successJumpActionButton selected:_imageActionMode == AnClickActionModeJump];
     return nextY;
 }
 
@@ -6513,6 +6686,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _failureImageActionButton,
         _failureOCRActionButton,
         _failureColorActionButton,
+        _failureJumpActionButton,
     ];
     CGFloat nextY = [self layoutButtonGrid:buttons x:side y:y width:width columns:3 height:36.0 columnGap:8.0 rowGap:8.0];
     [self styleSegmentButton:_failureNoneActionButton selected:_failureActionMode == AnClickActionModeNone];
@@ -6523,6 +6697,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self styleSegmentButton:_failureImageActionButton selected:_failureActionMode == AnClickActionModeImage];
     [self styleSegmentButton:_failureOCRActionButton selected:_failureActionMode == AnClickActionModeOCR];
     [self styleSegmentButton:_failureColorActionButton selected:_failureActionMode == AnClickActionModeColor];
+    [self styleSegmentButton:_failureJumpActionButton selected:_failureActionMode == AnClickActionModeJump];
     return nextY;
 }
 
@@ -6935,10 +7110,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)failureActionPointSummary {
+    AnClickActionMode failureMode = [self normalizedFailureActionMode:_failureActionMode];
+    NSString *name = [self actionNameForMode:failureMode];
     if (_hasFailureActionPoint) {
-        return [NSString stringWithFormat:@"失败位置 %.0f,%.0f", _failureActionPoint.x, _failureActionPoint.y];
+        return [NSString stringWithFormat:@"失败%@坐标 %.0f,%.0f", name, _failureActionPoint.x, _failureActionPoint.y];
     }
-    return @"选择失败位置";
+    return [NSString stringWithFormat:@"选择失败%@坐标", name];
 }
 
 - (CGFloat)layoutFailurePointButtonAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
@@ -6951,6 +7128,34 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _failurePointButton.frame = CGRectMake(side, y, width, 36.0);
     [self updateButtonShadowPath:_failurePointButton];
     return y + 44.0;
+}
+
+- (CGFloat)layoutFailureActionTaskFieldAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
+    AnClickActionMode failureMode = [self normalizedFailureActionMode:_failureActionMode];
+    if (![self modeIsRecognitionTask:failureMode]) {
+        return y;
+    }
+
+    _failureActionTaskCaptionLabel.text = [NSString stringWithFormat:@"失败后%@配置任务", [self actionNameForMode:failureMode]];
+    _failureActionTaskCaptionLabel.hidden = NO;
+    _failureActionTaskCaptionLabel.frame = CGRectMake(side, y, width, 20);
+
+    CGFloat gap = 10.0;
+    CGFloat fieldWidth = MIN(116.0, MAX(82.0, floor(width * 0.32)));
+    CGFloat buttonWidth = MAX(120.0, width - fieldWidth - gap);
+    _failureActionTaskField.hidden = NO;
+    _failureActionTaskField.frame = CGRectMake(side, y + 22.0, fieldWidth, 38);
+
+    NSInteger targetIndex = [self validRecognitionFailureActionTaskIndexForMode:failureMode targetIndex:_recognitionFailureActionTaskIndex];
+    NSString *buttonTitle = targetIndex >= 0
+        ? [NSString stringWithFormat:@"编辑%@任务%ld", [self actionNameForMode:failureMode], (long)targetIndex + 1]
+        : [NSString stringWithFormat:@"新建%@配置", [self actionNameForMode:failureMode]];
+    [_failureActionTaskEditButton setTitle:buttonTitle forState:UIControlStateNormal];
+    [self styleNormalButton:_failureActionTaskEditButton];
+    _failureActionTaskEditButton.hidden = NO;
+    _failureActionTaskEditButton.frame = CGRectMake(side + fieldWidth + gap, y + 22.0, buttonWidth, 38);
+    [self updateButtonShadowPath:_failureActionTaskEditButton];
+    return y + 68.0;
 }
 
 - (CGFloat)layoutSingleField:(UITextField *)field caption:(UILabel *)caption title:(NSString *)title y:(CGFloat)y {
@@ -6971,7 +7176,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat fieldWidth = floor((width - side * 2.0 - gap * 2.0) / 3.0);
     NSArray<UILabel *> *captions = @[_delayCaptionLabel, _repeatCaptionLabel, _intervalCaptionLabel];
     NSArray<UITextField *> *fields = @[_delayField, _repeatField, _intervalField];
-    NSArray<NSString *> *titles = @[(_actionRandomDelayEnabled ? @"随机上限" : @"延时秒"), @"次数", @"间隔秒"];
+    NSArray<NSString *> *titles = @[(_actionRandomDelayEnabled ? @"随机上限毫秒" : @"延时毫秒"), @"次数", @"间隔毫秒"];
     for (NSUInteger i = 0; i < captions.count; i++) {
         UILabel *caption = captions[i];
         UITextField *field = fields[i];
@@ -6985,25 +7190,52 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return y + 66.0;
 }
 
-- (CGFloat)layoutRecognitionBranchFieldsAtY:(CGFloat)y {
-    CGFloat side = 18.0;
-    CGFloat width = _panelView.bounds.size.width;
-    CGFloat gap = 12.0;
-    CGFloat fieldWidth = floor((width - side * 2.0 - gap) / 2.0);
-    NSArray<UILabel *> *captions = @[_successBranchCaptionLabel, _failureBranchCaptionLabel];
-    NSArray<UITextField *> *fields = @[_successBranchField, _failureBranchField];
-    NSArray<NSString *> *titles = @[@"成功任务号", @"失败任务号"];
-    for (NSUInteger i = 0; i < captions.count; i++) {
-        UILabel *caption = captions[i];
-        UITextField *field = fields[i];
-        CGFloat x = side + (fieldWidth + gap) * i;
-        caption.text = titles[i];
-        caption.hidden = NO;
-        caption.frame = CGRectMake(x, y, fieldWidth, 20);
-        field.hidden = NO;
-        field.frame = CGRectMake(x, y + 22.0, fieldWidth, 38);
-    }
+- (BOOL)currentSuccessActionNeedsJumpTask {
+    return [self currentActionIsRecognitionMode] &&
+        [self normalizedImageActionMode:_imageActionMode] == AnClickActionModeJump;
+}
+
+- (BOOL)currentFailureActionNeedsJumpTask {
+    return [self currentActionIsRecognitionMode] &&
+        [self normalizedFailureActionMode:_failureActionMode] == AnClickActionModeJump;
+}
+
+- (CGFloat)layoutJumpTaskField:(UITextField *)field
+                       caption:(UILabel *)caption
+                         title:(NSString *)title
+                             y:(CGFloat)y
+                          side:(CGFloat)side
+                         width:(CGFloat)width {
+    caption.text = title;
+    caption.hidden = NO;
+    caption.frame = CGRectMake(side, y, width, 20);
+    field.hidden = NO;
+    field.frame = CGRectMake(side, y + 22.0, width, 38);
     return y + 66.0;
+}
+
+- (CGFloat)layoutSuccessJumpTaskFieldAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
+    if (![self currentSuccessActionNeedsJumpTask]) {
+        return y;
+    }
+    return [self layoutJumpTaskField:_successBranchField
+                             caption:_successBranchCaptionLabel
+                               title:@"成功后跳转任务号"
+                                   y:y
+                                side:side
+                               width:width];
+}
+
+- (CGFloat)layoutFailureJumpTaskFieldAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
+    if (![self currentFailureActionNeedsJumpTask]) {
+        return y;
+    }
+    return [self layoutJumpTaskField:_failureBranchField
+                             caption:_failureBranchCaptionLabel
+                               title:@"失败后跳转任务号"
+                                   y:y
+                                side:side
+                               width:width];
 }
 
 - (CGFloat)layoutRecognitionRetryControlsAtY:(CGFloat)y {
@@ -7049,7 +7281,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _recognitionIntervalField.hidden = !showInterval;
     if (showInterval) {
         CGFloat intervalX = side + modeWidth + gap;
-        _recognitionIntervalCaptionLabel.text = @"循环间隔秒";
+        _recognitionIntervalCaptionLabel.text = @"循环间隔毫秒";
         _recognitionIntervalCaptionLabel.frame = CGRectMake(intervalX, y, intervalWidth, 20);
         _recognitionIntervalField.frame = CGRectMake(intervalX, y + 22.0, intervalWidth, 38);
     }
@@ -7063,7 +7295,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat fieldWidth = floor((width - side * 2.0 - gap) / 2.0);
     NSArray<UILabel *> *captions = @[_thresholdCaptionLabel, _delayCaptionLabel, _repeatCaptionLabel, _intervalCaptionLabel];
     NSArray<UITextField *> *fields = @[_thresholdField, _delayField, _repeatField, _intervalField];
-    NSArray<NSString *> *titles = @[firstTitle, (_actionRandomDelayEnabled ? @"随机上限" : @"延时"), @"次数", @"间隔"];
+    NSArray<NSString *> *titles = @[firstTitle, (_actionRandomDelayEnabled ? @"随机上限毫秒" : @"延时毫秒"), @"次数", @"间隔毫秒"];
     for (NSUInteger i = 0; i < captions.count; i++) {
         UILabel *caption = captions[i];
         UITextField *field = fields[i];
@@ -7081,14 +7313,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (CGFloat)layoutImageFieldsAtY:(CGFloat)y {
-    CGFloat branchY = [self layoutRecognitionRetryControlsAtY:[self layoutRecognitionMetricFieldsAtY:y firstTitle:@"匹配"]] + 4.0;
-    CGFloat randomY = [self layoutRecognitionBranchFieldsAtY:branchY] + 4.0;
+    CGFloat randomY = [self layoutRecognitionRetryControlsAtY:[self layoutRecognitionMetricFieldsAtY:y firstTitle:@"匹配"]] + 4.0;
     return [self layoutRandomizationControlsAtY:randomY];
 }
 
 - (CGFloat)layoutColorFieldsAtY:(CGFloat)y {
-    CGFloat branchY = [self layoutRecognitionRetryControlsAtY:[self layoutRecognitionMetricFieldsAtY:y firstTitle:@"容差"]] + 4.0;
-    CGFloat randomY = [self layoutRecognitionBranchFieldsAtY:branchY] + 4.0;
+    CGFloat randomY = [self layoutRecognitionRetryControlsAtY:[self layoutRecognitionMetricFieldsAtY:y firstTitle:@"容差"]] + 4.0;
     return [self layoutRandomizationControlsAtY:randomY];
 }
 
@@ -7100,7 +7330,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSArray<UILabel *> *captions = @[_thresholdCaptionLabel, _delayCaptionLabel, _repeatCaptionLabel];
     NSArray<UITextField *> *fields = @[_thresholdField, _delayField, _repeatField];
     NSString *repeatTitle = (_actionMode == AnClickActionModeNetwork && !_networkRequestOnly) ? @"判断次数" : @"执行次数";
-    NSArray<NSString *> *titles = @[@"超时秒", (_actionRandomDelayEnabled ? @"随机上限" : @"延时秒"), repeatTitle];
+    NSArray<NSString *> *titles = @[@"超时秒", (_actionRandomDelayEnabled ? @"随机上限毫秒" : @"延时毫秒"), repeatTitle];
     for (NSUInteger i = 0; i < captions.count; i++) {
         UILabel *caption = captions[i];
         UITextField *field = fields[i];
@@ -7123,13 +7353,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (UIColor *)targetUIColor {
     NSDictionary *anchor = [self effectiveTargetColorSamples].firstObject;
-    if (!anchor) {
-        return [UIColor colorWithWhite:1 alpha:0.10];
-    }
-    return [UIColor colorWithRed:MIN(255, MAX(0, [anchor[@"red"] integerValue])) / 255.0
-                           green:MIN(255, MAX(0, [anchor[@"green"] integerValue])) / 255.0
-                            blue:MIN(255, MAX(0, [anchor[@"blue"] integerValue])) / 255.0
-                           alpha:1.0];
+    return [self uiColorForColorSample:anchor fallback:[UIColor colorWithWhite:1 alpha:0.10]];
 }
 
 - (void)refreshEditorConfigControls {
@@ -7217,16 +7441,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _tertiaryConfigLabel.frame = CGRectMake(side, actionLabelY, contentWidth, 20);
         CGFloat actionButtonY = actionLabelY + 22.0;
         CGFloat afterSuccessActionsY = [self layoutSuccessActionButtonsAtY:actionButtonY side:side width:contentWidth];
-        [self layoutEditorSectionAtIndex:2 fromY:actionLabelY toY:afterSuccessActionsY];
+        CGFloat successFieldsY = [self layoutSuccessJumpTaskFieldAtY:afterSuccessActionsY + 12.0 side:side width:contentWidth];
+        CGFloat successSectionEndY = MAX(afterSuccessActionsY, successFieldsY);
+        [self layoutEditorSectionAtIndex:2 fromY:actionLabelY toY:successSectionEndY];
 
-        CGFloat failureLabelY = [self editorNextSectionContentYAfterBottom:afterSuccessActionsY];
+        CGFloat failureLabelY = [self editorNextSectionContentYAfterBottom:successSectionEndY];
         _failureActionCaptionLabel.text = @"失败后动作类型";
         _failureActionCaptionLabel.hidden = NO;
         _failureActionCaptionLabel.frame = CGRectMake(side, failureLabelY, contentWidth, 20);
         CGFloat failureButtonY = failureLabelY + 22.0;
         CGFloat afterFailureActionsY = [self layoutFailureActionButtonsAtY:failureButtonY side:side width:contentWidth];
 
-        CGFloat fieldsY = [self layoutFailurePointButtonAtY:afterFailureActionsY + 12.0 side:side width:contentWidth];
+        CGFloat fieldsY = [self layoutFailureJumpTaskFieldAtY:afterFailureActionsY + 12.0 side:side width:contentWidth];
+        fieldsY = [self layoutFailureActionTaskFieldAtY:fieldsY side:side width:contentWidth];
+        fieldsY = [self layoutFailurePointButtonAtY:fieldsY side:side width:contentWidth];
         [self layoutEditorSectionAtIndex:3 fromY:failureLabelY toY:MAX(afterFailureActionsY, fieldsY)];
         if ([self currentRecognitionEditorUsesNetworkAction]) {
             CGFloat networkTopY = [self editorNextSectionContentYAfterBottom:fieldsY];
@@ -7280,14 +7508,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _tertiaryConfigLabel.frame = CGRectMake(side, actionLabelY, contentWidth, 20);
         CGFloat actionButtonY = actionLabelY + 22.0;
         CGFloat afterSuccessActionsY = [self layoutSuccessActionButtonsAtY:actionButtonY side:side width:contentWidth];
-        [self layoutEditorSectionAtIndex:2 fromY:actionLabelY toY:afterSuccessActionsY];
-        CGFloat failureLabelY = [self editorNextSectionContentYAfterBottom:afterSuccessActionsY];
+        CGFloat successFieldsY = [self layoutSuccessJumpTaskFieldAtY:afterSuccessActionsY + 12.0 side:side width:contentWidth];
+        CGFloat successSectionEndY = MAX(afterSuccessActionsY, successFieldsY);
+        [self layoutEditorSectionAtIndex:2 fromY:actionLabelY toY:successSectionEndY];
+        CGFloat failureLabelY = [self editorNextSectionContentYAfterBottom:successSectionEndY];
         _failureActionCaptionLabel.text = @"失败后动作类型";
         _failureActionCaptionLabel.hidden = NO;
         _failureActionCaptionLabel.frame = CGRectMake(side, failureLabelY, contentWidth, 20);
         CGFloat failureButtonY = failureLabelY + 22.0;
         CGFloat afterFailureActionsY = [self layoutFailureActionButtonsAtY:failureButtonY side:side width:contentWidth];
-        CGFloat fieldsY = [self layoutFailurePointButtonAtY:afterFailureActionsY + 12.0 side:side width:contentWidth];
+        CGFloat fieldsY = [self layoutFailureJumpTaskFieldAtY:afterFailureActionsY + 12.0 side:side width:contentWidth];
+        fieldsY = [self layoutFailureActionTaskFieldAtY:fieldsY side:side width:contentWidth];
+        fieldsY = [self layoutFailurePointButtonAtY:fieldsY side:side width:contentWidth];
         [self layoutEditorSectionAtIndex:3 fromY:failureLabelY toY:MAX(afterFailureActionsY, fieldsY)];
         if ([self currentRecognitionEditorUsesNetworkAction]) {
             CGFloat networkTopY = [self editorNextSectionContentYAfterBottom:fieldsY];
@@ -7296,8 +7528,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
         CGFloat paramsTopY = [self editorNextSectionContentYAfterBottom:fieldsY];
         CGFloat timingEndY = [self layoutDoubleTimingFieldsAtY:paramsTopY];
-        CGFloat branchY = [self layoutRecognitionRetryControlsAtY:timingEndY + 4.0] + 4.0;
-        CGFloat randomY = [self layoutRecognitionBranchFieldsAtY:branchY] + 4.0;
+        CGFloat randomY = [self layoutRecognitionRetryControlsAtY:timingEndY + 4.0] + 4.0;
         CGFloat paramsEndY = [self layoutRandomizationControlsAtY:randomY];
         [self layoutEditorSectionAtIndex:5 fromY:paramsTopY toY:paramsEndY];
     } else if (_actionMode == AnClickActionModeColor) {
@@ -7328,14 +7559,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _secondaryConfigLabel.frame = CGRectMake(side, actionLabelY, contentWidth, 20);
         CGFloat actionButtonY = actionLabelY + 22.0;
         CGFloat afterSuccessActionsY = [self layoutSuccessActionButtonsAtY:actionButtonY side:side width:contentWidth];
-        [self layoutEditorSectionAtIndex:2 fromY:actionLabelY toY:afterSuccessActionsY];
-        CGFloat failureLabelY = [self editorNextSectionContentYAfterBottom:afterSuccessActionsY];
+        CGFloat successFieldsY = [self layoutSuccessJumpTaskFieldAtY:afterSuccessActionsY + 12.0 side:side width:contentWidth];
+        CGFloat successSectionEndY = MAX(afterSuccessActionsY, successFieldsY);
+        [self layoutEditorSectionAtIndex:2 fromY:actionLabelY toY:successSectionEndY];
+        CGFloat failureLabelY = [self editorNextSectionContentYAfterBottom:successSectionEndY];
         _failureActionCaptionLabel.text = @"失败后动作类型";
         _failureActionCaptionLabel.hidden = NO;
         _failureActionCaptionLabel.frame = CGRectMake(side, failureLabelY, contentWidth, 20);
         CGFloat failureButtonY = failureLabelY + 22.0;
         CGFloat afterFailureActionsY = [self layoutFailureActionButtonsAtY:failureButtonY side:side width:contentWidth];
-        CGFloat fieldsY = [self layoutFailurePointButtonAtY:afterFailureActionsY + 12.0 side:side width:contentWidth];
+        CGFloat fieldsY = [self layoutFailureJumpTaskFieldAtY:afterFailureActionsY + 12.0 side:side width:contentWidth];
+        fieldsY = [self layoutFailureActionTaskFieldAtY:fieldsY side:side width:contentWidth];
+        fieldsY = [self layoutFailurePointButtonAtY:fieldsY side:side width:contentWidth];
         [self layoutEditorSectionAtIndex:3 fromY:failureLabelY toY:MAX(afterFailureActionsY, fieldsY)];
         if ([self currentRecognitionEditorUsesNetworkAction]) {
             CGFloat networkTopY = [self editorNextSectionContentYAfterBottom:fieldsY];
@@ -7556,8 +7791,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (failureMode == AnClickActionModeNetwork) {
         return [NSString stringWithFormat:@" 失败后%@网络", [self normalizedNetworkMethodFromPostFlag:_networkUsesPost]];
     }
+    if (failureMode == AnClickActionModeJump) {
+        NSString *targetText = _recognitionFailureBranchIndex >= 0
+            ? [NSString stringWithFormat:@"任务%ld", (long)_recognitionFailureBranchIndex + 1]
+            : @"先填任务号";
+        return [NSString stringWithFormat:@" 失败后跳转%@", targetText];
+    }
     if ([self modeIsRecognitionTask:failureMode]) {
-        return [NSString stringWithFormat:@" 失败后%@任务", [self actionNameForMode:failureMode]];
+        NSString *targetText = _recognitionFailureActionTaskIndex >= 0
+            ? [NSString stringWithFormat:@"任务%ld", (long)_recognitionFailureActionTaskIndex + 1]
+            : @"先填任务号";
+        return [NSString stringWithFormat:@" 失败后%@%@", [self actionNameForMode:failureMode], targetText];
     }
     NSString *pointText = _hasFailureActionPoint ? @"已取失败位" : @"先取失败位";
     return [NSString stringWithFormat:@" 失败后%@ %@", [self actionNameForMode:failureMode], pointText];
@@ -7750,15 +7994,54 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self autosaveSelectedTaskIfPossible];
 }
 
+- (void)editFailureRecognitionActionTask {
+    if (![self currentActionIsRecognitionMode]) {
+        _statusLabel.text = @"识别动作才有失败配置";
+        return;
+    }
+    [self dismissConfigKeyboardAndSync];
+    AnClickActionMode failureMode = [self normalizedFailureActionMode:_failureActionMode];
+    if (![self modeIsRecognitionTask:failureMode]) {
+        _statusLabel.text = @"先选择失败后识图/识字/识色";
+        return;
+    }
+
+    NSInteger targetIndex = [self validRecognitionFailureActionTaskIndexForMode:failureMode targetIndex:_recognitionFailureActionTaskIndex];
+    if (targetIndex < 0) {
+        targetIndex = [self ensureRecognitionFailureActionTaskForMode:failureMode];
+        if (targetIndex < 0) {
+            _statusLabel.text = @"失败配置创建失败";
+            return;
+        }
+        _recognitionFailureActionTaskIndex = targetIndex;
+        if (!_failureActionTaskField.isFirstResponder) {
+            _failureActionTaskField.text = [self recognitionBranchFieldTextForIndex:_recognitionFailureActionTaskIndex];
+        }
+    }
+
+    if (_selectedTaskIndex >= 0 && _selectedTaskIndex < (NSInteger)_taskItems.count) {
+        NSMutableDictionary *currentTask = [self taskDictionaryFromCurrentConfigRequireComplete:NO];
+        if (currentTask) {
+            _taskItems[(NSUInteger)_selectedTaskIndex] = currentTask;
+        }
+    }
+    [self persistCurrentTaskList];
+    [self refreshTaskList];
+    _statusLabel.text = [NSString stringWithFormat:@"编辑失败后%@任务%ld",
+                         [self actionNameForMode:failureMode],
+                         (long)targetIndex + 1];
+    [self selectTaskAtIndex:targetIndex];
+}
+
 - (void)decreaseActionDelay {
     _actionDelay = MAX(0.0, _actionDelay - 0.1);
-    _actionDelay = round(_actionDelay * 10.0) / 10.0;
+    _actionDelay = round(_actionDelay * 1000.0) / 1000.0;
     [self updateStatusForCurrentConfig];
 }
 
 - (void)increaseActionDelay {
     _actionDelay = MIN(30.0, _actionDelay + 0.1);
-    _actionDelay = round(_actionDelay * 10.0) / 10.0;
+    _actionDelay = round(_actionDelay * 1000.0) / 1000.0;
     [self updateStatusForCurrentConfig];
 }
 
@@ -8257,12 +8540,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (UIButton *)overlayButtonWithTitle:(NSString *)title action:(SEL)action {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     [button setTitle:title forState:UIControlStateNormal];
-    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    button.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightBold];
-    button.backgroundColor = [UIColor colorWithRed:0.10 green:0.12 blue:0.15 alpha:0.94];
-    button.layer.cornerRadius = 5;
-    button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.18].CGColor;
-    button.layer.borderWidth = 1;
+    BOOL primary = [title isEqualToString:@"保存"] || [title isEqualToString:@"确定"];
+    [button setTitleColor:(primary ? UIColor.whiteColor : [self themePrimaryTextColor]) forState:UIControlStateNormal];
+    button.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    button.backgroundColor = primary
+        ? [self themeHighlightColor]
+        : [[self themeSurfaceColor] colorWithAlphaComponent:0.92];
+    button.layer.cornerRadius = 8.0;
+    button.layer.borderColor = (primary
+        ? [[self themeHighlightColor] colorWithAlphaComponent:0.86]
+        : [[self themeSeparatorColor] colorWithAlphaComponent:0.82]).CGColor;
+    button.layer.borderWidth = 1.0;
+    button.layer.shadowColor = UIColor.blackColor.CGColor;
+    button.layer.shadowOffset = CGSizeMake(0, 2);
+    button.layer.shadowRadius = 4.0;
+    button.layer.shadowOpacity = 0.12;
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
 }
@@ -9118,6 +9410,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         task[@"failureActionMode"] = @([self normalizedFailureActionMode:_failureActionMode]);
         task[@"threshold"] = @(_matchThreshold);
         [self storeRecognitionRetryConfigInTask:task];
+        if (![self storeRecognitionJumpActionConfigInTask:task requireComplete:requireComplete]) {
+            return nil;
+        }
+        if (![self storeRecognitionFailureActionConfigInTask:task requireComplete:requireComplete]) {
+            return nil;
+        }
         if ((_imageActionMode == AnClickActionModeNetwork || _failureActionMode == AnClickActionModeNetwork) &&
             ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
             return nil;
@@ -9168,6 +9466,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
         task[@"failureActionMode"] = @([self normalizedFailureActionMode:_failureActionMode]);
         [self storeRecognitionRetryConfigInTask:task];
+        if (![self storeRecognitionJumpActionConfigInTask:task requireComplete:requireComplete]) {
+            return nil;
+        }
+        if (![self storeRecognitionFailureActionConfigInTask:task requireComplete:requireComplete]) {
+            return nil;
+        }
         if ((_imageActionMode == AnClickActionModeNetwork || _failureActionMode == AnClickActionModeNetwork) &&
             ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
             return nil;
@@ -9201,8 +9505,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (colorSamples.count == 0) {
             if (requireComplete) {
                 _statusLabel.text = @"先取目标颜色";
+                return nil;
             }
-            return nil;
+            task[@"colorTolerance"] = @(_colorTolerance);
+            task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
+            task[@"failureActionMode"] = @([self normalizedFailureActionMode:_failureActionMode]);
+            [self storeRecognitionRetryConfigInTask:task];
+            if (![self storeRecognitionJumpActionConfigInTask:task requireComplete:NO]) {
+                return nil;
+            }
+            if (![self storeRecognitionFailureActionConfigInTask:task requireComplete:NO]) {
+                return nil;
+            }
+            if ((_imageActionMode == AnClickActionModeNetwork || _failureActionMode == AnClickActionModeNetwork) &&
+                ![self storeNetworkRequestConfigInTask:task requireComplete:NO]) {
+                return nil;
+            }
+            return task;
         }
         NSDictionary *anchorColor = colorSamples.firstObject;
         task[@"colorRed"] = @([anchorColor[@"red"] integerValue]);
@@ -9214,6 +9533,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         task[@"imageActionMode"] = @([self normalizedImageActionMode:_imageActionMode]);
         task[@"failureActionMode"] = @([self normalizedFailureActionMode:_failureActionMode]);
         [self storeRecognitionRetryConfigInTask:task];
+        if (![self storeRecognitionJumpActionConfigInTask:task requireComplete:requireComplete]) {
+            return nil;
+        }
+        if (![self storeRecognitionFailureActionConfigInTask:task requireComplete:requireComplete]) {
+            return nil;
+        }
         if ((_imageActionMode == AnClickActionModeNetwork || _failureActionMode == AnClickActionModeNetwork) &&
             ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
             return nil;
@@ -9300,17 +9625,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return task;
 }
 
-- (void)addRecognitionBranchSummaryForTask:(NSDictionary *)task toParts:(NSMutableArray<NSString *> *)parts {
-    NSInteger successBranchIndex = [self validRecognitionBranchIndexForTask:task success:YES];
-    if (successBranchIndex >= 0) {
-        [parts addObject:[NSString stringWithFormat:@"成功->%ld", (long)successBranchIndex + 1]];
-    }
-    NSInteger failureBranchIndex = [self validRecognitionBranchIndexForTask:task success:NO];
-    if (failureBranchIndex >= 0) {
-        [parts addObject:[NSString stringWithFormat:@"失败->%ld", (long)failureBranchIndex + 1]];
-    }
-}
-
 - (NSString *)recognitionFailureActionSummaryForTask:(NSDictionary *)task {
     AnClickActionMode failureMode = [self failureActionModeForTask:task];
     if (failureMode == AnClickActionModeNone) {
@@ -9319,8 +9633,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (failureMode == AnClickActionModeNetwork) {
         return [NSString stringWithFormat:@"失败后%@网络", [self networkMethodForTask:task]];
     }
+    if (failureMode == AnClickActionModeJump) {
+        NSInteger taskIndex = [self validRecognitionJumpIndexForTask:task success:NO];
+        if (taskIndex >= 0) {
+            return [NSString stringWithFormat:@"失败后跳转->%ld", (long)taskIndex + 1];
+        }
+        return @"失败后跳转未选任务";
+    }
     if ([self modeIsRecognitionTask:failureMode]) {
-        return [NSString stringWithFormat:@"失败后%@任务", [self actionNameForMode:failureMode]];
+        NSInteger taskIndex = [self recognitionFailureActionTaskIndexForTask:task];
+        if (taskIndex >= 0) {
+            return [NSString stringWithFormat:@"失败后%@->%ld", [self actionNameForMode:failureMode], (long)taskIndex + 1];
+        }
+        return [NSString stringWithFormat:@"失败后%@未选任务", [self actionNameForMode:failureMode]];
     }
     return [NSString stringWithFormat:@"失败后%@", [self actionNameForMode:failureMode]];
 }
@@ -9330,6 +9655,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return nil;
     }
     AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+    if (actionMode == AnClickActionModeJump) {
+        NSInteger taskIndex = [self validRecognitionJumpIndexForTask:task success:YES];
+        if (taskIndex >= 0) {
+            return [NSString stringWithFormat:@"成功后跳转->%ld", (long)taskIndex + 1];
+        }
+        return @"成功后跳转未选任务";
+    }
     if ([self modeIsRecognitionTask:actionMode]) {
         return [NSString stringWithFormat:@"成功后%@任务", [self actionNameForMode:actionMode]];
     }
@@ -9341,15 +9673,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
     if (delay > 0.001) {
         if ([task[@"randomDelay"] boolValue]) {
-            NSString *minimum = delay >= 1.0 ? @"1" : @"0";
-            [parts addObject:[NSString stringWithFormat:@"随机%@-%.1fs", minimum, delay]];
+            NSString *minimum = delay >= 1.0 ? @"1000毫秒" : @"0毫秒";
+            [parts addObject:[NSString stringWithFormat:@"随机%@-%@", minimum, [self millisecondsSummaryTextForDuration:delay]]];
         } else {
             [parts addObject:[NSString stringWithFormat:@"延%.1f", delay]];
         }
     }
     if ([self recognitionRetryUntilFoundForTask:task]) {
         [parts addObject:@"识别到为止"];
-        [parts addObject:[NSString stringWithFormat:@"识别间%.1fs", [self recognitionRetryIntervalForTask:task]]];
+        [parts addObject:[NSString stringWithFormat:@"识别间%@", [self millisecondsSummaryTextForDuration:[self recognitionRetryIntervalForTask:task]]]];
     } else {
         NSInteger repeat = MAX(1, [task[@"repeat"] integerValue]);
         if (repeat > 1 || delay > 0.001) {
@@ -9357,7 +9689,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
     }
     if ([task[@"interval"] respondsToSelector:@selector(doubleValue)]) {
-        [parts addObject:[NSString stringWithFormat:@"间%.2fs", [self actionIntervalForTask:task]]];
+        [parts addObject:[NSString stringWithFormat:@"间%@", [self millisecondsSummaryTextForDuration:[self actionIntervalForTask:task]]]];
     }
     if ([self modeForTask:task] == AnClickActionModeMacro) {
         double speed = [self macroPlaybackSpeedForTask:task];
@@ -9372,7 +9704,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (successActionSummary.length > 0) {
         [parts addObject:successActionSummary];
     }
-    [self addRecognitionBranchSummaryForTask:task toParts:parts];
     NSString *failureActionSummary = [self recognitionFailureActionSummaryForTask:task];
     if (failureActionSummary.length > 0) {
         [parts addObject:failureActionSummary];
@@ -9455,7 +9786,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                             ? @"一直判断"
                             : [NSString stringWithFormat:@"判断%ld次", (long)[self networkRetryLimitForTask:task]]];
         }
-        subtitle = [subtitle stringByAppendingFormat:@" · 超时%.0fs", [self networkTimeoutForTask:task]];
+        subtitle = [subtitle stringByAppendingFormat:@" · 超时%.0f秒", [self networkTimeoutForTask:task]];
     }
     if (mode != AnClickActionModeNetwork) {
         NSString *suffix = [self commonSuffixForTask:task];
@@ -9534,15 +9865,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         deleteButton.frame = CGRectMake(width - 88.0, rowY, 82.0, 68.0);
         [deleteButton setTitle:@"删除" forState:UIControlStateNormal];
         [deleteButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-        deleteButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
-        deleteButton.backgroundColor = [UIColor colorWithRed:0.84 green:0.13 blue:0.10 alpha:0.94];
-        deleteButton.layer.cornerRadius = 4;
+        deleteButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+        deleteButton.backgroundColor = [self themeDangerColor];
+        deleteButton.layer.cornerRadius = 8.0;
         deleteButton.layer.borderWidth = 1;
-        deleteButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.34 blue:0.30 alpha:0.85].CGColor;
+        deleteButton.layer.borderColor = [[self themeDangerColor] colorWithAlphaComponent:0.86].CGColor;
         deleteButton.layer.shadowColor = UIColor.blackColor.CGColor;
         deleteButton.layer.shadowOffset = CGSizeMake(0, 2);
         deleteButton.layer.shadowRadius = 4.0;
-        deleteButton.layer.shadowOpacity = 0.28;
+        deleteButton.layer.shadowOpacity = 0.12;
         deleteButton.hidden = (NSInteger)i != _revealedDeleteTaskIndex;
         deleteButton.alpha = deleteButton.hidden ? 0.0 : 1.0;
         [deleteButton addTarget:self action:@selector(deleteTaskButtonAtIndex:) forControlEvents:UIControlEventTouchUpInside];
@@ -9554,7 +9885,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         row.frame = CGRectMake(6.0, rowY, width - 12.0, 68.0);
         [row setTitle:[self titleForTask:_taskItems[i] index:i] forState:UIControlStateNormal];
         [row setTitleColor:[self themePrimaryTextColor] forState:UIControlStateNormal];
-        row.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightBold];
+        row.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
         row.titleLabel.numberOfLines = 2;
         row.titleLabel.adjustsFontSizeToFitWidth = YES;
         row.titleLabel.minimumScaleFactor = 0.62;
@@ -9564,15 +9895,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         row.backgroundColor = selected
             ? [[self themeHighlightColor] colorWithAlphaComponent:0.12]
             : [self themeSurfaceColor];
-        row.layer.cornerRadius = 8;
+        row.layer.cornerRadius = 10;
         row.layer.borderWidth = 1;
         row.layer.borderColor = selected
-            ? [self themeHighlightColor].CGColor
-            : [self themeSeparatorColor].CGColor;
+            ? [[self themeHighlightColor] colorWithAlphaComponent:0.55].CGColor
+            : [[self themeSeparatorColor] colorWithAlphaComponent:0.82].CGColor;
         row.layer.shadowColor = UIColor.blackColor.CGColor;
-        row.layer.shadowOffset = CGSizeMake(0, 2);
-        row.layer.shadowRadius = 4.0;
-        row.layer.shadowOpacity = selected ? 0.12 : 0.06;
+        row.layer.shadowOffset = CGSizeMake(0, 1);
+        row.layer.shadowRadius = 3.0;
+        row.layer.shadowOpacity = selected ? 0.08 : 0.035;
         if ((NSInteger)i == _revealedDeleteTaskIndex) {
             row.transform = CGAffineTransformMakeTranslation(-88.0, 0);
         }
@@ -9696,7 +10027,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     id intervalValue = task[@"interval"];
     _actionInterval = [intervalValue respondsToSelector:@selector(doubleValue)]
         ? MIN(30.0, MAX(0.0, [intervalValue doubleValue]))
-        : -1.0;
+        : AnClickDefaultTapPressDuration;
     _actionRandomDelayEnabled = [task[@"randomDelay"] respondsToSelector:@selector(boolValue)] ? [task[@"randomDelay"] boolValue] : NO;
     id jitterValue = task[@"jitterRadius"];
     _actionJitterRadius = [jitterValue respondsToSelector:@selector(doubleValue)]
@@ -10125,6 +10456,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (mode == AnClickActionModeNetwork) {
         return 0.85;
     }
+    if (mode == AnClickActionModeJump) {
+        return 0.0;
+    }
     if (mode == AnClickActionModeMacro) {
         return [self durationForRecordedEvents:_recordedMacroEvents playbackSpeed:_macroPlaybackSpeed];
     }
@@ -10150,7 +10484,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if ([value respondsToSelector:@selector(doubleValue)]) {
         return MIN(30.0, MAX(0.0, [value doubleValue]));
     }
-    return 0.0;
+    return AnClickDefaultTapPressDuration;
 }
 
 - (CGFloat)jitterRadiusForTask:(NSDictionary *)task {
@@ -10265,6 +10599,63 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         mode == AnClickActionModeColor;
 }
 
+- (NSMutableDictionary *)draftRecognitionTaskForMode:(AnClickActionMode)mode {
+    NSMutableDictionary *task = [@{
+        @"mode": @(mode),
+        @"delay": @0.0,
+        @"repeat": @1,
+        @"interval": @(AnClickDefaultTapPressDuration),
+        @"imageActionMode": @(AnClickActionModeTap),
+        @"failureActionMode": @(AnClickActionModeNone),
+        @"recognitionRetryUntilFound": @NO,
+        @"recognitionRetryInterval": @1.0,
+    } mutableCopy];
+    if (mode == AnClickActionModeImage) {
+        task[@"useMatchPoint"] = @YES;
+        task[@"threshold"] = @0.80;
+    } else if (mode == AnClickActionModeOCR) {
+        task[@"ocrText"] = @"";
+        task[@"ocrMode"] = @(AnClickOCRModeAppleVision);
+        task[@"ocrBackendVersion"] = @1;
+        task[@"ocrMatchMode"] = @(AnClickOCRMatchModeContains);
+        task[@"useMatchPoint"] = @YES;
+    } else if (mode == AnClickActionModeColor) {
+        task[@"colorTolerance"] = @18.0;
+    }
+    return task;
+}
+
+- (NSInteger)validRecognitionFailureActionTaskIndexForMode:(AnClickActionMode)mode targetIndex:(NSInteger)targetIndex {
+    if (![self modeIsRecognitionTask:mode] ||
+        targetIndex < 0 ||
+        targetIndex >= (NSInteger)_taskItems.count) {
+        return -1;
+    }
+    NSDictionary *targetTask = _taskItems[(NSUInteger)targetIndex];
+    return [self modeForTask:targetTask] == mode ? targetIndex : -1;
+}
+
+- (NSInteger)ensureRecognitionFailureActionTaskForMode:(AnClickActionMode)mode {
+    if (![self modeIsRecognitionTask:mode]) {
+        return -1;
+    }
+    NSInteger targetIndex = _recognitionFailureActionTaskIndex;
+    if (targetIndex >= 0 && targetIndex < (NSInteger)_taskItems.count) {
+        NSDictionary *targetTask = _taskItems[(NSUInteger)targetIndex];
+        AnClickActionMode targetMode = [self modeForTask:targetTask];
+        if (targetMode == mode) {
+            return targetIndex;
+        }
+        if (targetTask.count == 0 || targetMode == AnClickActionModeNone) {
+            _taskItems[(NSUInteger)targetIndex] = [self draftRecognitionTaskForMode:mode];
+            return targetIndex;
+        }
+    }
+
+    [_taskItems addObject:[self draftRecognitionTaskForMode:mode]];
+    return (NSInteger)_taskItems.count - 1;
+}
+
 - (BOOL)recognitionActionModeNeedsPoint:(AnClickActionMode)mode {
     return mode == AnClickActionModeTap ||
         mode == AnClickActionModeDoubleTap ||
@@ -10274,6 +10665,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (NSString *)recognitionActionDisplayNameForMode:(AnClickActionMode)mode networkName:(NSString *)networkName {
     if (mode == AnClickActionModeNetwork) {
         return [NSString stringWithFormat:@"%@网络", networkName.length > 0 ? networkName : @"请求"];
+    }
+    if (mode == AnClickActionModeJump) {
+        return @"跳转任务";
     }
     if ([self modeIsRecognitionTask:mode]) {
         return [NSString stringWithFormat:@"%@任务", [self actionNameForMode:mode]];
@@ -10309,12 +10703,56 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return branchIndex >= 0 ? branchIndex : -1;
 }
 
+- (NSInteger)recognitionFailureActionTaskIndexForTask:(NSDictionary *)task {
+    if (![self modeIsRecognitionTask:[self modeForTask:task]] ||
+        ![self modeIsRecognitionTask:[self failureActionModeForTask:task]]) {
+        return -1;
+    }
+    id value = task[@"failureActionTaskIndex"];
+    if (![value respondsToSelector:@selector(integerValue)]) {
+        value = task[@"failureBranchIndex"];
+    }
+    if (![value respondsToSelector:@selector(integerValue)]) {
+        return -1;
+    }
+    NSInteger taskIndex = [value integerValue];
+    return taskIndex >= 0 ? taskIndex : -1;
+}
+
 - (NSInteger)validRecognitionBranchIndexForTask:(NSDictionary *)task success:(BOOL)success {
     NSInteger branchIndex = [self recognitionBranchIndexForTask:task success:success];
     if (branchIndex < 0 || branchIndex >= (NSInteger)_taskItems.count) {
         return -1;
     }
     return branchIndex;
+}
+
+- (BOOL)recognitionTaskUsesJumpActionForTask:(NSDictionary *)task success:(BOOL)success {
+    if (![self modeIsRecognitionTask:[self modeForTask:task]]) {
+        return NO;
+    }
+    if (success) {
+        AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+        return actionMode == AnClickActionModeJump;
+    }
+    return [self failureActionModeForTask:task] == AnClickActionModeJump;
+}
+
+- (NSInteger)validRecognitionJumpIndexForTask:(NSDictionary *)task success:(BOOL)success {
+    if (![self recognitionTaskUsesJumpActionForTask:task success:success]) {
+        return -1;
+    }
+    return [self validRecognitionBranchIndexForTask:task success:success];
+}
+
+- (NSInteger)validRecognitionFailureActionTaskIndexForTask:(NSDictionary *)task {
+    NSInteger taskIndex = [self recognitionFailureActionTaskIndexForTask:task];
+    if (taskIndex < 0 || taskIndex >= (NSInteger)_taskItems.count) {
+        return -1;
+    }
+    NSDictionary *targetTask = _taskItems[(NSUInteger)taskIndex];
+    AnClickActionMode failureMode = [self failureActionModeForTask:task];
+    return [self modeForTask:targetTask] == failureMode ? taskIndex : -1;
 }
 
 - (AnClickActionMode)failureActionModeForTask:(NSDictionary *)task {
@@ -10369,15 +10807,99 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return NO;
 }
 
+- (BOOL)validateFailureRecognitionActionTaskForTask:(NSDictionary *)task {
+    AnClickActionMode failureMode = [self failureActionModeForTask:task];
+    if (![self modeIsRecognitionTask:failureMode]) {
+        return YES;
+    }
+    NSInteger taskIndex = [self recognitionFailureActionTaskIndexForTask:task];
+    if (taskIndex < 0) {
+        _statusLabel.text = [NSString stringWithFormat:@"失败后%@任务号未设置", [self actionNameForMode:failureMode]];
+        return NO;
+    }
+    if (taskIndex >= (NSInteger)_taskItems.count) {
+        _statusLabel.text = [NSString stringWithFormat:@"失败后任务%ld不存在", (long)taskIndex + 1];
+        return NO;
+    }
+    NSDictionary *targetTask = _taskItems[(NSUInteger)taskIndex];
+    if ([self modeForTask:targetTask] != failureMode) {
+        _statusLabel.text = [NSString stringWithFormat:@"任务%ld不是%@", (long)taskIndex + 1, [self actionNameForMode:failureMode]];
+        return NO;
+    }
+    return YES;
+}
+
+- (BOOL)validateRecognitionJumpActionForTask:(NSDictionary *)task {
+    if (![self modeIsRecognitionTask:[self modeForTask:task]]) {
+        return YES;
+    }
+
+    if ([self recognitionTaskUsesJumpActionForTask:task success:YES]) {
+        NSInteger taskIndex = [self recognitionBranchIndexForTask:task success:YES];
+        if (taskIndex < 0) {
+            _statusLabel.text = @"成功后跳转任务号未设置";
+            return NO;
+        }
+        if (taskIndex >= (NSInteger)_taskItems.count) {
+            _statusLabel.text = [NSString stringWithFormat:@"成功后任务%ld不存在", (long)taskIndex + 1];
+            return NO;
+        }
+    }
+
+    if ([self recognitionTaskUsesJumpActionForTask:task success:NO]) {
+        NSInteger taskIndex = [self recognitionBranchIndexForTask:task success:NO];
+        if (taskIndex < 0) {
+            _statusLabel.text = @"失败后跳转任务号未设置";
+            return NO;
+        }
+        if (taskIndex >= (NSInteger)_taskItems.count) {
+            _statusLabel.text = [NSString stringWithFormat:@"失败后任务%ld不存在", (long)taskIndex + 1];
+            return NO;
+        }
+    }
+
+    return YES;
+}
+
 - (void)storeRecognitionRetryConfigInTask:(NSMutableDictionary *)task {
     task[@"recognitionRetryUntilFound"] = @(_recognitionRetryUntilFound);
     task[@"recognitionRetryInterval"] = @(MIN(30.0, MAX(0.2, _recognitionRetryInterval)));
-    if (_recognitionSuccessBranchIndex >= 0) {
-        task[@"successBranchIndex"] = @(_recognitionSuccessBranchIndex);
+}
+
+- (BOOL)storeRecognitionJumpActionConfigInTask:(NSMutableDictionary *)task requireComplete:(BOOL)requireComplete {
+    if ([self normalizedImageActionMode:_imageActionMode] == AnClickActionModeJump) {
+        if (_recognitionSuccessBranchIndex >= 0) {
+            task[@"successBranchIndex"] = @(_recognitionSuccessBranchIndex);
+        } else if (requireComplete) {
+            _statusLabel.text = @"先填成功后跳转任务号";
+            return NO;
+        }
     }
-    if (_recognitionFailureBranchIndex >= 0) {
-        task[@"failureBranchIndex"] = @(_recognitionFailureBranchIndex);
+    if ([self normalizedFailureActionMode:_failureActionMode] == AnClickActionModeJump) {
+        if (_recognitionFailureBranchIndex >= 0) {
+            task[@"failureBranchIndex"] = @(_recognitionFailureBranchIndex);
+        } else if (requireComplete) {
+            _statusLabel.text = @"先填失败后跳转任务号";
+            return NO;
+        }
     }
+    return YES;
+}
+
+- (BOOL)storeRecognitionFailureActionConfigInTask:(NSMutableDictionary *)task requireComplete:(BOOL)requireComplete {
+    AnClickActionMode failureMode = [self normalizedFailureActionMode:_failureActionMode];
+    if (![self modeIsRecognitionTask:failureMode]) {
+        return YES;
+    }
+    if (_recognitionFailureActionTaskIndex >= 0) {
+        task[@"failureActionTaskIndex"] = @(_recognitionFailureActionTaskIndex);
+        return YES;
+    }
+    if (requireComplete) {
+        _statusLabel.text = [NSString stringWithFormat:@"先填失败后%@任务号", [self actionNameForMode:failureMode]];
+        return NO;
+    }
+    return YES;
 }
 
 - (void)loadRecognitionRetryConfigFromTask:(NSDictionary *)task {
@@ -10386,6 +10908,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _recognitionRetryInterval = [self recognitionRetryIntervalForTask:task];
     _recognitionSuccessBranchIndex = [self recognitionBranchIndexForTask:task success:YES];
     _recognitionFailureBranchIndex = [self recognitionBranchIndexForTask:task success:NO];
+    _recognitionFailureActionTaskIndex = [self recognitionFailureActionTaskIndexForTask:task];
+    if (![task[@"failureActionTaskIndex"] respondsToSelector:@selector(integerValue)] &&
+        _recognitionFailureActionTaskIndex >= 0 &&
+        _recognitionFailureActionTaskIndex == _recognitionFailureBranchIndex) {
+        _recognitionFailureBranchIndex = -1;
+    }
 }
 
 - (NSTimeInterval)networkTimeoutForTask:(NSDictionary *)task {
@@ -11064,14 +11592,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (NSTimeInterval)postRecognitionSuccessDelayForTask:(NSDictionary *)task {
     AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
     NSTimeInterval interval = [self actionIntervalForTask:task];
-    if (actionMode == AnClickActionModeNetwork || [self modeIsRecognitionTask:actionMode]) {
+    if (actionMode == AnClickActionModeNetwork ||
+        actionMode == AnClickActionModeJump ||
+        [self modeIsRecognitionTask:actionMode]) {
         return interval;
     }
     return [self durationForTaskMode:actionMode] + interval;
 }
 
 - (NSUInteger)nextTaskIndexAfterRecognitionTask:(NSDictionary *)task currentIndex:(NSUInteger)index success:(BOOL)success {
-    NSInteger branchIndex = [self validRecognitionBranchIndexForTask:task success:success];
+    NSInteger branchIndex = [self validRecognitionJumpIndexForTask:task success:success];
     if (branchIndex >= 0) {
         return (NSUInteger)branchIndex;
     }
@@ -11135,9 +11665,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSTimeInterval interval = [self actionIntervalForTask:task];
     NSTimeInterval continuationDelay = failureActionDelay > 0.001 ? failureActionDelay : interval;
 
-    NSInteger failureBranchIndex = [self validRecognitionBranchIndexForTask:task success:NO];
+    NSInteger failureBranchIndex = [self validRecognitionJumpIndexForTask:task success:NO];
     if (failureBranchIndex >= 0) {
-        _statusLabel.text = [NSString stringWithFormat:@"%@ 未命中 跳任务%ld", taskName, (long)failureBranchIndex + 1];
+        _statusLabel.text = [NSString stringWithFormat:@"%@ 未命中 失败后跳转任务%ld", taskName, (long)failureBranchIndex + 1];
         [self showToast:_statusLabel.text];
         [self scheduleTaskContinuationAfterRecognitionTask:task
                                                    atIndex:index
@@ -11151,7 +11681,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (retryUntilFound) {
         NSTimeInterval retryInterval = [self recognitionRetryIntervalForTask:task];
         NSTimeInterval retryDelay = failureActionDelay > 0.001 ? MAX(failureActionDelay, retryInterval) : retryInterval;
-        _statusLabel.text = [NSString stringWithFormat:@"%@ 未命中  %.1fs后继续", taskName, retryDelay];
+        _statusLabel.text = [NSString stringWithFormat:@"%@ 未命中  %@后继续", taskName, [self millisecondsSummaryTextForDuration:retryDelay]];
         [self showToast:_statusLabel.text];
         [self scheduleRecognitionTaskAttempt:task
                                      atIndex:index
@@ -11231,6 +11761,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
 
         AnClickActionMode failureActionMode = [self failureActionModeForTask:task];
+        if (failureActionMode == AnClickActionModeJump) {
+            [self continueAfterRecognitionFailureForTask:task
+                                                 atIndex:index
+                                                inWindow:currentHostWindow
+                                              generation:runGeneration
+                                                 attempt:attempt
+                                       failureActionDelay:0.0];
+            return;
+        }
+        if ([self modeIsRecognitionTask:failureActionMode]) {
+            NSInteger failureActionTaskIndex = [self validRecognitionFailureActionTaskIndexForTask:task];
+            if (failureActionTaskIndex >= 0) {
+                _statusLabel.text = [NSString stringWithFormat:@"识别失败后%@任务%ld",
+                                     [self actionNameForMode:failureActionMode],
+                                     (long)failureActionTaskIndex + 1];
+                [self showToast:_statusLabel.text];
+                [self continueTaskRunToIndex:(NSUInteger)failureActionTaskIndex
+                                    inWindow:currentHostWindow
+                                  generation:runGeneration];
+                return;
+            }
+        }
         if (failureActionMode != AnClickActionModeNone) {
             [self performRecognitionFailureActionForTask:task inWindow:currentHostWindow generation:runGeneration completion:^(NSTimeInterval failureActionDelay) {
                 if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"]) {
@@ -11368,6 +11920,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     NSTimeInterval interval = [self actionIntervalForTask:task];
+    if (failureMode == AnClickActionModeJump) {
+        if (completion) {
+            completion(interval);
+        }
+        return;
+    }
     if (failureMode == AnClickActionModeNetwork) {
         _statusLabel.text = @"识别失败后网络请求";
         [self showToast:_statusLabel.text];
@@ -11499,6 +12057,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 }
                 CGRect rect = rectValue.CGRectValue;
                 [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:1.2];
+                if (imageActionMode == AnClickActionModeJump) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    NSInteger taskIndex = [strongSelf validRecognitionJumpIndexForTask:task success:YES];
+                    strongSelf->_statusLabel.text = taskIndex >= 0
+                        ? [NSString stringWithFormat:@"识图 %.2f 成功后跳转任务%ld", scoreNumber.doubleValue, (long)taskIndex + 1]
+                        : @"识图成功后跳转未选任务";
+                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    if (completion) {
+                        completion(YES);
+                    }
+                    return;
+                }
                 if ([strongSelf modeIsRecognitionTask:imageActionMode]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f 后%@任务",
@@ -11656,6 +12226,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     return;
                 }
                 [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
+                if (actionMode == AnClickActionModeJump) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    NSInteger taskIndex = [strongSelf validRecognitionJumpIndexForTask:task success:YES];
+                    strongSelf->_statusLabel.text = taskIndex >= 0
+                        ? [NSString stringWithFormat:@"识字 %@ %@ 成功后跳转任务%ld", matchSummary, text, (long)taskIndex + 1]
+                        : @"识字成功后跳转未选任务";
+                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    if (completion) {
+                        completion(YES);
+                    }
+                    return;
+                }
                 if ([strongSelf modeIsRecognitionTask:actionMode]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ 后%@任务",
@@ -11787,6 +12369,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     return;
                 }
                 [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:scoreNumber ? scoreNumber.doubleValue : 1.0 inWindow:currentHostWindow duration:1.2];
+                if (actionMode == AnClickActionModeJump) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    NSInteger taskIndex = [strongSelf validRecognitionJumpIndexForTask:task success:YES];
+                    strongSelf->_statusLabel.text = taskIndex >= 0
+                        ? [NSString stringWithFormat:@"识色 %@ 成功后跳转任务%ld", patternSummary, (long)taskIndex + 1]
+                        : @"识色成功后跳转未选任务";
+                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    if (completion) {
+                        completion(YES);
+                    }
+                    return;
+                }
                 if ([strongSelf modeIsRecognitionTask:actionMode]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ 后%@任务",
@@ -11885,6 +12479,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 return NO;
             }
         }
+        if (![self validateFailureRecognitionActionTaskForTask:task]) {
+            return NO;
+        }
+        if (![self validateRecognitionJumpActionForTask:task]) {
+            return NO;
+        }
         return YES;
     }
     if (mode == AnClickActionModeOCR) {
@@ -11923,6 +12523,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 return NO;
             }
         }
+        if (![self validateFailureRecognitionActionTaskForTask:task]) {
+            return NO;
+        }
+        if (![self validateRecognitionJumpActionForTask:task]) {
+            return NO;
+        }
         return YES;
     }
     if (mode == AnClickActionModeColor) {
@@ -11949,6 +12555,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 _statusLabel.text = @"任务识色失败动作未取点";
                 return NO;
             }
+        }
+        if (![self validateFailureRecognitionActionTaskForTask:task]) {
+            return NO;
+        }
+        if (![self validateRecognitionJumpActionForTask:task]) {
+            return NO;
         }
         return YES;
     }
@@ -12720,17 +13332,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         row.tag = AnClickColorPickRowTagBase + (NSInteger)index;
         row.frame = CGRectMake(0.0, (rowHeight + gap) * index, width, rowHeight);
         row.backgroundColor = selected
-            ? [[self themeHighlightColor] colorWithAlphaComponent:0.30]
-            : [UIColor colorWithWhite:1 alpha:0.08];
-        row.layer.cornerRadius = 6;
+            ? [[self themeHighlightColor] colorWithAlphaComponent:0.12]
+            : [[self themeSurfaceColor] colorWithAlphaComponent:0.90];
+        row.layer.cornerRadius = 8.0;
         row.layer.borderWidth = 1;
-        row.layer.borderColor = (selected ? [self themeHighlightColor] : [UIColor colorWithWhite:1 alpha:0.12]).CGColor;
+        row.layer.borderColor = (selected
+            ? [[self themeHighlightColor] colorWithAlphaComponent:0.62]
+            : [[self themeSeparatorColor] colorWithAlphaComponent:0.82]).CGColor;
         row.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
         row.contentEdgeInsets = UIEdgeInsetsMake(0, 38, 0, 8);
         row.titleLabel.font = [UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightSemibold];
         row.titleLabel.adjustsFontSizeToFitWidth = YES;
         row.titleLabel.minimumScaleFactor = 0.62;
-        [row setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        [row setTitleColor:[self themePrimaryTextColor] forState:UIControlStateNormal];
         [row addTarget:self action:@selector(handleColorPickRowTap:) forControlEvents:UIControlEventTouchUpInside];
 
         NSInteger red = [sample[@"red"] integerValue];
@@ -12752,7 +13366,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                  alpha:1.0];
         swatch.layer.cornerRadius = 4;
         swatch.layer.borderWidth = 1;
-        swatch.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.32].CGColor;
+        swatch.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.90].CGColor;
         [row addSubview:swatch];
         [_colorPickListView addSubview:row];
     }
@@ -12773,13 +13387,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     NSDictionary *previewSample = _pendingColorPickSamples.firstObject ?: sample;
     if (previewSample) {
-        NSInteger previewRed = [previewSample[@"red"] integerValue];
-        NSInteger previewGreen = [previewSample[@"green"] integerValue];
-        NSInteger previewBlue = [previewSample[@"blue"] integerValue];
-        _colorPickSwatchView.backgroundColor = [UIColor colorWithRed:MIN(255, MAX(0, previewRed)) / 255.0
-                                                               green:MIN(255, MAX(0, previewGreen)) / 255.0
-                                                                blue:MIN(255, MAX(0, previewBlue)) / 255.0
-                                                               alpha:1.0];
+        _colorPickSwatchView.backgroundColor = [self uiColorForColorSample:previewSample fallback:[UIColor colorWithWhite:1 alpha:0.10]];
     }
     if (!sample) {
         _colorPickInfoLabel.text = @"第1点为点击坐标";
@@ -12954,10 +13562,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [imageView addGestureRecognizer:tap];
 
     UIScrollView *listView = [[UIScrollView alloc] initWithFrame:CGRectZero];
-    listView.backgroundColor = [[UIColor colorWithRed:0.06 green:0.06 blue:0.07 alpha:1.0] colorWithAlphaComponent:0.72];
-    listView.layer.cornerRadius = 8;
+    listView.backgroundColor = [[self themeSurfaceColor] colorWithAlphaComponent:0.86];
+    listView.layer.cornerRadius = 12.0;
     listView.layer.borderWidth = 1;
-    listView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
+    listView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72].CGColor;
     listView.clipsToBounds = YES;
     listView.showsVerticalScrollIndicator = YES;
     listView.hidden = YES;
@@ -12965,22 +13573,26 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _colorPickListView = listView;
 
     UIView *toolbar = [[UIView alloc] initWithFrame:CGRectZero];
-    toolbar.backgroundColor = [[UIColor colorWithRed:0.06 green:0.06 blue:0.07 alpha:1.0] colorWithAlphaComponent:0.88];
-    toolbar.layer.cornerRadius = 8;
+    toolbar.backgroundColor = [[self themeSurfaceColor] colorWithAlphaComponent:0.90];
+    toolbar.layer.cornerRadius = 12.0;
     toolbar.layer.borderWidth = 1;
-    toolbar.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
-    toolbar.clipsToBounds = YES;
+    toolbar.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72].CGColor;
+    toolbar.layer.shadowColor = UIColor.blackColor.CGColor;
+    toolbar.layer.shadowOffset = CGSizeMake(0, 4);
+    toolbar.layer.shadowRadius = 14.0;
+    toolbar.layer.shadowOpacity = 0.16;
+    toolbar.clipsToBounds = NO;
     [root addSubview:toolbar];
     _colorPickToolbar = toolbar;
 
     _colorPickSwatchView = [[UIView alloc] initWithFrame:CGRectZero];
-    _colorPickSwatchView.layer.cornerRadius = 5;
+    _colorPickSwatchView.layer.cornerRadius = 6.0;
     _colorPickSwatchView.layer.borderWidth = 1;
-    _colorPickSwatchView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.28].CGColor;
+    _colorPickSwatchView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.92].CGColor;
     [toolbar addSubview:_colorPickSwatchView];
 
     _colorPickInfoLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    _colorPickInfoLabel.textColor = UIColor.whiteColor;
+    _colorPickInfoLabel.textColor = [self themePrimaryTextColor];
     _colorPickInfoLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightSemibold];
     _colorPickInfoLabel.adjustsFontSizeToFitWidth = YES;
     _colorPickInfoLabel.minimumScaleFactor = 0.6;
@@ -13065,6 +13677,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     cancelButton.frame = CGRectMake(toolbarWidth - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
     confirmButton.frame = CGRectMake(CGRectGetMinX(cancelButton.frame) - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
     deleteButton.frame = CGRectMake(CGRectGetMinX(confirmButton.frame) - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
+    [self updateButtonShadowPath:cancelButton];
+    [self updateButtonShadowPath:confirmButton];
+    [self updateButtonShadowPath:deleteButton];
     CGFloat infoX = CGRectGetMaxX(_colorPickSwatchView.frame) + 8.0;
     CGFloat infoWidth = MAX(0.0, CGRectGetMinX(deleteButton.frame) - infoX - 8.0);
     _colorPickInfoLabel.frame = CGRectMake(infoX,
@@ -13200,8 +13815,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self rebuildColorPickList];
     [self refreshColorPickInfoLabelWithLastSample:displaySample];
     BOOL sampledWhite = red >= 245 && green >= 245 && blue >= 245;
-    _colorPickInfoLabel.text = [NSString stringWithFormat:@"%@ #%02lX%02lX%02lX  X%.0f Y%.0f",
+    NSDictionary *primarySample = _pendingColorPickSamples.firstObject ?: sample;
+    _colorPickSwatchView.backgroundColor = [self uiColorForColorSample:primarySample fallback:[UIColor colorWithWhite:1 alpha:0.10]];
+    _colorPickInfoLabel.text = [NSString stringWithFormat:@"%@ 主色%@ 当前#%02lX%02lX%02lX  X%.0f Y%.0f",
                                 sampledWhite ? @"采样白色 截图可能白底" : @"采样",
+                                [self colorHexStringForSample:primarySample],
                                 (long)red,
                                 (long)green,
                                 (long)blue,
@@ -13283,7 +13901,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)beginFailureActionPointPicking {
     if (![self currentActionIsRecognitionMode]) {
-        _statusLabel.text = @"识别动作才有失败位置";
+        _statusLabel.text = @"识别动作才有失败坐标";
         return;
     }
     if (![self currentFailureActionNeedsPoint]) {
@@ -13433,16 +14051,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [imageView addGestureRecognizer:overlayPan];
 
     UIView *toolbar = [[UIView alloc] initWithFrame:CGRectZero];
-    toolbar.backgroundColor = [[UIColor colorWithRed:0.06 green:0.06 blue:0.07 alpha:1.0] colorWithAlphaComponent:0.72];
-    toolbar.layer.cornerRadius = 6;
+    toolbar.backgroundColor = [[self themeSurfaceColor] colorWithAlphaComponent:0.90];
+    toolbar.layer.cornerRadius = 12.0;
     toolbar.layer.borderWidth = 1;
-    toolbar.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
-    toolbar.clipsToBounds = YES;
+    toolbar.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72].CGColor;
+    toolbar.layer.shadowColor = UIColor.blackColor.CGColor;
+    toolbar.layer.shadowOffset = CGSizeMake(0, 4);
+    toolbar.layer.shadowRadius = 14.0;
+    toolbar.layer.shadowOpacity = 0.16;
+    toolbar.clipsToBounds = NO;
     [overlay addSubview:toolbar];
     _pointPickToolbar = toolbar;
 
     _pointCoordinateLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    _pointCoordinateLabel.textColor = UIColor.whiteColor;
+    _pointCoordinateLabel.textColor = [self themePrimaryTextColor];
     _pointCoordinateLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightSemibold];
     _pointCoordinateLabel.adjustsFontSizeToFitWidth = YES;
     _pointCoordinateLabel.minimumScaleFactor = 0.65;
@@ -13545,7 +14167,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL pickingCustomClickPoint = _actionMode == AnClickActionModeImage || _actionMode == AnClickActionModeOCR;
     NSString *stage = nil;
     if (_pickingFailureActionPoint) {
-        stage = @"失败位置";
+        stage = @"失败坐标";
     } else if (_actionMode == AnClickActionModeSwipe) {
         stage = _pickingSwipeEndPoint ? @"终点" : @"起点";
     } else if (_actionMode == AnClickActionModeTwoFingerTap) {
@@ -13563,14 +14185,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (UIButton *)pointPickButtonWithTitle:(NSString *)title action:(SEL)action {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     [button setTitle:title forState:UIControlStateNormal];
-    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
-    button.backgroundColor = [title isEqualToString:@"确定"]
-        ? [UIColor colorWithRed:0.86 green:0.55 blue:0.18 alpha:0.92]
-        : [UIColor colorWithWhite:1 alpha:0.10];
-    button.layer.cornerRadius = 5;
-    button.layer.borderWidth = 1;
-    button.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.18].CGColor;
+    BOOL primary = [title isEqualToString:@"确定"];
+    BOOL destructive = [title isEqualToString:@"删点"];
+    UIColor *accentColor = destructive ? [self themeDangerColor] : [self themeHighlightColor];
+    button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    button.backgroundColor = primary || destructive
+        ? accentColor
+        : [self themeControlFillColor];
+    [button setTitleColor:(primary || destructive ? UIColor.whiteColor : [self themePrimaryTextColor]) forState:UIControlStateNormal];
+    button.layer.cornerRadius = 8.0;
+    button.layer.borderWidth = 1.0;
+    button.layer.borderColor = (primary || destructive
+        ? [accentColor colorWithAlphaComponent:0.86]
+        : [[self themeSeparatorColor] colorWithAlphaComponent:0.82]).CGColor;
+    button.layer.shadowColor = UIColor.blackColor.CGColor;
+    button.layer.shadowOffset = CGSizeMake(0, primary || destructive ? 2 : 1);
+    button.layer.shadowRadius = primary || destructive ? 4.0 : 2.0;
+    button.layer.shadowOpacity = primary || destructive ? 0.12 : 0.04;
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
 }
@@ -13603,6 +14234,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *cancelButton = (UIButton *)[_pointPickToolbar viewWithTag:1002];
     cancelButton.frame = CGRectMake(toolbarWidth - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
     confirmButton.frame = CGRectMake(CGRectGetMinX(cancelButton.frame) - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
+    [self updateButtonShadowPath:cancelButton];
+    [self updateButtonShadowPath:confirmButton];
     _pointCoordinateLabel.frame = CGRectMake(10, 0, MAX(0.0, CGRectGetMinX(confirmButton.frame) - 18), toolbarHeight);
 }
 
@@ -13731,7 +14364,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self finishPointPickingOverlay];
         [self refreshEditorConfigControls];
         [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
-        _statusLabel.text = [NSString stringWithFormat:@"失败位置 %.0f,%.0f", screenPoint.x, screenPoint.y];
+        _statusLabel.text = [self failureActionPointSummary];
         [self updateStatusForCurrentConfig];
         [self autosaveSelectedTaskIfPossible];
         return;
@@ -13874,6 +14507,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _statusLabel.text = _networkURL.length > 0 ? @"识图成功后请求网络" : @"先填网络链接";
             return;
         }
+        if (_imageActionMode == AnClickActionModeJump) {
+            _statusLabel.text = _recognitionSuccessBranchIndex >= 0
+                ? [NSString stringWithFormat:@"识图成功后跳转任务%ld", (long)_recognitionSuccessBranchIndex + 1]
+                : @"先填成功后跳转任务号";
+            return;
+        }
         if ([self modeIsRecognitionTask:_imageActionMode]) {
             _statusLabel.text = [NSString stringWithFormat:@"识图成功后执行%@任务", [self actionNameForMode:_imageActionMode]];
             return;
@@ -13913,6 +14552,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (_imageActionMode == AnClickActionModeNetwork) {
             [self syncNetworkFieldsFromEditor];
             _statusLabel.text = _networkURL.length > 0 ? @"识字成功后请求网络" : @"先填网络链接";
+            return;
+        }
+        if (_imageActionMode == AnClickActionModeJump) {
+            _statusLabel.text = _recognitionSuccessBranchIndex >= 0
+                ? [NSString stringWithFormat:@"识字成功后跳转任务%ld", (long)_recognitionSuccessBranchIndex + 1]
+                : @"先填成功后跳转任务号";
             return;
         }
         if ([self modeIsRecognitionTask:_imageActionMode]) {
@@ -13969,6 +14614,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (_imageActionMode == AnClickActionModeNetwork) {
             [self syncNetworkFieldsFromEditor];
             _statusLabel.text = _networkURL.length > 0 ? @"识色成功后请求网络" : @"先填网络链接";
+            return;
+        }
+        if (_imageActionMode == AnClickActionModeJump) {
+            _statusLabel.text = _recognitionSuccessBranchIndex >= 0
+                ? [NSString stringWithFormat:@"识色成功后跳转任务%ld", (long)_recognitionSuccessBranchIndex + 1]
+                : @"先填成功后跳转任务号";
             return;
         }
         if ([self modeIsRecognitionTask:_imageActionMode]) {
