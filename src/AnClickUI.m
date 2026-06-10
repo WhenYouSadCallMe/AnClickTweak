@@ -299,7 +299,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_failureDoubleTapActionButton;
     UIButton *_failureLongPressActionButton;
     UIButton *_failureNetworkActionButton;
+    UIButton *_successPointButton;
     UIButton *_failurePointButton;
+    UIButton *_successActionTaskEditButton;
     UIButton *_failureActionTaskEditButton;
     UIButton *_randomDelayModeButton;
     UIButton *_ocrContainsMatchModeButton;
@@ -352,6 +354,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UILabel *_jitterCaptionLabel;
     UILabel *_successBranchCaptionLabel;
     UILabel *_failureBranchCaptionLabel;
+    UILabel *_successActionTaskCaptionLabel;
     UILabel *_failureActionTaskCaptionLabel;
     UILabel *_recognitionRetryModeCaptionLabel;
     UILabel *_recognitionIntervalCaptionLabel;
@@ -365,6 +368,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UITextField *_jitterField;
     UITextField *_successBranchField;
     UITextField *_failureBranchField;
+    UITextField *_successActionTaskField;
     UITextField *_failureActionTaskField;
     UITextField *_recognitionIntervalField;
     UITextField *_thresholdField;
@@ -445,6 +449,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _hasManualSwipeAnchor;
     CGPoint _manualSwipeEndPoint;
     BOOL _hasManualSwipeEndPoint;
+    CGPoint _successActionPoint;
+    BOOL _hasSuccessActionPoint;
     CGPoint _failureActionPoint;
     BOOL _hasFailureActionPoint;
     CGSize _manualCoordinateScreenSize;
@@ -455,6 +461,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGPoint _pendingPointPickPoint;
     BOOL _hasPendingPointPickPoint;
     BOOL _longPressHolding;
+    BOOL _pickingSuccessActionPoint;
     BOOL _templateSearchInProgress;
     BOOL _captureDrawingSelection;
     CGPoint _captureDragStartPoint;
@@ -555,6 +562,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSInteger _actionRepeatCount;
     NSInteger _recognitionSuccessBranchIndex;
     NSInteger _recognitionFailureBranchIndex;
+    NSInteger _recognitionSuccessActionTaskIndex;
     NSInteger _recognitionFailureActionTaskIndex;
     NSString *_currentTemplatePath;
     NSString *_actionDescription;
@@ -1463,6 +1471,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _actionInterval = AnClickDefaultTapPressDuration;
     _recognitionSuccessBranchIndex = -1;
     _recognitionFailureBranchIndex = -1;
+    _recognitionSuccessActionTaskIndex = -1;
     _recognitionFailureActionTaskIndex = -1;
     _globalDelayMilliseconds = 0;
     _globalRunRepeatCount = 1;
@@ -1620,6 +1629,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _failurePointButton = [self panelButtonWithTitle:@"失败坐标" action:@selector(beginFailureActionPointPicking)];
     _failurePointButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 120, buttonWidth, 32);
     [_panelView addSubview:_failurePointButton];
+
+    _successPointButton = [self panelButtonWithTitle:@"成功坐标" action:@selector(beginSuccessActionPointPicking)];
+    _successPointButton.frame = CGRectMake(gap * 3.0 + buttonWidth * 2.0, 120, buttonWidth, 32);
+    [_panelView addSubview:_successPointButton];
 
     _runManualButton = [self panelButtonWithTitle:@"执行" action:@selector(runManualAction)];
     _runManualButton.frame = CGRectMake(gap * 4.0 + buttonWidth * 3.0, 120, buttonWidth, 32);
@@ -1896,6 +1909,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_panelView addSubview:_successBranchCaptionLabel];
     _failureBranchCaptionLabel = [self configCaptionLabelWithText:@"失败跳任务"];
     [_panelView addSubview:_failureBranchCaptionLabel];
+    _successActionTaskCaptionLabel = [self configCaptionLabelWithText:@"成功动作任务号"];
+    [_panelView addSubview:_successActionTaskCaptionLabel];
     _failureActionTaskCaptionLabel = [self configCaptionLabelWithText:@"失败动作任务号"];
     [_panelView addSubview:_failureActionTaskCaptionLabel];
     _recognitionRetryModeCaptionLabel = [self configCaptionLabelWithText:@"识别策略"];
@@ -1961,11 +1976,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_failureBranchField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_failureBranchField];
 
+    _successActionTaskField = [self configTextFieldWithPlaceholder:@"任务号"];
+    _successActionTaskField.keyboardType = UIKeyboardTypeNumberPad;
+    [_successActionTaskField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
+    [_successActionTaskField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+    [_panelView addSubview:_successActionTaskField];
+
     _failureActionTaskField = [self configTextFieldWithPlaceholder:@"任务号"];
     _failureActionTaskField.keyboardType = UIKeyboardTypeNumberPad;
     [_failureActionTaskField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
     [_failureActionTaskField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_failureActionTaskField];
+
+    _successActionTaskEditButton = [self panelButtonWithTitle:@"设置配置" action:@selector(editSuccessRecognitionActionTask)];
+    [_panelView addSubview:_successActionTaskEditButton];
 
     _failureActionTaskEditButton = [self panelButtonWithTitle:@"设置配置" action:@selector(editFailureRecognitionActionTask)];
     [_panelView addSubview:_failureActionTaskEditButton];
@@ -2749,6 +2773,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_hasManualSwipeEndPoint) {
         _manualSwipeEndPoint = [self point:_manualSwipeEndPoint mappedFromScreenSize:sourceSize toScreenSize:targetSize];
     }
+    if (_hasSuccessActionPoint) {
+        _successActionPoint = [self point:_successActionPoint mappedFromScreenSize:sourceSize toScreenSize:targetSize];
+    }
     if (_hasFailureActionPoint) {
         _failureActionPoint = [self point:_failureActionPoint mappedFromScreenSize:sourceSize toScreenSize:targetSize];
     }
@@ -2768,6 +2795,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_hasManualActionPoint[(NSUInteger)AnClickActionModeImage] ||
         _hasManualActionPoint[(NSUInteger)AnClickActionModeOCR] ||
         _hasManualSwipeAnchor ||
+        _hasSuccessActionPoint ||
         _hasFailureActionPoint ||
         _multiTapPoints.count > 0 ||
         _recordedSwipePoints.count > 0 ||
@@ -3684,13 +3712,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _jitterCaptionLabel.hidden = YES;
     _successBranchCaptionLabel.hidden = YES;
     _failureBranchCaptionLabel.hidden = YES;
+    _successActionTaskCaptionLabel.hidden = YES;
     _failureActionTaskCaptionLabel.hidden = YES;
     _recognitionRetryModeCaptionLabel.hidden = YES;
     _recognitionIntervalCaptionLabel.hidden = YES;
     _captureButton.hidden = YES;
     _playButton.hidden = YES;
     _pickPointButton.hidden = YES;
+    _successPointButton.hidden = YES;
     _failurePointButton.hidden = YES;
+    _successActionTaskEditButton.hidden = YES;
     _failureActionTaskEditButton.hidden = YES;
     _runManualButton.hidden = YES;
     _recordSwipeButton.hidden = YES;
@@ -3740,6 +3771,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _jitterField.hidden = YES;
     _successBranchField.hidden = YES;
     _failureBranchField.hidden = YES;
+    _successActionTaskField.hidden = YES;
     _failureActionTaskField.hidden = YES;
     _recognitionIntervalField.hidden = YES;
     _ocrTargetField.hidden = YES;
@@ -3795,13 +3827,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _jitterCaptionLabel,
         _successBranchCaptionLabel,
         _failureBranchCaptionLabel,
+        _successActionTaskCaptionLabel,
         _failureActionTaskCaptionLabel,
         _recognitionRetryModeCaptionLabel,
         _recognitionIntervalCaptionLabel,
         _captureButton,
         _playButton,
         _pickPointButton,
+        _successPointButton,
         _failurePointButton,
+        _successActionTaskEditButton,
         _failureActionTaskEditButton,
         _runManualButton,
         _recordSwipeButton,
@@ -3846,6 +3881,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _jitterField,
         _successBranchField,
         _failureBranchField,
+        _successActionTaskField,
         _failureActionTaskField,
         _recognitionIntervalField,
         _thresholdField,
@@ -5409,8 +5445,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _manualSwipeEndPoint = CGPointZero;
     _hasManualSwipeAnchor = NO;
     _hasManualSwipeEndPoint = NO;
+    _successActionPoint = CGPointZero;
+    _hasSuccessActionPoint = NO;
     _failureActionPoint = CGPointZero;
     _hasFailureActionPoint = NO;
+    _pickingSuccessActionPoint = NO;
     _pickingFailureActionPoint = NO;
     _manualCoordinateScreenSize = CGSizeZero;
     _hasManualCoordinateScreenSize = NO;
@@ -5467,6 +5506,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _actionInterval = AnClickDefaultTapPressDuration;
     _recognitionSuccessBranchIndex = -1;
     _recognitionFailureBranchIndex = -1;
+    _recognitionSuccessActionTaskIndex = -1;
     _recognitionFailureActionTaskIndex = -1;
 }
 
@@ -5826,7 +5866,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _intervalField, _macroSpeedField, _longPressDurationField, _jitterField, _thresholdField, _ocrTargetField, _successBranchField, _failureBranchField, _failureActionTaskField, _recognitionIntervalField, _networkURLField, _networkContainsField, _networkFalseField, _networkPostBodyField, nil];
+    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _intervalField, _macroSpeedField, _longPressDurationField, _jitterField, _thresholdField, _ocrTargetField, _successBranchField, _failureBranchField, _successActionTaskField, _failureActionTaskField, _recognitionIntervalField, _networkURLField, _networkContainsField, _networkFalseField, _networkPostBodyField, nil];
     [fields addObjectsFromArray:_networkPostKeyFields ?: @[]];
     [fields addObjectsFromArray:_networkPostValueFields ?: @[]];
     if (_globalDelayField) {
@@ -6107,6 +6147,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *jitterText = [_jitterField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *successBranchText = [_successBranchField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *failureBranchText = [_failureBranchField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *successActionTaskText = [_successActionTaskField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *failureActionTaskText = [_failureActionTaskField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if (delayText.length > 0) {
         NSTimeInterval delayMilliseconds = MIN(30000.0, MAX(0.0, delayText.doubleValue));
@@ -6142,16 +6183,43 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } else {
         _actionJitterRadius = 0.0;
     }
+    BOOL editingRecognitionTask = _actionMode == AnClickActionModeImage ||
+        _actionMode == AnClickActionModeOCR ||
+        _actionMode == AnClickActionModeColor;
+    AnClickActionMode successMode = [self normalizedImageActionMode:_imageActionMode];
+    AnClickActionMode failureMode = [self normalizedFailureActionMode:_failureActionMode];
+    BOOL successModeIsRecognitionTask = successMode == AnClickActionModeImage ||
+        successMode == AnClickActionModeOCR ||
+        successMode == AnClickActionModeColor;
+    BOOL failureModeIsRecognitionTask = failureMode == AnClickActionModeImage ||
+        failureMode == AnClickActionModeOCR ||
+        failureMode == AnClickActionModeColor;
     NSInteger successBranchNumber = successBranchText.integerValue;
     NSInteger failureBranchNumber = failureBranchText.integerValue;
-    _recognitionSuccessBranchIndex = successBranchText.length > 0 && successBranchNumber > 0
+    _recognitionSuccessBranchIndex = editingRecognitionTask &&
+        successMode == AnClickActionModeJump &&
+        successBranchText.length > 0 &&
+        successBranchNumber > 0
         ? successBranchNumber - 1
         : -1;
-    _recognitionFailureBranchIndex = failureBranchText.length > 0 && failureBranchNumber > 0
+    _recognitionFailureBranchIndex = editingRecognitionTask &&
+        failureMode == AnClickActionModeJump &&
+        failureBranchText.length > 0 &&
+        failureBranchNumber > 0
         ? failureBranchNumber - 1
         : -1;
+    NSInteger successActionTaskNumber = successActionTaskText.integerValue;
+    _recognitionSuccessActionTaskIndex = editingRecognitionTask &&
+        successModeIsRecognitionTask &&
+        successActionTaskText.length > 0 &&
+        successActionTaskNumber > 0
+        ? successActionTaskNumber - 1
+        : -1;
     NSInteger failureActionTaskNumber = failureActionTaskText.integerValue;
-    _recognitionFailureActionTaskIndex = failureActionTaskText.length > 0 && failureActionTaskNumber > 0
+    _recognitionFailureActionTaskIndex = editingRecognitionTask &&
+        failureModeIsRecognitionTask &&
+        failureActionTaskText.length > 0 &&
+        failureActionTaskNumber > 0
         ? failureActionTaskNumber - 1
         : -1;
     NSString *recognitionIntervalText = [_recognitionIntervalField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
@@ -6238,6 +6306,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     if (!_failureBranchField.isFirstResponder) {
         _failureBranchField.text = [self recognitionBranchFieldTextForIndex:_recognitionFailureBranchIndex];
+    }
+    if (!_successActionTaskField.isFirstResponder) {
+        _successActionTaskField.text = [self recognitionBranchFieldTextForIndex:_recognitionSuccessActionTaskIndex];
     }
     if (!_failureActionTaskField.isFirstResponder) {
         _failureActionTaskField.text = [self recognitionBranchFieldTextForIndex:_recognitionFailureActionTaskIndex];
@@ -6477,13 +6548,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _jitterCaptionLabel.hidden = YES;
     _successBranchCaptionLabel.hidden = YES;
     _failureBranchCaptionLabel.hidden = YES;
+    _successActionTaskCaptionLabel.hidden = YES;
     _failureActionTaskCaptionLabel.hidden = YES;
     _recognitionRetryModeCaptionLabel.hidden = YES;
     _recognitionIntervalCaptionLabel.hidden = YES;
     _captureButton.hidden = YES;
     _playButton.hidden = YES;
     _pickPointButton.hidden = YES;
+    _successPointButton.hidden = YES;
     _failurePointButton.hidden = YES;
+    _successActionTaskEditButton.hidden = YES;
     _failureActionTaskEditButton.hidden = YES;
     _runManualButton.hidden = YES;
     _recordSwipeButton.hidden = YES;
@@ -6530,6 +6604,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _jitterField.hidden = YES;
     _successBranchField.hidden = YES;
     _failureBranchField.hidden = YES;
+    _successActionTaskField.hidden = YES;
     _failureActionTaskField.hidden = YES;
     _recognitionIntervalField.hidden = YES;
     _thresholdField.hidden = YES;
@@ -7109,6 +7184,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self failureActionModeNeedsPoint:[self normalizedFailureActionMode:_failureActionMode]];
 }
 
+- (BOOL)currentSuccessActionNeedsPoint {
+    return [self currentActionIsRecognitionMode] &&
+        [self recognitionActionModeNeedsPoint:[self normalizedImageActionMode:_imageActionMode]];
+}
+
+- (NSString *)successActionPointSummary {
+    AnClickActionMode successMode = [self normalizedImageActionMode:_imageActionMode];
+    NSString *name = [self actionNameForMode:successMode];
+    if (_hasSuccessActionPoint) {
+        return [NSString stringWithFormat:@"成功%@坐标 %.0f,%.0f", name, _successActionPoint.x, _successActionPoint.y];
+    }
+    return [NSString stringWithFormat:@"选择成功%@坐标", name];
+}
+
 - (NSString *)failureActionPointSummary {
     AnClickActionMode failureMode = [self normalizedFailureActionMode:_failureActionMode];
     NSString *name = [self actionNameForMode:failureMode];
@@ -7116,6 +7205,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return [NSString stringWithFormat:@"失败%@坐标 %.0f,%.0f", name, _failureActionPoint.x, _failureActionPoint.y];
     }
     return [NSString stringWithFormat:@"选择失败%@坐标", name];
+}
+
+- (CGFloat)layoutSuccessPointButtonAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
+    if (![self currentSuccessActionNeedsPoint]) {
+        return y;
+    }
+    [_successPointButton setTitle:[self successActionPointSummary] forState:UIControlStateNormal];
+    [self styleNormalButton:_successPointButton];
+    _successPointButton.hidden = NO;
+    _successPointButton.frame = CGRectMake(side, y, width, 36.0);
+    [self updateButtonShadowPath:_successPointButton];
+    return y + 44.0;
 }
 
 - (CGFloat)layoutFailurePointButtonAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
@@ -7128,6 +7229,34 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _failurePointButton.frame = CGRectMake(side, y, width, 36.0);
     [self updateButtonShadowPath:_failurePointButton];
     return y + 44.0;
+}
+
+- (CGFloat)layoutSuccessActionTaskFieldAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
+    AnClickActionMode successMode = [self normalizedImageActionMode:_imageActionMode];
+    if (![self modeIsRecognitionTask:successMode]) {
+        return y;
+    }
+
+    _successActionTaskCaptionLabel.text = [NSString stringWithFormat:@"成功后%@配置任务", [self actionNameForMode:successMode]];
+    _successActionTaskCaptionLabel.hidden = NO;
+    _successActionTaskCaptionLabel.frame = CGRectMake(side, y, width, 20);
+
+    CGFloat gap = 10.0;
+    CGFloat fieldWidth = MIN(116.0, MAX(82.0, floor(width * 0.32)));
+    CGFloat buttonWidth = MAX(120.0, width - fieldWidth - gap);
+    _successActionTaskField.hidden = NO;
+    _successActionTaskField.frame = CGRectMake(side, y + 22.0, fieldWidth, 38);
+
+    NSInteger targetIndex = [self validRecognitionSuccessActionTaskIndexForMode:successMode targetIndex:_recognitionSuccessActionTaskIndex];
+    NSString *buttonTitle = targetIndex >= 0
+        ? [NSString stringWithFormat:@"编辑%@任务%ld", [self actionNameForMode:successMode], (long)targetIndex + 1]
+        : [NSString stringWithFormat:@"新建%@配置", [self actionNameForMode:successMode]];
+    [_successActionTaskEditButton setTitle:buttonTitle forState:UIControlStateNormal];
+    [self styleNormalButton:_successActionTaskEditButton];
+    _successActionTaskEditButton.hidden = NO;
+    _successActionTaskEditButton.frame = CGRectMake(side + fieldWidth + gap, y + 22.0, buttonWidth, 38);
+    [self updateButtonShadowPath:_successActionTaskEditButton];
+    return y + 68.0;
 }
 
 - (CGFloat)layoutFailureActionTaskFieldAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
@@ -7442,6 +7571,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         CGFloat actionButtonY = actionLabelY + 22.0;
         CGFloat afterSuccessActionsY = [self layoutSuccessActionButtonsAtY:actionButtonY side:side width:contentWidth];
         CGFloat successFieldsY = [self layoutSuccessJumpTaskFieldAtY:afterSuccessActionsY + 12.0 side:side width:contentWidth];
+        successFieldsY = [self layoutSuccessActionTaskFieldAtY:successFieldsY side:side width:contentWidth];
+        successFieldsY = [self layoutSuccessPointButtonAtY:successFieldsY side:side width:contentWidth];
         CGFloat successSectionEndY = MAX(afterSuccessActionsY, successFieldsY);
         [self layoutEditorSectionAtIndex:2 fromY:actionLabelY toY:successSectionEndY];
 
@@ -7509,6 +7640,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         CGFloat actionButtonY = actionLabelY + 22.0;
         CGFloat afterSuccessActionsY = [self layoutSuccessActionButtonsAtY:actionButtonY side:side width:contentWidth];
         CGFloat successFieldsY = [self layoutSuccessJumpTaskFieldAtY:afterSuccessActionsY + 12.0 side:side width:contentWidth];
+        successFieldsY = [self layoutSuccessActionTaskFieldAtY:successFieldsY side:side width:contentWidth];
+        successFieldsY = [self layoutSuccessPointButtonAtY:successFieldsY side:side width:contentWidth];
         CGFloat successSectionEndY = MAX(afterSuccessActionsY, successFieldsY);
         [self layoutEditorSectionAtIndex:2 fromY:actionLabelY toY:successSectionEndY];
         CGFloat failureLabelY = [self editorNextSectionContentYAfterBottom:successSectionEndY];
@@ -7560,6 +7693,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         CGFloat actionButtonY = actionLabelY + 22.0;
         CGFloat afterSuccessActionsY = [self layoutSuccessActionButtonsAtY:actionButtonY side:side width:contentWidth];
         CGFloat successFieldsY = [self layoutSuccessJumpTaskFieldAtY:afterSuccessActionsY + 12.0 side:side width:contentWidth];
+        successFieldsY = [self layoutSuccessActionTaskFieldAtY:successFieldsY side:side width:contentWidth];
+        successFieldsY = [self layoutSuccessPointButtonAtY:successFieldsY side:side width:contentWidth];
         CGFloat successSectionEndY = MAX(afterSuccessActionsY, successFieldsY);
         [self layoutEditorSectionAtIndex:2 fromY:actionLabelY toY:successSectionEndY];
         CGFloat failureLabelY = [self editorNextSectionContentYAfterBottom:successSectionEndY];
@@ -7807,6 +7942,30 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [NSString stringWithFormat:@" 失败后%@ %@", [self actionNameForMode:failureMode], pointText];
 }
 
+- (NSString *)currentEditorSuccessActionStatusSuffix {
+    if (![self currentActionIsRecognitionMode]) {
+        return @"";
+    }
+    AnClickActionMode successMode = [self normalizedImageActionMode:_imageActionMode];
+    if (successMode == AnClickActionModeNetwork) {
+        return @"";
+    }
+    if (successMode == AnClickActionModeJump) {
+        return _recognitionSuccessBranchIndex >= 0
+            ? [NSString stringWithFormat:@"->%ld", (long)_recognitionSuccessBranchIndex + 1]
+            : @"未选任务";
+    }
+    if ([self modeIsRecognitionTask:successMode]) {
+        return _recognitionSuccessActionTaskIndex >= 0
+            ? [NSString stringWithFormat:@"->%ld", (long)_recognitionSuccessActionTaskIndex + 1]
+            : @"未选任务";
+    }
+    if ([self recognitionActionModeNeedsPoint:successMode]) {
+        return _hasSuccessActionPoint ? @" 成功位已取" : @" 识别点/先取成功位";
+    }
+    return @"";
+}
+
 - (void)updateStatusForCurrentConfig {
     if (_actionMode == AnClickActionModeNone) {
         _statusLabel.text = @"请选择动作";
@@ -7819,11 +7978,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (!_imageUsesMatchPoint && [self hasManualPointForMode:AnClickActionModeImage]) {
             targetState = @"已取点击点";
         }
-        _statusLabel.text = [NSString stringWithFormat:@"识图 %@ %@ 后%@%@%@",
+        _statusLabel.text = [NSString stringWithFormat:@"识图 %@ %@ 后%@%@%@%@",
                              templateState,
                              targetState,
                              [self recognitionActionDisplayNameForMode:_imageActionMode
                                                             networkName:[self normalizedNetworkMethodFromPostFlag:_networkUsesPost]],
+                             [self currentEditorSuccessActionStatusSuffix],
                              [self currentEditorFailureActionStatusSuffix],
                              [self recognitionRetryStatusSummary]];
         return;
@@ -7843,11 +8003,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (_networkUsesPost && _networkPostBodyUsesOCRResult) {
             networkActionName = @"POST键值";
         }
-        _statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ %@ 后%@%@%@",
+        _statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ %@ 后%@%@%@%@",
                              [self ocrMatchModeTitleForMode:matchMode],
                              targetState,
                              pointState,
                              [self recognitionActionDisplayNameForMode:_imageActionMode networkName:networkActionName],
+                             [self currentEditorSuccessActionStatusSuffix],
                              [self currentEditorFailureActionStatusSuffix],
                              [self recognitionRetryStatusSummary]];
         return;
@@ -7855,11 +8016,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     if (_actionMode == AnClickActionModeColor) {
         NSString *targetState = [self targetColorShortDescription];
-        _statusLabel.text = [NSString stringWithFormat:@"识色 %@ 容差%.0f 后%@%@%@",
+        _statusLabel.text = [NSString stringWithFormat:@"识色 %@ 容差%.0f 后%@%@%@%@",
                              targetState,
                              _colorTolerance,
                              [self recognitionActionDisplayNameForMode:_imageActionMode
                                                             networkName:[self normalizedNetworkMethodFromPostFlag:_networkUsesPost]],
+                             [self currentEditorSuccessActionStatusSuffix],
                              [self currentEditorFailureActionStatusSuffix],
                              [self recognitionRetryStatusSummary]];
         return;
@@ -7949,6 +8111,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 }
 
+- (void)clearSuccessBranchTargetSelection {
+    _recognitionSuccessBranchIndex = -1;
+    _recognitionSuccessActionTaskIndex = -1;
+    _successBranchField.text = @"";
+    _successActionTaskField.text = @"";
+}
+
+- (void)clearFailureBranchTargetSelection {
+    _recognitionFailureBranchIndex = -1;
+    _recognitionFailureActionTaskIndex = -1;
+    _failureBranchField.text = @"";
+    _failureActionTaskField.text = @"";
+}
+
 - (void)cycleImageActionMode {
     NSArray<NSNumber *> *modes = [self imageActionModes];
     NSUInteger currentIndex = 0;
@@ -7959,14 +8135,22 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
     }
     NSUInteger nextIndex = (currentIndex + 1) % modes.count;
-    _imageActionMode = (AnClickActionMode)[(NSNumber *)modes[nextIndex] integerValue];
+    AnClickActionMode nextMode = (AnClickActionMode)[(NSNumber *)modes[nextIndex] integerValue];
+    if (nextMode != _imageActionMode) {
+        [self clearSuccessBranchTargetSelection];
+    }
+    _imageActionMode = nextMode;
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
     [self autosaveSelectedTaskIfPossible];
 }
 
 - (void)selectImageActionMode:(UIButton *)sender {
-    _imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)sender.tag];
+    AnClickActionMode nextMode = [self normalizedImageActionMode:(AnClickActionMode)sender.tag];
+    if (nextMode != _imageActionMode) {
+        [self clearSuccessBranchTargetSelection];
+    }
+    _imageActionMode = nextMode;
     if (_imageActionMode != AnClickActionModeNetwork &&
         _failureActionMode != AnClickActionModeNetwork) {
         _networkPostBodyUsesOCRResult = NO;
@@ -7984,7 +8168,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self updateStatusForCurrentConfig];
         return;
     }
-    _failureActionMode = [self normalizedFailureActionMode:(AnClickActionMode)sender.tag];
+    AnClickActionMode nextMode = [self normalizedFailureActionMode:(AnClickActionMode)sender.tag];
+    if (nextMode != _failureActionMode) {
+        [self clearFailureBranchTargetSelection];
+    }
+    _failureActionMode = nextMode;
     if (_imageActionMode != AnClickActionModeNetwork &&
         _failureActionMode != AnClickActionModeNetwork) {
         _networkPostBodyUsesOCRResult = NO;
@@ -7992,6 +8180,45 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
     [self autosaveSelectedTaskIfPossible];
+}
+
+- (void)editSuccessRecognitionActionTask {
+    if (![self currentActionIsRecognitionMode]) {
+        _statusLabel.text = @"识别动作才有成功配置";
+        return;
+    }
+    [self dismissConfigKeyboardAndSync];
+    AnClickActionMode successMode = [self normalizedImageActionMode:_imageActionMode];
+    if (![self modeIsRecognitionTask:successMode]) {
+        _statusLabel.text = @"先选择成功后识图/识字/识色";
+        return;
+    }
+
+    NSInteger targetIndex = [self validRecognitionSuccessActionTaskIndexForMode:successMode targetIndex:_recognitionSuccessActionTaskIndex];
+    if (targetIndex < 0) {
+        targetIndex = [self ensureRecognitionSuccessActionTaskForMode:successMode];
+        if (targetIndex < 0) {
+            _statusLabel.text = @"成功配置创建失败";
+            return;
+        }
+        _recognitionSuccessActionTaskIndex = targetIndex;
+        if (!_successActionTaskField.isFirstResponder) {
+            _successActionTaskField.text = [self recognitionBranchFieldTextForIndex:_recognitionSuccessActionTaskIndex];
+        }
+    }
+
+    if (_selectedTaskIndex >= 0 && _selectedTaskIndex < (NSInteger)_taskItems.count) {
+        NSMutableDictionary *currentTask = [self taskDictionaryFromCurrentConfigRequireComplete:NO];
+        if (currentTask) {
+            _taskItems[(NSUInteger)_selectedTaskIndex] = currentTask;
+        }
+    }
+    [self persistCurrentTaskList];
+    [self refreshTaskList];
+    _statusLabel.text = [NSString stringWithFormat:@"编辑成功后%@任务%ld",
+                         [self actionNameForMode:successMode],
+                         (long)targetIndex + 1];
+    [self selectTaskAtIndex:targetIndex];
 }
 
 - (void)editFailureRecognitionActionTask {
@@ -9413,6 +9640,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (![self storeRecognitionJumpActionConfigInTask:task requireComplete:requireComplete]) {
             return nil;
         }
+        if (![self storeRecognitionSuccessActionConfigInTask:task requireComplete:requireComplete]) {
+            return nil;
+        }
         if (![self storeRecognitionFailureActionConfigInTask:task requireComplete:requireComplete]) {
             return nil;
         }
@@ -9420,14 +9650,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
             return nil;
         }
-        BOOL successNeedsPoint = !_imageUsesMatchPoint &&
-            [self recognitionActionModeNeedsPoint:[self normalizedImageActionMode:_imageActionMode]];
+        BOOL successNeedsPoint = [self recognitionActionModeNeedsPoint:[self normalizedImageActionMode:_imageActionMode]];
         BOOL failureNeedsPoint = [self failureActionModeNeedsPoint:[self normalizedFailureActionMode:_failureActionMode]];
         if (successNeedsPoint) {
-            if ([self hasManualPointForMode:AnClickActionModeImage]) {
+            if (_hasSuccessActionPoint) {
+                task[@"successPoint"] = [NSValue valueWithCGPoint:_successActionPoint];
+                task[@"successPointScreenSize"] = [self currentScreenCoordinateSizeValue];
+            } else if (!_imageUsesMatchPoint && [self hasManualPointForMode:AnClickActionModeImage]) {
                 task[@"point"] = [NSValue valueWithCGPoint:_manualActionPoints[(NSUInteger)AnClickActionModeImage]];
                 task[@"pointScreenSize"] = [self currentScreenCoordinateSizeValue];
-            } else if (requireComplete) {
+            } else if (requireComplete && !_imageUsesMatchPoint) {
                 _statusLabel.text = @"先取点击点";
                 return nil;
             }
@@ -9469,6 +9701,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (![self storeRecognitionJumpActionConfigInTask:task requireComplete:requireComplete]) {
             return nil;
         }
+        if (![self storeRecognitionSuccessActionConfigInTask:task requireComplete:requireComplete]) {
+            return nil;
+        }
         if (![self storeRecognitionFailureActionConfigInTask:task requireComplete:requireComplete]) {
             return nil;
         }
@@ -9476,14 +9711,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
             return nil;
         }
-        BOOL successNeedsPoint = !_ocrUsesMatchPoint &&
-            [self recognitionActionModeNeedsPoint:[self normalizedImageActionMode:_imageActionMode]];
+        BOOL successNeedsPoint = [self recognitionActionModeNeedsPoint:[self normalizedImageActionMode:_imageActionMode]];
         BOOL failureNeedsPoint = [self failureActionModeNeedsPoint:[self normalizedFailureActionMode:_failureActionMode]];
         if (successNeedsPoint) {
-            if ([self hasManualPointForMode:AnClickActionModeOCR]) {
+            if (_hasSuccessActionPoint) {
+                task[@"successPoint"] = [NSValue valueWithCGPoint:_successActionPoint];
+                task[@"successPointScreenSize"] = [self currentScreenCoordinateSizeValue];
+            } else if (!_ocrUsesMatchPoint && [self hasManualPointForMode:AnClickActionModeOCR]) {
                 task[@"point"] = [NSValue valueWithCGPoint:_manualActionPoints[(NSUInteger)AnClickActionModeOCR]];
                 task[@"pointScreenSize"] = [self currentScreenCoordinateSizeValue];
-            } else if (requireComplete) {
+            } else if (requireComplete && !_ocrUsesMatchPoint) {
                 _statusLabel.text = @"先取点击点";
                 return nil;
             }
@@ -9514,12 +9751,25 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             if (![self storeRecognitionJumpActionConfigInTask:task requireComplete:NO]) {
                 return nil;
             }
+            if (![self storeRecognitionSuccessActionConfigInTask:task requireComplete:NO]) {
+                return nil;
+            }
             if (![self storeRecognitionFailureActionConfigInTask:task requireComplete:NO]) {
                 return nil;
             }
             if ((_imageActionMode == AnClickActionModeNetwork || _failureActionMode == AnClickActionModeNetwork) &&
                 ![self storeNetworkRequestConfigInTask:task requireComplete:NO]) {
                 return nil;
+            }
+            if ([self recognitionActionModeNeedsPoint:[self normalizedImageActionMode:_imageActionMode]] &&
+                _hasSuccessActionPoint) {
+                task[@"successPoint"] = [NSValue valueWithCGPoint:_successActionPoint];
+                task[@"successPointScreenSize"] = [self currentScreenCoordinateSizeValue];
+            }
+            if ([self failureActionModeNeedsPoint:[self normalizedFailureActionMode:_failureActionMode]] &&
+                _hasFailureActionPoint) {
+                task[@"failurePoint"] = [NSValue valueWithCGPoint:_failureActionPoint];
+                task[@"failurePointScreenSize"] = [self currentScreenCoordinateSizeValue];
             }
             return task;
         }
@@ -9536,12 +9786,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (![self storeRecognitionJumpActionConfigInTask:task requireComplete:requireComplete]) {
             return nil;
         }
+        if (![self storeRecognitionSuccessActionConfigInTask:task requireComplete:requireComplete]) {
+            return nil;
+        }
         if (![self storeRecognitionFailureActionConfigInTask:task requireComplete:requireComplete]) {
             return nil;
         }
         if ((_imageActionMode == AnClickActionModeNetwork || _failureActionMode == AnClickActionModeNetwork) &&
             ![self storeNetworkRequestConfigInTask:task requireComplete:requireComplete]) {
             return nil;
+        }
+        if ([self recognitionActionModeNeedsPoint:[self normalizedImageActionMode:_imageActionMode]] &&
+            _hasSuccessActionPoint) {
+            task[@"successPoint"] = [NSValue valueWithCGPoint:_successActionPoint];
+            task[@"successPointScreenSize"] = [self currentScreenCoordinateSizeValue];
         }
         if ([self failureActionModeNeedsPoint:[self normalizedFailureActionMode:_failureActionMode]]) {
             if (_hasFailureActionPoint) {
@@ -9663,7 +9921,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return @"成功后跳转未选任务";
     }
     if ([self modeIsRecognitionTask:actionMode]) {
-        return [NSString stringWithFormat:@"成功后%@任务", [self actionNameForMode:actionMode]];
+        NSInteger taskIndex = [self recognitionSuccessActionTaskIndexForTask:task];
+        if (taskIndex >= 0) {
+            return [NSString stringWithFormat:@"成功后%@->%ld", [self actionNameForMode:actionMode], (long)taskIndex + 1];
+        }
+        return [NSString stringWithFormat:@"成功后%@未选任务", [self actionNameForMode:actionMode]];
     }
     return nil;
 }
@@ -10055,6 +10317,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _hasManualActionPoint[(NSUInteger)AnClickActionModeImage] = YES;
             [self rememberManualCoordinateScreenSize];
         }
+        NSValue *successPointValue = task[@"successPoint"];
+        if (successPointValue) {
+            _successActionPoint = [self resolvedPoint:successPointValue.CGPointValue forTask:task screenSizeKey:@"successPointScreenSize"];
+            _hasSuccessActionPoint = YES;
+            [self rememberManualCoordinateScreenSize];
+        }
         NSValue *failurePointValue = task[@"failurePoint"];
         if (failurePointValue) {
             _failureActionPoint = [self resolvedPoint:failurePointValue.CGPointValue forTask:task screenSizeKey:@"failurePointScreenSize"];
@@ -10105,6 +10373,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _hasManualActionPoint[(NSUInteger)AnClickActionModeOCR] = YES;
             [self rememberManualCoordinateScreenSize];
         }
+        NSValue *successPointValue = task[@"successPoint"];
+        if (successPointValue) {
+            _successActionPoint = [self resolvedPoint:successPointValue.CGPointValue forTask:task screenSizeKey:@"successPointScreenSize"];
+            _hasSuccessActionPoint = YES;
+            [self rememberManualCoordinateScreenSize];
+        }
         NSValue *failurePointValue = task[@"failurePoint"];
         if (failurePointValue) {
             _failureActionPoint = [self resolvedPoint:failurePointValue.CGPointValue forTask:task screenSizeKey:@"failurePointScreenSize"];
@@ -10148,6 +10422,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _failureActionMode = [self failureActionModeForTask:task];
         if (_imageActionMode == AnClickActionModeNetwork || _failureActionMode == AnClickActionModeNetwork) {
             [self loadNetworkRequestConfigFromTask:task];
+        }
+        NSValue *successPointValue = task[@"successPoint"];
+        if (successPointValue) {
+            _successActionPoint = [self resolvedPoint:successPointValue.CGPointValue forTask:task screenSizeKey:@"successPointScreenSize"];
+            _hasSuccessActionPoint = YES;
+            [self rememberManualCoordinateScreenSize];
         }
         NSValue *failurePointValue = task[@"failurePoint"];
         if (failurePointValue) {
@@ -10625,6 +10905,27 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return task;
 }
 
+- (AnClickActionMode)successActionModeForTask:(NSDictionary *)task {
+    if (![self modeIsRecognitionTask:[self modeForTask:task]]) {
+        return AnClickActionModeNone;
+    }
+    id value = task[@"imageActionMode"];
+    if (![value respondsToSelector:@selector(integerValue)]) {
+        return AnClickActionModeTap;
+    }
+    return [self normalizedImageActionMode:(AnClickActionMode)[value integerValue]];
+}
+
+- (NSInteger)validRecognitionSuccessActionTaskIndexForMode:(AnClickActionMode)mode targetIndex:(NSInteger)targetIndex {
+    if (![self modeIsRecognitionTask:mode] ||
+        targetIndex < 0 ||
+        targetIndex >= (NSInteger)_taskItems.count) {
+        return -1;
+    }
+    NSDictionary *targetTask = _taskItems[(NSUInteger)targetIndex];
+    return [self modeForTask:targetTask] == mode ? targetIndex : -1;
+}
+
 - (NSInteger)validRecognitionFailureActionTaskIndexForMode:(AnClickActionMode)mode targetIndex:(NSInteger)targetIndex {
     if (![self modeIsRecognitionTask:mode] ||
         targetIndex < 0 ||
@@ -10633,6 +10934,27 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     NSDictionary *targetTask = _taskItems[(NSUInteger)targetIndex];
     return [self modeForTask:targetTask] == mode ? targetIndex : -1;
+}
+
+- (NSInteger)ensureRecognitionSuccessActionTaskForMode:(AnClickActionMode)mode {
+    if (![self modeIsRecognitionTask:mode]) {
+        return -1;
+    }
+    NSInteger targetIndex = _recognitionSuccessActionTaskIndex;
+    if (targetIndex >= 0 && targetIndex < (NSInteger)_taskItems.count) {
+        NSDictionary *targetTask = _taskItems[(NSUInteger)targetIndex];
+        AnClickActionMode targetMode = [self modeForTask:targetTask];
+        if (targetMode == mode) {
+            return targetIndex;
+        }
+        if (targetTask.count == 0 || targetMode == AnClickActionModeNone) {
+            _taskItems[(NSUInteger)targetIndex] = [self draftRecognitionTaskForMode:mode];
+            return targetIndex;
+        }
+    }
+
+    [_taskItems addObject:[self draftRecognitionTaskForMode:mode]];
+    return (NSInteger)_taskItems.count - 1;
 }
 
 - (NSInteger)ensureRecognitionFailureActionTaskForMode:(AnClickActionMode)mode {
@@ -10719,6 +11041,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return taskIndex >= 0 ? taskIndex : -1;
 }
 
+- (NSInteger)recognitionSuccessActionTaskIndexForTask:(NSDictionary *)task {
+    if (![self modeIsRecognitionTask:[self modeForTask:task]] ||
+        ![self modeIsRecognitionTask:[self successActionModeForTask:task]]) {
+        return -1;
+    }
+    id value = task[@"successActionTaskIndex"];
+    if (![value respondsToSelector:@selector(integerValue)]) {
+        return -1;
+    }
+    NSInteger taskIndex = [value integerValue];
+    return taskIndex >= 0 ? taskIndex : -1;
+}
+
 - (NSInteger)validRecognitionBranchIndexForTask:(NSDictionary *)task success:(BOOL)success {
     NSInteger branchIndex = [self recognitionBranchIndexForTask:task success:success];
     if (branchIndex < 0 || branchIndex >= (NSInteger)_taskItems.count) {
@@ -10743,6 +11078,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return -1;
     }
     return [self validRecognitionBranchIndexForTask:task success:success];
+}
+
+- (NSInteger)validRecognitionSuccessActionTaskIndexForTask:(NSDictionary *)task {
+    NSInteger taskIndex = [self recognitionSuccessActionTaskIndexForTask:task];
+    if (taskIndex < 0 || taskIndex >= (NSInteger)_taskItems.count) {
+        return -1;
+    }
+    NSDictionary *targetTask = _taskItems[(NSUInteger)taskIndex];
+    AnClickActionMode successMode = [self successActionModeForTask:task];
+    return [self modeForTask:targetTask] == successMode ? taskIndex : -1;
 }
 
 - (NSInteger)validRecognitionFailureActionTaskIndexForTask:(NSDictionary *)task {
@@ -10779,6 +11124,34 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [self point:point mappedFromScreenSize:sourceSize toScreenSize:targetSize];
 }
 
+- (BOOL)successActionPointForTask:(NSDictionary *)task
+                        matchPoint:(CGPoint)matchPoint
+                     hasMatchPoint:(BOOL)hasMatchPoint
+                  customPointValue:(NSValue *)customPointValue
+                     useMatchPoint:(BOOL)useMatchPoint
+                             point:(CGPoint *)point {
+    NSValue *successPointValue = task[@"successPoint"];
+    if (successPointValue) {
+        if (point) {
+            *point = [self resolvedPoint:successPointValue.CGPointValue forTask:task screenSizeKey:@"successPointScreenSize"];
+        }
+        return YES;
+    }
+    if (useMatchPoint && hasMatchPoint) {
+        if (point) {
+            *point = matchPoint;
+        }
+        return YES;
+    }
+    if (customPointValue) {
+        if (point) {
+            *point = [self resolvedPointForTask:task fallbackPoint:customPointValue.CGPointValue];
+        }
+        return YES;
+    }
+    return NO;
+}
+
 - (BOOL)failureActionPointForTask:(NSDictionary *)task point:(CGPoint *)point {
     NSValue *failurePointValue = task[@"failurePoint"];
     if (failurePointValue) {
@@ -10805,6 +11178,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
     }
     return NO;
+}
+
+- (BOOL)validateSuccessRecognitionActionTaskForTask:(NSDictionary *)task {
+    AnClickActionMode successMode = [self successActionModeForTask:task];
+    if (![self modeIsRecognitionTask:successMode]) {
+        return YES;
+    }
+    NSInteger taskIndex = [self recognitionSuccessActionTaskIndexForTask:task];
+    if (taskIndex < 0) {
+        _statusLabel.text = [NSString stringWithFormat:@"成功后%@任务号未设置", [self actionNameForMode:successMode]];
+        return NO;
+    }
+    if (taskIndex >= (NSInteger)_taskItems.count) {
+        _statusLabel.text = [NSString stringWithFormat:@"成功后任务%ld不存在", (long)taskIndex + 1];
+        return NO;
+    }
+    NSDictionary *targetTask = _taskItems[(NSUInteger)taskIndex];
+    if ([self modeForTask:targetTask] != successMode) {
+        _statusLabel.text = [NSString stringWithFormat:@"任务%ld不是%@", (long)taskIndex + 1, [self actionNameForMode:successMode]];
+        return NO;
+    }
+    return YES;
 }
 
 - (BOOL)validateFailureRecognitionActionTaskForTask:(NSDictionary *)task {
@@ -10866,6 +11261,34 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     task[@"recognitionRetryInterval"] = @(MIN(30.0, MAX(0.2, _recognitionRetryInterval)));
 }
 
+- (BOOL)storeRecognitionSuccessActionConfigInTask:(NSMutableDictionary *)task requireComplete:(BOOL)requireComplete {
+    AnClickActionMode successMode = [self normalizedImageActionMode:_imageActionMode];
+    if (![self modeIsRecognitionTask:successMode]) {
+        return YES;
+    }
+    if (_recognitionSuccessActionTaskIndex >= 0) {
+        NSInteger validIndex = [self validRecognitionSuccessActionTaskIndexForMode:successMode targetIndex:_recognitionSuccessActionTaskIndex];
+        if (validIndex >= 0) {
+            task[@"successActionTaskIndex"] = @(validIndex);
+            return YES;
+        }
+        if (requireComplete) {
+            if (_recognitionSuccessActionTaskIndex >= (NSInteger)_taskItems.count) {
+                _statusLabel.text = [NSString stringWithFormat:@"成功后任务%ld不存在", (long)_recognitionSuccessActionTaskIndex + 1];
+            } else {
+                _statusLabel.text = [NSString stringWithFormat:@"任务%ld不是%@", (long)_recognitionSuccessActionTaskIndex + 1, [self actionNameForMode:successMode]];
+            }
+            return NO;
+        }
+        return YES;
+    }
+    if (requireComplete) {
+        _statusLabel.text = [NSString stringWithFormat:@"先填成功后%@任务号", [self actionNameForMode:successMode]];
+        return NO;
+    }
+    return YES;
+}
+
 - (BOOL)storeRecognitionJumpActionConfigInTask:(NSMutableDictionary *)task requireComplete:(BOOL)requireComplete {
     if ([self normalizedImageActionMode:_imageActionMode] == AnClickActionModeJump) {
         if (_recognitionSuccessBranchIndex >= 0) {
@@ -10892,7 +11315,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return YES;
     }
     if (_recognitionFailureActionTaskIndex >= 0) {
-        task[@"failureActionTaskIndex"] = @(_recognitionFailureActionTaskIndex);
+        NSInteger validIndex = [self validRecognitionFailureActionTaskIndexForMode:failureMode targetIndex:_recognitionFailureActionTaskIndex];
+        if (validIndex >= 0) {
+            task[@"failureActionTaskIndex"] = @(validIndex);
+            return YES;
+        }
+        if (requireComplete) {
+            if (_recognitionFailureActionTaskIndex >= (NSInteger)_taskItems.count) {
+                _statusLabel.text = [NSString stringWithFormat:@"失败后任务%ld不存在", (long)_recognitionFailureActionTaskIndex + 1];
+            } else {
+                _statusLabel.text = [NSString stringWithFormat:@"任务%ld不是%@", (long)_recognitionFailureActionTaskIndex + 1, [self actionNameForMode:failureMode]];
+            }
+            return NO;
+        }
         return YES;
     }
     if (requireComplete) {
@@ -10908,6 +11343,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _recognitionRetryInterval = [self recognitionRetryIntervalForTask:task];
     _recognitionSuccessBranchIndex = [self recognitionBranchIndexForTask:task success:YES];
     _recognitionFailureBranchIndex = [self recognitionBranchIndexForTask:task success:NO];
+    _recognitionSuccessActionTaskIndex = [self recognitionSuccessActionTaskIndexForTask:task];
     _recognitionFailureActionTaskIndex = [self recognitionFailureActionTaskIndexForTask:task];
     if (![task[@"failureActionTaskIndex"] respondsToSelector:@selector(integerValue)] &&
         _recognitionFailureActionTaskIndex >= 0 &&
@@ -11605,6 +12041,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (branchIndex >= 0) {
         return (NSUInteger)branchIndex;
     }
+    if (success) {
+        NSInteger successActionTaskIndex = [self validRecognitionSuccessActionTaskIndexForTask:task];
+        if (successActionTaskIndex >= 0) {
+            return (NSUInteger)successActionTaskIndex;
+        }
+    } else {
+        NSInteger failureActionTaskIndex = [self validRecognitionFailureActionTaskIndexForTask:task];
+        if (failureActionTaskIndex >= 0) {
+            return (NSUInteger)failureActionTaskIndex;
+        }
+    }
     return index + 1;
 }
 
@@ -11938,7 +12385,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     if ([self modeIsRecognitionTask:failureMode]) {
-        _statusLabel.text = [NSString stringWithFormat:@"识别失败后%@任务", [self actionNameForMode:failureMode]];
+        _statusLabel.text = [NSString stringWithFormat:@"识别失败后%@未选配置", [self actionNameForMode:failureMode]];
         [self showToast:_statusLabel.text];
         if (completion) {
             completion(interval);
@@ -12071,9 +12518,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 }
                 if ([strongSelf modeIsRecognitionTask:imageActionMode]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f 后%@任务",
-                                                     scoreNumber.doubleValue,
-                                                     [strongSelf actionNameForMode:imageActionMode]];
+                    NSInteger taskIndex = [strongSelf validRecognitionSuccessActionTaskIndexForTask:task];
+                    strongSelf->_statusLabel.text = taskIndex >= 0
+                        ? [NSString stringWithFormat:@"识图 %.2f 成功后%@任务%ld",
+                           scoreNumber.doubleValue,
+                           [strongSelf actionNameForMode:imageActionMode],
+                           (long)taskIndex + 1]
+                        : [NSString stringWithFormat:@"识图成功后%@未选任务", [strongSelf actionNameForMode:imageActionMode]];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     if (completion) {
                         completion(YES);
@@ -12092,9 +12543,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     return;
                 }
-                CGPoint actionPoint = useMatchPoint
-                    ? matchPointValue.CGPointValue
-                    : [strongSelf resolvedPointForTask:task fallbackPoint:customPointValue.CGPointValue];
+                CGPoint actionPoint = CGPointZero;
+                if (![strongSelf successActionPointForTask:task
+                                                 matchPoint:matchPointValue.CGPointValue
+                                              hasMatchPoint:YES
+                                           customPointValue:customPointValue
+                                              useMatchPoint:useMatchPoint
+                                                      point:&actionPoint]) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    strongSelf->_statusLabel.text = @"识图成功动作未取点";
+                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    if (completion) {
+                        completion(YES);
+                    }
+                    return;
+                }
                 actionPoint = [strongSelf point:actionPoint byApplyingJitterForTask:task];
                 [strongSelf performPointActionMode:imageActionMode atPoint:actionPoint inWindow:currentHostWindow];
                 strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f %@ %.0f,%.0f",
@@ -12148,7 +12611,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
     BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
     NSValue *customPointValue = task[@"point"];
-    if ([self recognitionActionModeNeedsPoint:actionMode] && !useMatchPoint && !customPointValue) {
+    if ([self recognitionActionModeNeedsPoint:actionMode] &&
+        !useMatchPoint &&
+        !customPointValue &&
+        !task[@"successPoint"]) {
         _statusLabel.text = @"识字未取点";
         if (completion) {
             completion(NO);
@@ -12240,10 +12706,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 }
                 if ([strongSelf modeIsRecognitionTask:actionMode]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ 后%@任务",
-                                                     matchSummary,
-                                                     text,
-                                                     [strongSelf actionNameForMode:actionMode]];
+                    NSInteger taskIndex = [strongSelf validRecognitionSuccessActionTaskIndexForTask:task];
+                    strongSelf->_statusLabel.text = taskIndex >= 0
+                        ? [NSString stringWithFormat:@"识字 %@ %@ 成功后%@任务%ld",
+                           matchSummary,
+                           text,
+                           [strongSelf actionNameForMode:actionMode],
+                           (long)taskIndex + 1]
+                        : [NSString stringWithFormat:@"识字成功后%@未选任务", [strongSelf actionNameForMode:actionMode]];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     if (completion) {
                         completion(YES);
@@ -12261,9 +12731,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     return;
                 }
-                CGPoint actionPoint = useMatchPoint
-                    ? pointValue.CGPointValue
-                    : [strongSelf resolvedPointForTask:task fallbackPoint:customPointValue.CGPointValue];
+                CGPoint actionPoint = CGPointZero;
+                if (![strongSelf successActionPointForTask:task
+                                                 matchPoint:pointValue.CGPointValue
+                                              hasMatchPoint:YES
+                                           customPointValue:customPointValue
+                                              useMatchPoint:useMatchPoint
+                                                      point:&actionPoint]) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    strongSelf->_statusLabel.text = @"识字成功动作未取点";
+                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    if (completion) {
+                        completion(YES);
+                    }
+                    return;
+                }
                 actionPoint = [strongSelf point:actionPoint byApplyingJitterForTask:task];
                 [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
                 strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ %.0f,%.0f",
@@ -12383,9 +12865,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 }
                 if ([strongSelf modeIsRecognitionTask:actionMode]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ 后%@任务",
-                                                     patternSummary,
-                                                     [strongSelf actionNameForMode:actionMode]];
+                    NSInteger taskIndex = [strongSelf validRecognitionSuccessActionTaskIndexForTask:task];
+                    strongSelf->_statusLabel.text = taskIndex >= 0
+                        ? [NSString stringWithFormat:@"识色 %@ 成功后%@任务%ld",
+                           patternSummary,
+                           [strongSelf actionNameForMode:actionMode],
+                           (long)taskIndex + 1]
+                        : [NSString stringWithFormat:@"识色成功后%@未选任务", [strongSelf actionNameForMode:actionMode]];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     if (completion) {
                         completion(YES);
@@ -12403,7 +12889,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     return;
                 }
-                CGPoint actionPoint = pointValue.CGPointValue;
+                CGPoint actionPoint = CGPointZero;
+                if (![strongSelf successActionPointForTask:task
+                                                 matchPoint:pointValue.CGPointValue
+                                              hasMatchPoint:YES
+                                           customPointValue:nil
+                                              useMatchPoint:YES
+                                                      point:&actionPoint]) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    strongSelf->_statusLabel.text = @"识色成功动作未取点";
+                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    if (completion) {
+                        completion(YES);
+                    }
+                    return;
+                }
                 actionPoint = [strongSelf point:actionPoint byApplyingJitterForTask:task];
                 [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
                 strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ %.0f,%.0f",
@@ -12468,7 +12968,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 return NO;
             }
         }
-        if ([self recognitionActionModeNeedsPoint:actionMode] && !useMatchPoint && !task[@"point"]) {
+        if ([self recognitionActionModeNeedsPoint:actionMode] &&
+            !useMatchPoint &&
+            !task[@"point"] &&
+            !task[@"successPoint"]) {
             _statusLabel.text = @"任务识图未取点";
             return NO;
         }
@@ -12478,6 +12981,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 _statusLabel.text = @"任务识图失败动作未取点";
                 return NO;
             }
+        }
+        if (![self validateSuccessRecognitionActionTaskForTask:task]) {
+            return NO;
         }
         if (![self validateFailureRecognitionActionTaskForTask:task]) {
             return NO;
@@ -12512,7 +13018,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 return NO;
             }
         }
-        if ([self recognitionActionModeNeedsPoint:actionMode] && !useMatchPoint && !task[@"point"]) {
+        if ([self recognitionActionModeNeedsPoint:actionMode] &&
+            !useMatchPoint &&
+            !task[@"point"] &&
+            !task[@"successPoint"]) {
             _statusLabel.text = @"任务识字未取点";
             return NO;
         }
@@ -12522,6 +13031,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 _statusLabel.text = @"任务识字失败动作未取点";
                 return NO;
             }
+        }
+        if (![self validateSuccessRecognitionActionTaskForTask:task]) {
+            return NO;
         }
         if (![self validateFailureRecognitionActionTaskForTask:task]) {
             return NO;
@@ -12555,6 +13067,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 _statusLabel.text = @"任务识色失败动作未取点";
                 return NO;
             }
+        }
+        if (![self validateSuccessRecognitionActionTaskForTask:task]) {
+            return NO;
         }
         if (![self validateFailureRecognitionActionTaskForTask:task]) {
             return NO;
@@ -13915,7 +14430,30 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
+    _pickingSuccessActionPoint = NO;
     _pickingFailureActionPoint = YES;
+    _pickingSwipeEndPoint = NO;
+    [self beginScreenPointPickingWithHostWindow:hostWindow];
+}
+
+- (void)beginSuccessActionPointPicking {
+    if (![self currentActionIsRecognitionMode]) {
+        _statusLabel.text = @"识别动作才有成功坐标";
+        return;
+    }
+    if (![self currentSuccessActionNeedsPoint]) {
+        _statusLabel.text = @"先选择成功后点击动作";
+        return;
+    }
+
+    UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        _statusLabel.text = @"无窗口";
+        return;
+    }
+
+    _pickingSuccessActionPoint = YES;
+    _pickingFailureActionPoint = NO;
     _pickingSwipeEndPoint = NO;
     [self beginScreenPointPickingWithHostWindow:hostWindow];
 }
@@ -13926,6 +14464,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
+    _pickingSuccessActionPoint = NO;
     _pickingFailureActionPoint = NO;
     if (_actionMode == AnClickActionModeColor) {
         [self beginColorPicking];
@@ -14085,13 +14624,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     _pointPickWindow.hidden = NO;
     [self updatePointPickCursor];
-    _statusLabel.text = _pickingFailureActionPoint ? @"取失败动作位置" : (_pickingSwipeEndPoint ? @"滑动取终点" : @"拖动取点");
+    _statusLabel.text = _pickingSuccessActionPoint
+        ? @"取成功动作位置"
+        : (_pickingFailureActionPoint ? @"取失败动作位置" : (_pickingSwipeEndPoint ? @"滑动取终点" : @"拖动取点"));
 }
 
 - (CGPoint)initialPointPickPointInOverlay:(UIView *)overlay {
     UIWindow *hostWindow = _pointPickHostWindow;
     if (_actionMode == AnClickActionModeSwipe && _pickingSwipeEndPoint && _hasManualSwipeAnchor && hostWindow) {
         return [self clampedPointPickPoint:[hostWindow convertPoint:_manualSwipeAnchor fromWindow:nil] inOverlay:overlay];
+    }
+    if (_pickingSuccessActionPoint && _hasSuccessActionPoint && hostWindow) {
+        return [self clampedPointPickPoint:[hostWindow convertPoint:_successActionPoint fromWindow:nil] inOverlay:overlay];
     }
     if (_pickingFailureActionPoint && _hasFailureActionPoint && hostWindow) {
         return [self clampedPointPickPoint:[hostWindow convertPoint:_failureActionPoint fromWindow:nil] inOverlay:overlay];
@@ -14166,7 +14710,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGPoint screenPoint = [self pointPickScreenPointFromImagePoint:_pendingPointPickPoint];
     BOOL pickingCustomClickPoint = _actionMode == AnClickActionModeImage || _actionMode == AnClickActionModeOCR;
     NSString *stage = nil;
-    if (_pickingFailureActionPoint) {
+    if (_pickingSuccessActionPoint) {
+        stage = @"成功坐标";
+    } else if (_pickingFailureActionPoint) {
         stage = @"失败坐标";
     } else if (_actionMode == AnClickActionModeSwipe) {
         stage = _pickingSwipeEndPoint ? @"终点" : @"起点";
@@ -14290,6 +14836,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _pointPickWindow = nil;
     _pointPickHostWindow = nil;
     _pickingSwipeEndPoint = NO;
+    _pickingSuccessActionPoint = NO;
     _pickingFailureActionPoint = NO;
     [self restorePanelAfterExternalTap];
 }
@@ -14354,6 +14901,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_actionMode == AnClickActionModeNone) {
         [self cancelPointPicking];
         _statusLabel.text = @"先选择动作";
+        return;
+    }
+
+    if (_pickingSuccessActionPoint) {
+        _successActionPoint = screenPoint;
+        _hasSuccessActionPoint = YES;
+        [self rememberManualCoordinateScreenSize];
+        [self finishPointPickingOverlay];
+        [self refreshEditorConfigControls];
+        [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
+        _statusLabel.text = [self successActionPointSummary];
+        [self updateStatusForCurrentConfig];
+        [self autosaveSelectedTaskIfPossible];
         return;
     }
 
