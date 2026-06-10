@@ -157,13 +157,13 @@ static UIImage *AnClickCaptureHardwareScreenImage(void) {
     return image;
 }
 
-static BOOL AnClickImageAppearsUniform(UIImage *image) {
+static BOOL AnClickImageAppearsBlankOrLowDetail(UIImage *image) {
     if (!image.CGImage) {
         return YES;
     }
 
-    const size_t sampleWidth = 8;
-    const size_t sampleHeight = 8;
+    const size_t sampleWidth = 32;
+    const size_t sampleHeight = 32;
     const size_t bytesPerPixel = 4;
     const size_t bytesPerRow = sampleWidth * bytesPerPixel;
     unsigned char pixels[sampleHeight * bytesPerRow];
@@ -195,21 +195,38 @@ static BOOL AnClickImageAppearsUniform(UIImage *image) {
     int maxR = 0;
     int maxG = 0;
     int maxB = 0;
+    double luminanceSum = 0.0;
+    double luminanceSquaredSum = 0.0;
+    NSUInteger darkPixels = 0;
     for (size_t y = 0; y < sampleHeight; y++) {
         for (size_t x = 0; x < sampleWidth; x++) {
             const unsigned char *pixel = pixels + y * bytesPerRow + x * bytesPerPixel;
             int r = pixel[0];
             int g = pixel[1];
             int b = pixel[2];
+            double luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
             minR = MIN(minR, r);
             minG = MIN(minG, g);
             minB = MIN(minB, b);
             maxR = MAX(maxR, r);
             maxG = MAX(maxG, g);
             maxB = MAX(maxB, b);
+            luminanceSum += luminance;
+            luminanceSquaredSum += luminance * luminance;
+            if (luminance < 12.0) {
+                darkPixels++;
+            }
         }
     }
-    return (maxR - minR) <= 2 && (maxG - minG) <= 2 && (maxB - minB) <= 2;
+    NSUInteger pixelCount = sampleWidth * sampleHeight;
+    double mean = luminanceSum / MAX((double)pixelCount, 1.0);
+    double variance = luminanceSquaredSum / MAX((double)pixelCount, 1.0) - mean * mean;
+    double stdDev = sqrt(MAX(0.0, variance));
+    double darkRatio = (double)darkPixels / MAX((double)pixelCount, 1.0);
+    BOOL almostUniform = (maxR - minR) <= 3 && (maxG - minG) <= 3 && (maxB - minB) <= 3;
+    BOOL mostlyBlack = mean < 18.0 && darkRatio > 0.92;
+    BOOL tooLittleDetail = stdDev < 2.5 && (maxR - minR) <= 10 && (maxG - minG) <= 10 && (maxB - minB) <= 10;
+    return almostUniform || mostlyBlack || tooLittleDetail;
 }
 
 static BOOL AnClickImageMatchesWindowPointSize(UIImage *image, UIWindow *window) {
@@ -235,6 +252,15 @@ static UIImage *AnClickCaptureActiveWindowImage(UIWindow **capturedWindow) {
     void (^captureBlock)(void) = ^{
         NSArray<UIWindow *> *windows = AnClickCaptureCandidateWindows(&window);
         if (window) {
+            UIImage *screenImage = AnClickCaptureHardwareScreenImage();
+            BOOL screenImageMatches = screenImage.CGImage && AnClickImageMatchesWindowPointSize(screenImage, window);
+            BOOL screenImageUsable = screenImageMatches && !AnClickImageAppearsBlankOrLowDetail(screenImage);
+            if (screenImageUsable) {
+                image = screenImage;
+                window = nil;
+                return;
+            }
+
             CGSize size = window.bounds.size;
             CGFloat scale = window.screen.scale > 0 ? window.screen.scale : UIScreen.mainScreen.scale;
             UIGraphicsBeginImageContextWithOptions(size, NO, scale);
@@ -254,13 +280,21 @@ static UIImage *AnClickCaptureActiveWindowImage(UIWindow **capturedWindow) {
             }
             image = UIGraphicsGetImageFromCurrentImageContext();
             UIGraphicsEndImageContext();
-            if (image.CGImage && !AnClickImageAppearsUniform(image)) {
+            if (image.CGImage && !AnClickImageAppearsBlankOrLowDetail(image)) {
                 return;
+            }
+
+            if (screenImageMatches && screenImage.CGImage) {
+                image = screenImage;
+                window = nil;
+                return;
+            } else if (screenImage.CGImage) {
+                NSLog(@"[AnClick] Ignored hardware screenshot with mismatched orientation size");
             }
         }
 
         UIImage *screenImage = AnClickCaptureHardwareScreenImage();
-        if (screenImage.CGImage && AnClickImageMatchesWindowPointSize(screenImage, window)) {
+        if (screenImage.CGImage && (!window || AnClickImageMatchesWindowPointSize(screenImage, window))) {
             image = screenImage;
             window = nil;
         } else if (screenImage.CGImage) {
