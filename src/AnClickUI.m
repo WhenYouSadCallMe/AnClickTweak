@@ -59,6 +59,8 @@ extern NSInteger IOHIDEventGetIntegerValue(IOHIDEventRef event, IOHIDEventField 
 
 static const NSUInteger AnClickMacroMaxTrajectoryPoints = 2400;
 static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
+static const double AnClickMacroMinPlaybackSpeed = 0.1;
+static const double AnClickMacroMaxPlaybackSpeed = 10.0;
 static const NSInteger AnClickBackdropBlurViewTag = 77001;
 static char AnClickVolumeObservationContext;
 static const IOHIDEventType AnClickHIDEventTypeKeyboard = 3;
@@ -214,6 +216,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 + (BOOL)isHolding;
 + (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration;
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events;
++ (void)playRecordedEvents:(NSArray<NSDictionary *> *)events playbackSpeed:(NSTimeInterval)playbackSpeed;
 + (void)twoFingerTapAtPoint:(CGPoint)point distance:(CGFloat)distance;
 + (void)pinchAtPoint:(CGPoint)center fromDistance:(CGFloat)fromDistance toDistance:(CGFloat)toDistance duration:(NSTimeInterval)duration;
 + (void)rotateAtPoint:(CGPoint)center radius:(CGFloat)radius startAngle:(CGFloat)startAngle endAngle:(CGFloat)endAngle duration:(NSTimeInterval)duration;
@@ -326,6 +329,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UILabel *_delayCaptionLabel;
     UILabel *_repeatCaptionLabel;
     UILabel *_intervalCaptionLabel;
+    UILabel *_macroSpeedCaptionLabel;
     UILabel *_randomDelayCaptionLabel;
     UILabel *_jitterCaptionLabel;
     UILabel *_successBranchCaptionLabel;
@@ -337,6 +341,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UITextField *_delayField;
     UITextField *_repeatField;
     UITextField *_intervalField;
+    UITextField *_macroSpeedField;
     UITextField *_jitterField;
     UITextField *_successBranchField;
     UITextField *_failureBranchField;
@@ -511,6 +516,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSInteger _selectedColorPickSampleIndex;
     NSTimeInterval _networkTimeout;
     NSTimeInterval _recognitionRetryInterval;
+    double _macroPlaybackSpeed;
     NSTimeInterval _actionInterval;
     CGFloat _actionJitterRadius;
     double _colorTolerance;
@@ -1718,6 +1724,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_panelView addSubview:_repeatCaptionLabel];
     _intervalCaptionLabel = [self configCaptionLabelWithText:@"循环间隔（秒）"];
     [_panelView addSubview:_intervalCaptionLabel];
+    _macroSpeedCaptionLabel = [self configCaptionLabelWithText:@"录制速度"];
+    [_panelView addSubview:_macroSpeedCaptionLabel];
     _randomDelayCaptionLabel = [self configCaptionLabelWithText:@"延时模式"];
     [_panelView addSubview:_randomDelayCaptionLabel];
     _jitterCaptionLabel = [self configCaptionLabelWithText:@"随机抖动"];
@@ -1755,6 +1763,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_intervalField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
     [_intervalField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_intervalField];
+
+    _macroSpeedField = [self configTextFieldWithPlaceholder:@"1原速"];
+    _macroSpeedField.keyboardType = UIKeyboardTypeDecimalPad;
+    [_macroSpeedField addTarget:self action:@selector(actionTimingChanged:) forControlEvents:UIControlEventEditingChanged];
+    [_macroSpeedField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+    [_panelView addSubview:_macroSpeedField];
 
     _randomDelayModeButton = [self panelButtonWithTitle:@"固定延时" action:@selector(toggleRandomDelayMode)];
     [_panelView addSubview:_randomDelayModeButton];
@@ -3476,6 +3490,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _delayCaptionLabel.hidden = YES;
     _repeatCaptionLabel.hidden = YES;
     _intervalCaptionLabel.hidden = YES;
+    _macroSpeedCaptionLabel.hidden = YES;
     _randomDelayCaptionLabel.hidden = YES;
     _jitterCaptionLabel.hidden = YES;
     _successBranchCaptionLabel.hidden = YES;
@@ -3521,6 +3536,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _delayField.hidden = YES;
     _repeatField.hidden = YES;
     _intervalField.hidden = YES;
+    _macroSpeedField.hidden = YES;
     _jitterField.hidden = YES;
     _successBranchField.hidden = YES;
     _failureBranchField.hidden = YES;
@@ -3569,6 +3585,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _delayCaptionLabel,
         _repeatCaptionLabel,
         _intervalCaptionLabel,
+        _macroSpeedCaptionLabel,
         _randomDelayCaptionLabel,
         _jitterCaptionLabel,
         _successBranchCaptionLabel,
@@ -3609,6 +3626,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _delayField,
         _repeatField,
         _intervalField,
+        _macroSpeedField,
         _jitterField,
         _successBranchField,
         _failureBranchField,
@@ -5129,6 +5147,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _recognitionRetryInterval = 1.0;
     _actionRandomDelayEnabled = NO;
     _actionJitterRadius = 0.0;
+    _macroPlaybackSpeed = 1.0;
     _hasTargetColor = NO;
     _targetColorSamples = [NSMutableArray array];
     _pendingColorPickSamples = [NSMutableArray array];
@@ -5487,7 +5506,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _intervalField, _jitterField, _thresholdField, _ocrTargetField, _successBranchField, _failureBranchField, _recognitionIntervalField, _networkURLField, _networkContainsField, _networkFalseField, _networkPostBodyField, nil];
+    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _intervalField, _macroSpeedField, _jitterField, _thresholdField, _ocrTargetField, _successBranchField, _failureBranchField, _recognitionIntervalField, _networkURLField, _networkContainsField, _networkFalseField, _networkPostBodyField, nil];
     [fields addObjectsFromArray:_networkPostKeyFields ?: @[]];
     [fields addObjectsFromArray:_networkPostValueFields ?: @[]];
     if (_globalDelayField) {
@@ -5585,7 +5604,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *jitterText = _actionJitterRadius > 0.001
         ? [NSString stringWithFormat:@" 抖%.0fpx", _actionJitterRadius]
         : @"";
-    return [NSString stringWithFormat:@"%@ 次%ld%@%@", delayText, (long)_actionRepeatCount, intervalText, jitterText];
+    NSString *macroSpeedText = _actionMode == AnClickActionModeMacro && fabs([self normalizedMacroPlaybackSpeed:_macroPlaybackSpeed] - 1.0) > 0.001
+        ? [NSString stringWithFormat:@" 速%@", [self macroPlaybackSpeedSummaryText:_macroPlaybackSpeed]]
+        : @"";
+    return [NSString stringWithFormat:@"%@ 次%ld%@%@%@", delayText, (long)_actionRepeatCount, intervalText, jitterText, macroSpeedText];
 }
 
 - (void)syncActionDescriptionFromField {
@@ -5616,6 +5638,50 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return @"";
     }
     return [NSString stringWithFormat:@"%.2f", MIN(30.0, MAX(0.0, _actionInterval))];
+}
+
+- (double)normalizedMacroPlaybackSpeed:(double)speed {
+    if (!isfinite(speed) || speed <= 0.0) {
+        return 1.0;
+    }
+    return MIN(AnClickMacroMaxPlaybackSpeed, MAX(AnClickMacroMinPlaybackSpeed, speed));
+}
+
+- (double)macroPlaybackSpeedForTask:(NSDictionary *)task {
+    id value = task[@"macroSpeed"];
+    if ([value respondsToSelector:@selector(doubleValue)]) {
+        return [self normalizedMacroPlaybackSpeed:[value doubleValue]];
+    }
+    return 1.0;
+}
+
+- (NSString *)macroPlaybackSpeedSummaryText:(double)speed {
+    double normalizedSpeed = [self normalizedMacroPlaybackSpeed:speed];
+    double rounded = round(normalizedSpeed);
+    if (fabs(normalizedSpeed - rounded) < 0.005) {
+        return [NSString stringWithFormat:@"%.0fx", rounded];
+    }
+    double oneDecimal = round(normalizedSpeed * 10.0) / 10.0;
+    if (fabs(normalizedSpeed - oneDecimal) < 0.005) {
+        return [NSString stringWithFormat:@"%.1fx", oneDecimal];
+    }
+    return [NSString stringWithFormat:@"%.2fx", normalizedSpeed];
+}
+
+- (NSString *)macroPlaybackSpeedFieldText {
+    double speed = [self normalizedMacroPlaybackSpeed:_macroPlaybackSpeed];
+    if (fabs(speed - 1.0) < 0.001) {
+        return @"";
+    }
+    double rounded = round(speed);
+    if (fabs(speed - rounded) < 0.005) {
+        return [NSString stringWithFormat:@"%.0f", rounded];
+    }
+    double oneDecimal = round(speed * 10.0) / 10.0;
+    if (fabs(speed - oneDecimal) < 0.005) {
+        return [NSString stringWithFormat:@"%.1f", oneDecimal];
+    }
+    return [NSString stringWithFormat:@"%.2f", speed];
 }
 
 - (NSString *)jitterFieldText {
@@ -5661,6 +5727,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *delayText = [_delayField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *repeatText = [_repeatField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *intervalText = [_intervalField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *macroSpeedText = [_macroSpeedField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *jitterText = [_jitterField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *successBranchText = [_successBranchField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *failureBranchText = [_failureBranchField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
@@ -5680,6 +5747,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _actionInterval = round(_actionInterval * 100.0) / 100.0;
     } else {
         _actionInterval = -1.0;
+    }
+    if (macroSpeedText.length > 0) {
+        _macroPlaybackSpeed = [self normalizedMacroPlaybackSpeed:macroSpeedText.doubleValue];
+        _macroPlaybackSpeed = round(_macroPlaybackSpeed * 100.0) / 100.0;
+    } else {
+        _macroPlaybackSpeed = 1.0;
     }
     if (jitterText.length > 0) {
         _actionJitterRadius = MIN(200.0, MAX(0.0, jitterText.doubleValue));
@@ -5761,6 +5834,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     if (!_intervalField.isFirstResponder) {
         _intervalField.text = [self actionIntervalFieldText];
+    }
+    if (!_macroSpeedField.isFirstResponder) {
+        _macroSpeedField.text = [self macroPlaybackSpeedFieldText];
     }
     [_randomDelayModeButton setTitle:(_actionRandomDelayEnabled ? @"随机延时" : @"固定延时") forState:UIControlStateNormal];
     [self styleSegmentButton:_randomDelayModeButton selected:_actionRandomDelayEnabled];
@@ -6002,6 +6078,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _delayCaptionLabel.hidden = YES;
     _repeatCaptionLabel.hidden = YES;
     _intervalCaptionLabel.hidden = YES;
+    _macroSpeedCaptionLabel.hidden = YES;
     _randomDelayCaptionLabel.hidden = YES;
     _jitterCaptionLabel.hidden = YES;
     _successBranchCaptionLabel.hidden = YES;
@@ -6044,6 +6121,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _delayField.hidden = YES;
     _repeatField.hidden = YES;
     _intervalField.hidden = YES;
+    _macroSpeedField.hidden = YES;
     _jitterField.hidden = YES;
     _successBranchField.hidden = YES;
     _failureBranchField.hidden = YES;
@@ -7071,8 +7149,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self styleRecordButton:_macroRecordButton active:recording];
         [self styleNormalButton:_macroPlayButton];
         [self layoutButtons:@[_macroRecordButton, _macroPlayButton] x:side y:configTopY + 22.0 width:contentWidth height:40 gap:10.0];
-        [self layoutDoubleTimingFieldsAtY:configTopY + 80.0];
-        [self layoutRandomizationControlsAtY:configTopY + 150.0];
+        [self layoutSingleField:_macroSpeedField caption:_macroSpeedCaptionLabel title:@"回放速度倍率" y:configTopY + 80.0];
+        [self layoutDoubleTimingFieldsAtY:configTopY + 158.0];
+        [self layoutRandomizationControlsAtY:configTopY + 228.0];
     } else if (_actionMode == AnClickActionModeSwipe) {
         _saveTaskButton.enabled = YES;
         _saveTaskButton.alpha = 1.0;
@@ -7242,7 +7321,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if ([AnClickRecorder shared].isRecording) {
             _statusLabel.text = @"录制中  点悬浮停止";
         } else if (_recordedMacroEvents.count > 0) {
-            _statusLabel.text = [NSString stringWithFormat:@"已录制 %lu步", (unsigned long)_recordedMacroEvents.count];
+            double speed = [self normalizedMacroPlaybackSpeed:_macroPlaybackSpeed];
+            NSString *speedText = fabs(speed - 1.0) > 0.001
+                ? [NSString stringWithFormat:@" 速%@", [self macroPlaybackSpeedSummaryText:speed]]
+                : @" 原速";
+            _statusLabel.text = [NSString stringWithFormat:@"已录制 %lu步%@", (unsigned long)_recordedMacroEvents.count, speedText];
         } else {
             _statusLabel.text = @"先开始录制";
         }
@@ -8556,6 +8639,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSTimeInterval)durationForRecordedEvents:(NSArray<NSDictionary *> *)events {
+    return [self durationForRecordedEvents:events playbackSpeed:1.0];
+}
+
+- (NSTimeInterval)durationForRecordedEvents:(NSArray<NSDictionary *> *)events playbackSpeed:(double)playbackSpeed {
+    double speed = [self normalizedMacroPlaybackSpeed:playbackSpeed];
     NSTimeInterval duration = 0.0;
     for (NSDictionary *event in events) {
         if (![event isKindOfClass:NSDictionary.class]) {
@@ -8569,7 +8657,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             }
         }
     }
-    return MAX(0.35, duration + 0.20);
+    return MAX(0.35, duration / speed + 0.20);
 }
 
 - (void)autosaveSelectedTaskIfPossible {
@@ -8844,6 +8932,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (_recordedMacroEvents.count > 0) {
             task[@"events"] = [_recordedMacroEvents copy];
             task[@"eventsScreenSize"] = [NSValue valueWithCGSize:_hasRecordedMacroScreenSize ? _recordedMacroScreenSize : [self currentScreenCoordinateSize]];
+            task[@"macroSpeed"] = @([self normalizedMacroPlaybackSpeed:_macroPlaybackSpeed]);
         } else if (requireComplete) {
             _statusLabel.text = @"先录制";
             return nil;
@@ -8906,6 +8995,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if ([task[@"interval"] respondsToSelector:@selector(doubleValue)]) {
         [parts addObject:[NSString stringWithFormat:@"间%.2fs", [self actionIntervalForTask:task]]];
     }
+    if ([self modeForTask:task] == AnClickActionModeMacro) {
+        double speed = [self macroPlaybackSpeedForTask:task];
+        if (fabs(speed - 1.0) > 0.001) {
+            [parts addObject:[NSString stringWithFormat:@"速%@", [self macroPlaybackSpeedSummaryText:speed]]];
+        }
+    }
     [self addRecognitionBranchSummaryForTask:task toParts:parts];
     NSString *failureActionSummary = [self recognitionFailureActionSummaryForTask:task];
     if (failureActionSummary.length > 0) {
@@ -8928,7 +9023,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *subtitle = desc.length > 0 ? desc : (mode == AnClickActionModeNone ? @"未设置" : @"已设置");
     if (desc.length == 0 && mode == AnClickActionModeMacro) {
         NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
-        subtitle = events.count > 0 ? [NSString stringWithFormat:@"已录 %lu 步", (unsigned long)events.count] : @"未录制";
+        double speed = [self macroPlaybackSpeedForTask:task];
+        NSString *speedText = fabs(speed - 1.0) > 0.001
+            ? [NSString stringWithFormat:@" · 速%@", [self macroPlaybackSpeedSummaryText:speed]]
+            : @"";
+        subtitle = events.count > 0 ? [NSString stringWithFormat:@"已录 %lu 步%@", (unsigned long)events.count, speedText] : @"未录制";
     } else if (desc.length == 0 && mode == AnClickActionModeTwoFingerTap) {
         NSUInteger count = [self storedMultiTapPointsForTask:task].count;
         subtitle = count >= 2
@@ -9285,6 +9384,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _recordedMacroEvents = [events isKindOfClass:NSArray.class] ? [events copy] : nil;
         _recordedMacroScreenSize = [self screenCoordinateSizeFromObject:task[@"eventsScreenSize"]];
         _hasRecordedMacroScreenSize = [self screenCoordinateSizeIsValid:_recordedMacroScreenSize];
+        _macroPlaybackSpeed = [self macroPlaybackSpeedForTask:task];
     } else if (mode == AnClickActionModeOCR) {
         [self loadRecognitionRetryConfigFromTask:task];
         _ocrTargetText = [self trimmedActionDescription:task[@"ocrText"]];
@@ -9652,7 +9752,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return 0.85;
     }
     if (mode == AnClickActionModeMacro) {
-        return [self durationForRecordedEvents:_recordedMacroEvents];
+        return [self durationForRecordedEvents:_recordedMacroEvents playbackSpeed:_macroPlaybackSpeed];
     }
     return 0.30;
 }
@@ -11488,7 +11588,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         duration = 0.85;
     } else if (mode == AnClickActionModeMacro) {
         NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
-        duration = [self durationForRecordedEvents:events];
+        duration = [self durationForRecordedEvents:events playbackSpeed:[self macroPlaybackSpeedForTask:task]];
     }
     if (turboPointTapRepeat) {
         __weak typeof(self) weakSelf = self;
@@ -11567,13 +11667,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             } else if (mode == AnClickActionModeMacro) {
                 NSArray<NSDictionary *> *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
                 NSArray<NSDictionary *> *resolvedEvents = [strongSelf recordedEvents:[strongSelf resolvedRecordedEventsForTask:task] byApplyingJitterForTask:task];
+                double playbackSpeed = [strongSelf macroPlaybackSpeedForTask:task];
                 NSArray<NSValue *> *trajectory = [strongSelf trajectoryPointsForRecordedEvents:resolvedEvents];
+                NSTimeInterval playbackDuration = [strongSelf durationForRecordedEvents:events playbackSpeed:playbackSpeed];
                 if (!suppressFastTrace && trajectory.count >= 2) {
-                    [strongSelf showTrajectoryForScreenPoints:trajectory inWindow:currentHostWindow duration:[strongSelf durationForRecordedEvents:events]];
+                    [strongSelf showTrajectoryForScreenPoints:trajectory inWindow:currentHostWindow duration:playbackDuration];
                 } else if (!suppressFastTrace && trajectory.count == 1) {
                     [strongSelf showTapMarkerAtScreenPoint:trajectory.firstObject.CGPointValue inWindow:currentHostWindow];
                 }
-                [AnClickFakeTouch playRecordedEvents:resolvedEvents];
+                [AnClickFakeTouch playRecordedEvents:resolvedEvents playbackSpeed:playbackSpeed];
             } else if (mode == AnClickActionModeTwoFingerTap) {
                 NSArray<NSValue *> *points = [strongSelf points:[strongSelf resolvedMultiTapPointsForTask:task] byApplyingJitterForTask:task];
                 if (points.count >= 2) {
@@ -13548,7 +13650,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    NSTimeInterval duration = [self durationForRecordedEvents:_recordedMacroEvents];
+    [self syncActionTimingFromFields];
+    double playbackSpeed = [self normalizedMacroPlaybackSpeed:_macroPlaybackSpeed];
+    NSTimeInterval duration = [self durationForRecordedEvents:_recordedMacroEvents playbackSpeed:playbackSpeed];
     [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
     NSArray<NSDictionary *> *recordedEvents = _hasRecordedMacroScreenSize
         ? [self resolvedRecordedEvents:_recordedMacroEvents fromScreenSize:_recordedMacroScreenSize]
@@ -13565,10 +13669,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         } else if (trajectory.count == 1) {
             [strongSelf showTapMarkerAtScreenPoint:trajectory.firstObject.CGPointValue inWindow:hostWindow];
         }
-        [AnClickFakeTouch playRecordedEvents:recordedEvents];
+        [AnClickFakeTouch playRecordedEvents:recordedEvents playbackSpeed:playbackSpeed];
         [strongSelf restorePanelAfterScreenDelay:duration + 0.15];
     });
-    _statusLabel.text = [NSString stringWithFormat:@"回放 %lu步", (unsigned long)_recordedMacroEvents.count];
+    _statusLabel.text = [NSString stringWithFormat:@"回放 %lu步 速%@", (unsigned long)_recordedMacroEvents.count, [self macroPlaybackSpeedSummaryText:playbackSpeed]];
 }
 
 - (void)beginSwipeRecording {

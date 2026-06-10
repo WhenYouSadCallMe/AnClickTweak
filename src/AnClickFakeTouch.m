@@ -21,6 +21,7 @@
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end duration:(NSTimeInterval)duration steps:(NSUInteger)steps;
 + (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration;
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events;
++ (void)playRecordedEvents:(NSArray<NSDictionary *> *)events playbackSpeed:(NSTimeInterval)playbackSpeed;
 + (void)twoFingerTapAtPoint:(CGPoint)point distance:(CGFloat)distance;
 + (void)pinchAtPoint:(CGPoint)center fromDistance:(CGFloat)fromDistance toDistance:(CGFloat)toDistance duration:(NSTimeInterval)duration;
 + (void)rotateAtPoint:(CGPoint)center radius:(CGFloat)radius startAngle:(CGFloat)startAngle endAngle:(CGFloat)endAngle duration:(NSTimeInterval)duration;
@@ -45,6 +46,8 @@ static const NSTimeInterval AnClickTurboDoubleTapDelay = 0.035;
 static const NSTimeInterval AnClickRecordedKeepAliveInterval = 1.0 / 30.0;
 static const NSTimeInterval AnClickRecordedMoveMinInterval = 1.0 / 90.0;
 static const NSTimeInterval AnClickRecordedPlaybackMaxDuration = 600.0;
+static const NSTimeInterval AnClickRecordedPlaybackMinSpeed = 0.1;
+static const NSTimeInterval AnClickRecordedPlaybackMaxSpeed = 10.0;
 static const NSUInteger AnClickRecordedPlaybackMaxEvents = 24000;
 static const NSUInteger AnClickRecordedPlaybackMaxScheduledBlocks = 30000;
 static const NSUInteger AnClickMultiTapMaxPoints = 32;
@@ -338,11 +341,23 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     });
 }
 
++ (NSTimeInterval)normalizedRecordedPlaybackSpeed:(NSTimeInterval)playbackSpeed {
+    if (!isfinite(playbackSpeed) || playbackSpeed <= 0.0) {
+        return 1.0;
+    }
+    return MIN(AnClickRecordedPlaybackMaxSpeed, MAX(AnClickRecordedPlaybackMinSpeed, playbackSpeed));
+}
+
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events {
+    [self playRecordedEvents:events playbackSpeed:1.0];
+}
+
++ (void)playRecordedEvents:(NSArray<NSDictionary *> *)events playbackSpeed:(NSTimeInterval)playbackSpeed {
     if (events.count == 0) {
         return;
     }
 
+    NSTimeInterval speed = [self normalizedRecordedPlaybackSpeed:playbackSpeed];
     NSInteger touchId = 6;
     BOOL touchIsDown = NO;
     NSTimeInterval previousTimestamp = 0;
@@ -370,10 +385,11 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
 
         NSInteger type = typeNumber.integerValue;
         CGPoint point = CGPointMake(xNumber.doubleValue, yNumber.doubleValue);
-        NSTimeInterval timestamp = MAX(0, timestampNumber.doubleValue);
-        if (timestamp > AnClickRecordedPlaybackMaxDuration) {
+        NSTimeInterval rawTimestamp = MAX(0, timestampNumber.doubleValue);
+        if (rawTimestamp > AnClickRecordedPlaybackMaxDuration) {
             break;
         }
+        NSTimeInterval timestamp = rawTimestamp / speed;
 
         if (touchIsDown && timestamp > previousTimestamp + AnClickRecordedKeepAliveInterval) {
             for (NSTimeInterval tick = previousTimestamp + AnClickRecordedKeepAliveInterval;
@@ -429,7 +445,7 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     }
 
     if (previousType == 0 || previousType == 1) {
-        NSTimeInterval cancelTimestamp = MIN(previousTimestamp + 0.08, AnClickRecordedPlaybackMaxDuration);
+        NSTimeInterval cancelTimestamp = MIN(previousTimestamp + 0.08, AnClickRecordedPlaybackMaxDuration / speed);
         NSInteger cancelTouchId = touchId;
         CGPoint cancelPoint = previousPoint;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(cancelTimestamp * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
