@@ -374,6 +374,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UILabel *_failureActionTaskCaptionLabel;
     UILabel *_recognitionRetryModeCaptionLabel;
     UILabel *_recognitionIntervalCaptionLabel;
+    NSMutableArray<UILabel *> *_successRecognitionActionDetailLabels;
+    NSMutableArray<UILabel *> *_failureRecognitionActionDetailLabels;
     UILabel *_collapsedRuntimeLabel;
     UITextField *_descriptionField;
     UITextField *_delayField;
@@ -2021,6 +2023,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_panelView addSubview:_recognitionRetryModeCaptionLabel];
     _recognitionIntervalCaptionLabel = [self configCaptionLabelWithText:@"识别间隔（毫秒）"];
     [_panelView addSubview:_recognitionIntervalCaptionLabel];
+    _successRecognitionActionDetailLabels = [NSMutableArray array];
+    _failureRecognitionActionDetailLabels = [NSMutableArray array];
+    for (NSUInteger i = 0; i < 4; i++) {
+        UILabel *successLabel = [self branchRecognitionDetailLabel];
+        [_successRecognitionActionDetailLabels addObject:successLabel];
+        [_panelView addSubview:successLabel];
+
+        UILabel *failureLabel = [self branchRecognitionDetailLabel];
+        [_failureRecognitionActionDetailLabels addObject:failureLabel];
+        [_panelView addSubview:failureLabel];
+    }
 
     _descriptionField = [[UITextField alloc] initWithFrame:CGRectMake(8, 142, panelWidth - 16, 34)];
     _descriptionField.placeholder = @"备注/动作说明";
@@ -3892,6 +3905,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _failureActionTaskCaptionLabel.hidden = YES;
     _recognitionRetryModeCaptionLabel.hidden = YES;
     _recognitionIntervalCaptionLabel.hidden = YES;
+    for (UILabel *label in _successRecognitionActionDetailLabels) {
+        label.hidden = YES;
+    }
+    for (UILabel *label in _failureRecognitionActionDetailLabels) {
+        label.hidden = YES;
+    }
     _captureButton.hidden = YES;
     _playButton.hidden = YES;
     _pickPointButton.hidden = YES;
@@ -4079,6 +4098,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [result addObject:views[i]];
         }
     }
+    [result addObjectsFromArray:_successRecognitionActionDetailLabels ?: @[]];
+    [result addObjectsFromArray:_failureRecognitionActionDetailLabels ?: @[]];
     [result addObjectsFromArray:_networkPostKeyFields ?: @[]];
     [result addObjectsFromArray:_networkPostValueFields ?: @[]];
     [result addObjectsFromArray:_networkPostValueModeButtons ?: @[]];
@@ -7440,19 +7461,70 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (![self modeIsRecognitionTask:successMode]) {
         return y;
     }
-    _successActionTaskField.hidden = YES;
-    _successActionTaskCaptionLabel.text = [NSString stringWithFormat:@"成功后%@配置", [self actionNameForMode:successMode]];
-    _successActionTaskCaptionLabel.hidden = NO;
-    _successActionTaskCaptionLabel.frame = CGRectMake(side, y, width, 20);
+    return [self layoutBranchRecognitionActionConfigForSuccess:YES
+                                                          mode:successMode
+                                                             y:y
+                                                          side:side
+                                                         width:width];
+}
 
-    NSDictionary *config = [self currentStoredRecognitionActionConfigForSuccess:YES mode:successMode];
-    NSString *summary = config ? [self recognitionConditionSummaryForTask:config] : @"未设置";
-    [_successActionTaskEditButton setTitle:[NSString stringWithFormat:@"%@ · %@", [self actionNameForMode:successMode], summary] forState:UIControlStateNormal];
-    [self styleNormalButton:_successActionTaskEditButton];
-    _successActionTaskEditButton.hidden = NO;
-    _successActionTaskEditButton.frame = CGRectMake(side, y + 22.0, width, 38);
-    [self updateButtonShadowPath:_successActionTaskEditButton];
-    return y + 68.0;
+- (NSArray<NSString *> *)branchRecognitionDetailRowsForConfig:(NSDictionary *)config mode:(AnClickActionMode)mode success:(BOOL)success {
+    NSString *prefix = success ? @"成功" : @"失败";
+    NSString *actionName = [self actionNameForMode:mode];
+    if (!config) {
+        return @[
+            [NSString stringWithFormat:@"%@后%@：未设置独立配置", prefix, actionName],
+            [NSString stringWithFormat:@"截图/文字/颜色：点下方按钮设置%@后%@", prefix, actionName],
+        ];
+    }
+
+    NSMutableArray<NSString *> *rows = [NSMutableArray array];
+    [rows addObject:[NSString stringWithFormat:@"条件：%@", [self recognitionConditionSummaryForTask:config] ?: @"未设置"]];
+    [rows addObject:[NSString stringWithFormat:@"节奏：%@", [self recognitionTimingFlowSummaryForTask:config] ?: @"首次0毫秒"]];
+    [rows addObject:[NSString stringWithFormat:@"成功：%@", [self recognitionBranchActionSummaryForTask:config success:YES includePrefix:NO] ?: @"无动作"]];
+    [rows addObject:[NSString stringWithFormat:@"失败：%@", [self recognitionBranchActionSummaryForTask:config success:NO includePrefix:NO] ?: @"无动作"]];
+    return rows;
+}
+
+- (CGFloat)layoutBranchRecognitionActionConfigForSuccess:(BOOL)success
+                                                   mode:(AnClickActionMode)mode
+                                                      y:(CGFloat)y
+                                                   side:(CGFloat)side
+                                                  width:(CGFloat)width {
+    UILabel *caption = success ? _successActionTaskCaptionLabel : _failureActionTaskCaptionLabel;
+    UIButton *button = success ? _successActionTaskEditButton : _failureActionTaskEditButton;
+    NSArray<UILabel *> *detailLabels = success ? _successRecognitionActionDetailLabels : _failureRecognitionActionDetailLabels;
+    NSString *prefix = success ? @"成功" : @"失败";
+    NSString *actionName = [self actionNameForMode:mode];
+    NSDictionary *config = [self currentStoredRecognitionActionConfigForSuccess:success mode:mode];
+    NSArray<NSString *> *rows = [self branchRecognitionDetailRowsForConfig:config mode:mode success:success];
+
+    caption.text = [NSString stringWithFormat:@"%@后%@独立配置", prefix, actionName];
+    caption.hidden = NO;
+    caption.frame = CGRectMake(side, y, width, 20);
+
+    CGFloat rowY = y + 24.0;
+    CGFloat rowHeight = 32.0;
+    NSUInteger visibleCount = MIN(detailLabels.count, rows.count);
+    for (NSUInteger i = 0; i < detailLabels.count; i++) {
+        UILabel *label = detailLabels[i];
+        BOOL visible = i < visibleCount;
+        label.hidden = !visible;
+        if (!visible) {
+            continue;
+        }
+        label.text = rows[i];
+        label.textColor = (i == 0 && !config) ? [self themeDangerColor] : [self themePrimaryTextColor];
+        label.frame = CGRectMake(side, rowY, width, rowHeight);
+        rowY += rowHeight + 4.0;
+    }
+
+    [button setTitle:[NSString stringWithFormat:@"%@%@后%@截图/参数", config ? @"编辑" : @"设置", prefix, actionName] forState:UIControlStateNormal];
+    [self styleNormalButton:button];
+    button.hidden = NO;
+    button.frame = CGRectMake(side, rowY + 4.0, width, 38);
+    [self updateButtonShadowPath:button];
+    return CGRectGetMaxY(button.frame) + 8.0;
 }
 
 - (CGFloat)layoutFailureActionTaskFieldAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
@@ -7460,19 +7532,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (![self modeIsRecognitionTask:failureMode]) {
         return y;
     }
-    _failureActionTaskField.hidden = YES;
-    _failureActionTaskCaptionLabel.text = [NSString stringWithFormat:@"失败后%@配置", [self actionNameForMode:failureMode]];
-    _failureActionTaskCaptionLabel.hidden = NO;
-    _failureActionTaskCaptionLabel.frame = CGRectMake(side, y, width, 20);
-
-    NSDictionary *config = [self currentStoredRecognitionActionConfigForSuccess:NO mode:failureMode];
-    NSString *summary = config ? [self recognitionConditionSummaryForTask:config] : @"未设置";
-    [_failureActionTaskEditButton setTitle:[NSString stringWithFormat:@"%@ · %@", [self actionNameForMode:failureMode], summary] forState:UIControlStateNormal];
-    [self styleNormalButton:_failureActionTaskEditButton];
-    _failureActionTaskEditButton.hidden = NO;
-    _failureActionTaskEditButton.frame = CGRectMake(side, y + 22.0, width, 38);
-    [self updateButtonShadowPath:_failureActionTaskEditButton];
-    return y + 68.0;
+    return [self layoutBranchRecognitionActionConfigForSuccess:NO
+                                                          mode:failureMode
+                                                             y:y
+                                                          side:side
+                                                         width:width];
 }
 
 - (CGFloat)layoutSingleField:(UITextField *)field caption:(UILabel *)caption title:(NSString *)title y:(CGFloat)y {
@@ -8414,7 +8478,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)selectImageActionMode:(UIButton *)sender {
     AnClickActionMode nextMode = [self normalizedImageActionMode:(AnClickActionMode)sender.tag];
-    if (nextMode != _imageActionMode) {
+    BOOL changed = nextMode != _imageActionMode;
+    if (changed) {
         [self clearSuccessBranchTargetSelection];
     }
     _imageActionMode = nextMode;
@@ -8422,7 +8487,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _failureActionMode != AnClickActionModeNetwork) {
         _networkPostBodyUsesOCRResult = NO;
     }
-    if (!_editingBranchRecognitionConfig && [self modeIsRecognitionTask:_imageActionMode]) {
+    if (!_editingBranchRecognitionConfig && !changed && [self modeIsRecognitionTask:_imageActionMode]) {
         [self beginEditingRecognitionActionConfigForSuccess:YES mode:_imageActionMode];
         return;
     }
@@ -8440,7 +8505,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
     AnClickActionMode nextMode = [self normalizedFailureActionMode:(AnClickActionMode)sender.tag];
-    if (nextMode != _failureActionMode) {
+    BOOL changed = nextMode != _failureActionMode;
+    if (changed) {
         [self clearFailureBranchTargetSelection];
     }
     _failureActionMode = nextMode;
@@ -8448,7 +8514,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _failureActionMode != AnClickActionModeNetwork) {
         _networkPostBodyUsesOCRResult = NO;
     }
-    if (!_editingBranchRecognitionConfig && [self modeIsRecognitionTask:_failureActionMode]) {
+    if (!_editingBranchRecognitionConfig && !changed && [self modeIsRecognitionTask:_failureActionMode]) {
         [self beginEditingRecognitionActionConfigForSuccess:NO mode:_failureActionMode];
         return;
     }
@@ -10578,6 +10644,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     label.layer.cornerRadius = 6.0;
     label.clipsToBounds = YES;
     label.userInteractionEnabled = NO;
+    return label;
+}
+
+- (UILabel *)branchRecognitionDetailLabel {
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
+    label.hidden = YES;
+    label.textColor = [self themePrimaryTextColor];
+    label.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+    label.numberOfLines = 2;
+    label.adjustsFontSizeToFitWidth = YES;
+    label.minimumScaleFactor = 0.72;
     return label;
 }
 
