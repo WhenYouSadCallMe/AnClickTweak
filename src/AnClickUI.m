@@ -346,10 +346,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_successOCRActionButton;
     UIButton *_successColorActionButton;
     UIButton *_successJumpActionButton;
+    UIButton *_successBranchCaptureButton;
+    UIButton *_successBranchColorPickButton;
     UIButton *_failureImageActionButton;
     UIButton *_failureOCRActionButton;
     UIButton *_failureColorActionButton;
     UIButton *_failureJumpActionButton;
+    UIButton *_failureBranchCaptureButton;
+    UIButton *_failureBranchColorPickButton;
     UIButton *_successJumpTaskButton;
     UIButton *_failureJumpTaskButton;
     NSArray<UIButton *> *_modeButtons;
@@ -397,6 +401,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UITextField *_recognitionIntervalField;
     UITextField *_thresholdField;
     UITextField *_ocrTargetField;
+    UITextField *_successBranchOCRTargetField;
+    UITextField *_failureBranchOCRTargetField;
     UITextField *_networkURLField;
     UITextField *_networkContainsField;
     UITextField *_networkFalseField;
@@ -427,7 +433,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIImage *_colorPickImage;
     NSMutableData *_colorPickPixelData;
     UIImageView *_previewView;
+    UIImageView *_successBranchPreviewView;
+    UIImageView *_failureBranchPreviewView;
     UIView *_colorPreviewView;
+    UIView *_successBranchColorPreviewView;
+    UIView *_failureBranchColorPreviewView;
     UIView *_tapMarkerView;
     UIView *_recognitionBoxView;
     UIView *_operationTraceView;
@@ -487,6 +497,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _longPressHolding;
     BOOL _pickingSuccessActionPoint;
     BOOL _templateSearchInProgress;
+    BOOL _branchTemplateCaptureActive;
+    BOOL _branchTemplateCaptureSuccess;
     BOOL _captureDrawingSelection;
     CGPoint _captureDragStartPoint;
     AnClickCaptureSelectionEditMode _captureSelectionEditMode;
@@ -610,12 +622,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     AnClickActionMode _imageActionMode;
     AnClickActionMode _failureActionMode;
     AnClickActionMode _editingBranchActionMode;
+    AnClickActionMode _branchTemplateCaptureMode;
+    AnClickActionMode _branchColorPickMode;
     AnClickOCRMode _ocrMode;
     AnClickOCRMatchMode _ocrMatchMode;
     UIWindow *_pointPickHostWindow;
     BOOL _panelSceneUnavailable;
     BOOL _editingBranchRecognitionConfig;
     BOOL _editingBranchRecognitionSuccess;
+    BOOL _branchColorPickActive;
+    BOOL _branchColorPickSuccess;
 }
 
 - (UIColor *)themeHighlightColor {
@@ -1878,6 +1894,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _failureJumpTaskButton = [self panelButtonWithTitle:@"选择任务" action:@selector(showFailureJumpTaskPicker)];
     [_panelView addSubview:_failureJumpTaskButton];
 
+    _successBranchCaptureButton = [self panelButtonWithTitle:@"成功后识图截图" action:@selector(beginSuccessBranchTemplateCapture)];
+    [_panelView addSubview:_successBranchCaptureButton];
+
+    _failureBranchCaptureButton = [self panelButtonWithTitle:@"失败后识图截图" action:@selector(beginFailureBranchTemplateCapture)];
+    [_panelView addSubview:_failureBranchCaptureButton];
+
+    _successBranchColorPickButton = [self panelButtonWithTitle:@"成功后取色" action:@selector(beginSuccessBranchColorPicking)];
+    [_panelView addSubview:_successBranchColorPickButton];
+
+    _failureBranchColorPickButton = [self panelButtonWithTitle:@"失败后取色" action:@selector(beginFailureBranchColorPicking)];
+    [_panelView addSubview:_failureBranchColorPickButton];
+
     _ocrContainsMatchModeButton = [self panelButtonWithTitle:@"文字匹配" action:@selector(selectOCRMatchMode:)];
     _ocrContainsMatchModeButton.tag = AnClickOCRMatchModeContains;
     _ocrContainsMatchModeButton.frame = CGRectMake(gap, 196, buttonWidth, 32);
@@ -2164,6 +2192,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_ocrTargetField addTarget:self action:@selector(ocrTargetEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_ocrTargetField];
 
+    _successBranchOCRTargetField = [[UITextField alloc] initWithFrame:CGRectZero];
+    _successBranchOCRTargetField.placeholder = @"成功后目标文字";
+    _successBranchOCRTargetField.keyboardType = UIKeyboardTypeDefault;
+    _successBranchOCRTargetField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _successBranchOCRTargetField.autocorrectionType = UITextAutocorrectionTypeNo;
+    [self applyObsidianInputStyleToField:_successBranchOCRTargetField placeholder:@"成功后目标文字" monospaced:NO];
+    [self configureConfigTextField:_successBranchOCRTargetField];
+    [_successBranchOCRTargetField addTarget:self action:@selector(branchOCRTargetChanged:) forControlEvents:UIControlEventEditingChanged];
+    [_successBranchOCRTargetField addTarget:self action:@selector(branchOCRTargetEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+    [_panelView addSubview:_successBranchOCRTargetField];
+
+    _failureBranchOCRTargetField = [[UITextField alloc] initWithFrame:CGRectZero];
+    _failureBranchOCRTargetField.placeholder = @"失败后目标文字";
+    _failureBranchOCRTargetField.keyboardType = UIKeyboardTypeDefault;
+    _failureBranchOCRTargetField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _failureBranchOCRTargetField.autocorrectionType = UITextAutocorrectionTypeNo;
+    [self applyObsidianInputStyleToField:_failureBranchOCRTargetField placeholder:@"失败后目标文字" monospaced:NO];
+    [self configureConfigTextField:_failureBranchOCRTargetField];
+    [_failureBranchOCRTargetField addTarget:self action:@selector(branchOCRTargetChanged:) forControlEvents:UIControlEventEditingChanged];
+    [_failureBranchOCRTargetField addTarget:self action:@selector(branchOCRTargetEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+    [_panelView addSubview:_failureBranchOCRTargetField];
+
     _networkURLField = [[UITextField alloc] initWithFrame:CGRectZero];
     _networkURLField.placeholder = @"https://example.com";
     _networkURLField.keyboardType = UIKeyboardTypeURL;
@@ -2258,12 +2308,46 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _previewView.hidden = YES;
     [_panelView addSubview:_previewView];
 
+    _successBranchPreviewView = [[UIImageView alloc] initWithFrame:CGRectZero];
+    _successBranchPreviewView.contentMode = UIViewContentModeScaleAspectFit;
+    _successBranchPreviewView.clipsToBounds = YES;
+    _successBranchPreviewView.backgroundColor = [self themeControlFillColor];
+    _successBranchPreviewView.layer.cornerRadius = 4;
+    _successBranchPreviewView.layer.borderWidth = 1;
+    _successBranchPreviewView.layer.borderColor = [self themeSeparatorColor].CGColor;
+    _successBranchPreviewView.hidden = YES;
+    [_panelView addSubview:_successBranchPreviewView];
+
+    _failureBranchPreviewView = [[UIImageView alloc] initWithFrame:CGRectZero];
+    _failureBranchPreviewView.contentMode = UIViewContentModeScaleAspectFit;
+    _failureBranchPreviewView.clipsToBounds = YES;
+    _failureBranchPreviewView.backgroundColor = [self themeControlFillColor];
+    _failureBranchPreviewView.layer.cornerRadius = 4;
+    _failureBranchPreviewView.layer.borderWidth = 1;
+    _failureBranchPreviewView.layer.borderColor = [self themeSeparatorColor].CGColor;
+    _failureBranchPreviewView.hidden = YES;
+    [_panelView addSubview:_failureBranchPreviewView];
+
     _colorPreviewView = [[UIView alloc] initWithFrame:CGRectZero];
     _colorPreviewView.hidden = YES;
     _colorPreviewView.layer.cornerRadius = 6;
     _colorPreviewView.layer.borderWidth = 1;
     _colorPreviewView.layer.borderColor = [self themeSeparatorColor].CGColor;
     [_panelView addSubview:_colorPreviewView];
+
+    _successBranchColorPreviewView = [[UIView alloc] initWithFrame:CGRectZero];
+    _successBranchColorPreviewView.hidden = YES;
+    _successBranchColorPreviewView.layer.cornerRadius = 6;
+    _successBranchColorPreviewView.layer.borderWidth = 1;
+    _successBranchColorPreviewView.layer.borderColor = [self themeSeparatorColor].CGColor;
+    [_panelView addSubview:_successBranchColorPreviewView];
+
+    _failureBranchColorPreviewView = [[UIView alloc] initWithFrame:CGRectZero];
+    _failureBranchColorPreviewView.hidden = YES;
+    _failureBranchColorPreviewView.layer.cornerRadius = 6;
+    _failureBranchColorPreviewView.layer.borderWidth = 1;
+    _failureBranchColorPreviewView.layer.borderColor = [self themeSeparatorColor].CGColor;
+    [_panelView addSubview:_failureBranchColorPreviewView];
     [self installEditorContentSubviewsInScrollView];
     [self refreshTemplatePreview];
     [self refreshTaskList];
@@ -3962,6 +4046,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _successColorActionButton.hidden = YES;
     _successJumpActionButton.hidden = YES;
     _successJumpTaskButton.hidden = YES;
+    _successBranchCaptureButton.hidden = YES;
+    _successBranchColorPickButton.hidden = YES;
     _failureNoneActionButton.hidden = YES;
     _failureTapActionButton.hidden = YES;
     _failureDoubleTapActionButton.hidden = YES;
@@ -3972,6 +4058,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _failureColorActionButton.hidden = YES;
     _failureJumpActionButton.hidden = YES;
     _failureJumpTaskButton.hidden = YES;
+    _failureBranchCaptureButton.hidden = YES;
+    _failureBranchColorPickButton.hidden = YES;
     _randomDelayModeButton.hidden = YES;
     _ocrContainsMatchModeButton.hidden = YES;
     _ocrRegexMatchModeButton.hidden = YES;
@@ -4002,13 +4090,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _failureActionTaskField.hidden = YES;
     _recognitionIntervalField.hidden = YES;
     _ocrTargetField.hidden = YES;
+    _successBranchOCRTargetField.hidden = YES;
+    _failureBranchOCRTargetField.hidden = YES;
     _networkURLField.hidden = YES;
     _networkContainsField.hidden = YES;
     _networkFalseField.hidden = YES;
     _networkPostBodyField.hidden = YES;
     [self hideNetworkPostPairControls];
     _previewView.hidden = YES;
+    _successBranchPreviewView.hidden = YES;
+    _failureBranchPreviewView.hidden = YES;
     _colorPreviewView.hidden = YES;
+    _successBranchColorPreviewView.hidden = YES;
+    _failureBranchColorPreviewView.hidden = YES;
     _editorContentScrollView.hidden = !visible;
     [self hideEditorSectionViews];
     if (!visible) {
@@ -4079,6 +4173,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _successColorActionButton,
         _successJumpActionButton,
         _successJumpTaskButton,
+        _successBranchCaptureButton,
+        _successBranchColorPickButton,
         _failureNoneActionButton,
         _failureTapActionButton,
         _failureDoubleTapActionButton,
@@ -4092,6 +4188,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _failureColorActionButton,
         _failureJumpActionButton,
         _failureJumpTaskButton,
+        _failureBranchCaptureButton,
+        _failureBranchColorPickButton,
         _randomDelayModeButton,
         _ocrContainsMatchModeButton,
         _ocrRegexMatchModeButton,
@@ -4121,12 +4219,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _recognitionIntervalField,
         _thresholdField,
         _ocrTargetField,
+        _successBranchOCRTargetField,
+        _failureBranchOCRTargetField,
         _networkURLField,
         _networkContainsField,
         _networkFalseField,
         _networkPostBodyField,
         _previewView,
+        _successBranchPreviewView,
+        _failureBranchPreviewView,
         _colorPreviewView,
+        _successBranchColorPreviewView,
+        _failureBranchColorPreviewView,
     };
     NSUInteger count = sizeof(views) / sizeof(UIView *);
     for (NSUInteger i = 0; i < count; i++) {
@@ -6528,6 +6632,38 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _ocrTargetText = [self trimmedActionDescription:_ocrTargetField.text];
 }
 
+- (void)branchOCRTargetChanged:(UITextField *)textField {
+    BOOL success = textField == _successBranchOCRTargetField;
+    AnClickActionMode mode = success
+        ? [self normalizedImageActionMode:_imageActionMode]
+        : [self normalizedFailureActionMode:_failureActionMode];
+    if (mode != AnClickActionModeOCR) {
+        return;
+    }
+    NSMutableDictionary *config = [self ensureMutableBranchActionConfigForSuccess:success mode:mode];
+    if (!config) {
+        return;
+    }
+    NSString *target = [self trimmedActionDescription:textField.text];
+    if (target.length > 0) {
+        config[@"ocrText"] = target;
+    } else {
+        [config removeObjectForKey:@"ocrText"];
+    }
+    config[@"ocrMode"] = @(AnClickOCRModeAppleVision);
+    config[@"ocrBackendVersion"] = @1;
+    config[@"ocrMatchMode"] = @(AnClickOCRMatchModeContains);
+    config[@"useMatchPoint"] = @YES;
+    [self storeBranchActionConfig:config success:success mode:mode];
+    [self refreshTaskList];
+    [self updateStatusForCurrentConfig];
+}
+
+- (void)branchOCRTargetEditingDidEnd:(UITextField *)textField {
+    [self branchOCRTargetChanged:textField];
+    [self refreshEditorConfigControls];
+}
+
 - (void)syncNetworkFieldsFromEditor {
     if (_networkURLField) {
         _networkURL = [self trimmedActionDescription:_networkURLField.text];
@@ -6838,6 +6974,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _successColorActionButton.hidden = YES;
     _successJumpActionButton.hidden = YES;
     _successJumpTaskButton.hidden = YES;
+    _successBranchCaptureButton.hidden = YES;
+    _successBranchColorPickButton.hidden = YES;
     _failureNoneActionButton.hidden = YES;
     _failureTapActionButton.hidden = YES;
     _failureDoubleTapActionButton.hidden = YES;
@@ -6851,6 +6989,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _failureColorActionButton.hidden = YES;
     _failureJumpActionButton.hidden = YES;
     _failureJumpTaskButton.hidden = YES;
+    _failureBranchCaptureButton.hidden = YES;
+    _failureBranchColorPickButton.hidden = YES;
     _randomDelayModeButton.hidden = YES;
     _ocrContainsMatchModeButton.hidden = YES;
     _ocrRegexMatchModeButton.hidden = YES;
@@ -6882,13 +7022,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _recognitionIntervalField.hidden = YES;
     _thresholdField.hidden = YES;
     _ocrTargetField.hidden = YES;
+    _successBranchOCRTargetField.hidden = YES;
+    _failureBranchOCRTargetField.hidden = YES;
     _networkURLField.hidden = YES;
     _networkContainsField.hidden = YES;
     _networkFalseField.hidden = YES;
     _networkPostBodyField.hidden = YES;
     [self hideNetworkPostPairControls];
     _previewView.hidden = YES;
+    _successBranchPreviewView.hidden = YES;
+    _failureBranchPreviewView.hidden = YES;
     _colorPreviewView.hidden = YES;
+    _successBranchColorPreviewView.hidden = YES;
+    _failureBranchColorPreviewView.hidden = YES;
     _saveTaskButton.hidden = YES;
     _editorBackButton.hidden = YES;
     _cancelEditButton.hidden = YES;
@@ -7468,13 +7614,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (BOOL)currentFailureActionNeedsPoint {
+    AnClickActionMode failureMode = [self normalizedFailureActionMode:_failureActionMode];
     return [self currentActionIsRecognitionMode] &&
-        [self failureActionModeNeedsPoint:[self normalizedFailureActionMode:_failureActionMode]];
+        [self failureActionModeNeedsPoint:failureMode] &&
+        [self currentStoredBranchActionConfigForSuccess:NO mode:failureMode] == nil;
 }
 
 - (BOOL)currentSuccessActionNeedsPoint {
+    AnClickActionMode successMode = [self normalizedImageActionMode:_imageActionMode];
     return [self currentActionIsRecognitionMode] &&
-        [self recognitionActionModeNeedsPoint:[self normalizedImageActionMode:_imageActionMode]];
+        [self recognitionActionModeNeedsPoint:successMode] &&
+        [self currentStoredBranchActionConfigForSuccess:YES mode:successMode] == nil;
 }
 
 - (NSString *)successActionPointSummary {
@@ -7529,6 +7679,76 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                   y:y
                                                side:side
                                               width:width];
+}
+
+- (UIImage *)branchTemplateImageForConfig:(NSDictionary *)config {
+    NSString *path = [config[@"templatePath"] isKindOfClass:NSString.class] ? config[@"templatePath"] : nil;
+    return (path.length > 0 && [[NSFileManager defaultManager] fileExistsAtPath:path]) ? [UIImage imageWithContentsOfFile:path] : nil;
+}
+
+- (UIColor *)branchColorForConfig:(NSDictionary *)config {
+    NSArray<NSDictionary *> *points = [self normalizedColorPatternPointsForTask:config ?: @{}];
+    NSDictionary *anchor = points.firstObject;
+    return [self uiColorForColorSample:anchor fallback:[[self themeControlFillColor] colorWithAlphaComponent:1.0]];
+}
+
+- (NSString *)branchColorButtonTitleForConfig:(NSDictionary *)config prefix:(NSString *)prefix {
+    NSString *summary = config ? [self colorPatternSummaryForTask:config] : @"未取色";
+    return [NSString stringWithFormat:@"%@取色 %@", prefix, summary];
+}
+
+- (CGFloat)layoutBranchInlineRecognitionConfigForSuccess:(BOOL)success
+                                                   mode:(AnClickActionMode)mode
+                                                 config:(NSDictionary *)config
+                                                      y:(CGFloat)y
+                                                   side:(CGFloat)side
+                                                  width:(CGFloat)width {
+    NSString *prefix = success ? @"成功后" : @"失败后";
+    if (mode == AnClickActionModeImage) {
+        UIButton *captureButton = success ? _successBranchCaptureButton : _failureBranchCaptureButton;
+        UIImageView *previewView = success ? _successBranchPreviewView : _failureBranchPreviewView;
+        UIImage *image = [self branchTemplateImageForConfig:config];
+        [captureButton setTitle:(image ? [NSString stringWithFormat:@"%@重新截图", prefix] : [NSString stringWithFormat:@"%@识图截图", prefix])
+                       forState:UIControlStateNormal];
+        [self styleSegmentButton:captureButton selected:YES];
+        captureButton.hidden = NO;
+        captureButton.frame = CGRectMake(side, y, width, 38.0);
+        [self updateButtonShadowPath:captureButton];
+
+        previewView.image = image;
+        previewView.hidden = NO;
+        previewView.frame = CGRectMake(side, y + 46.0, width, 54.0);
+        return y + 108.0;
+    }
+
+    if (mode == AnClickActionModeOCR) {
+        UITextField *field = success ? _successBranchOCRTargetField : _failureBranchOCRTargetField;
+        if (!field.isFirstResponder) {
+            field.text = [self trimmedActionDescription:config[@"ocrText"]] ?: @"";
+        }
+        [self setStyledPlaceholder:[NSString stringWithFormat:@"%@目标文字", prefix] forField:field alpha:0.32];
+        field.hidden = NO;
+        field.frame = CGRectMake(side, y, width, 40.0);
+        return y + 48.0;
+    }
+
+    if (mode == AnClickActionModeColor) {
+        UIView *swatchView = success ? _successBranchColorPreviewView : _failureBranchColorPreviewView;
+        UIButton *pickButton = success ? _successBranchColorPickButton : _failureBranchColorPickButton;
+        CGFloat swatchSize = 40.0;
+        swatchView.hidden = NO;
+        swatchView.frame = CGRectMake(side, y, swatchSize, swatchSize);
+        swatchView.backgroundColor = [self branchColorForConfig:config];
+
+        [pickButton setTitle:[self branchColorButtonTitleForConfig:config prefix:prefix] forState:UIControlStateNormal];
+        [self styleNormalButton:pickButton];
+        pickButton.hidden = NO;
+        pickButton.frame = CGRectMake(side + swatchSize + 10.0, y, width - swatchSize - 10.0, 40.0);
+        [self updateButtonShadowPath:pickButton];
+        return y + 48.0;
+    }
+
+    return y;
 }
 
 - (NSArray<NSString *> *)branchActionDetailRowsForConfig:(NSDictionary *)config mode:(AnClickActionMode)mode success:(BOOL)success {
@@ -7599,6 +7819,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     caption.frame = CGRectMake(side, y, width, 20);
 
     CGFloat rowY = y + 24.0;
+    rowY = [self layoutBranchInlineRecognitionConfigForSuccess:success
+                                                          mode:mode
+                                                        config:config
+                                                             y:rowY
+                                                          side:side
+                                                         width:width];
     CGFloat rowHeight = 32.0;
     NSUInteger visibleCount = MIN(detailLabels.count, rows.count);
     for (NSUInteger i = 0; i < detailLabels.count; i++) {
@@ -8582,12 +8808,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _failureActionMode != AnClickActionModeNetwork) {
         _networkPostBodyUsesOCRResult = NO;
     }
-    if (!_editingBranchRecognitionConfig && _imageActionMode != AnClickActionModeJump) {
-        [self refreshEditorConfigControls];
-        [self updateStatusForCurrentConfig];
-        [self autosaveSelectedTaskIfPossible];
-        [self beginEditingRecognitionActionConfigForSuccess:YES mode:_imageActionMode];
-        return;
+    if ([self modeIsRecognitionTask:_imageActionMode]) {
+        [self ensureMutableBranchActionConfigForSuccess:YES mode:_imageActionMode];
     }
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
@@ -8612,14 +8834,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _failureActionMode != AnClickActionModeNetwork) {
         _networkPostBodyUsesOCRResult = NO;
     }
-    if (!_editingBranchRecognitionConfig &&
-        _failureActionMode != AnClickActionModeNone &&
-        _failureActionMode != AnClickActionModeJump) {
-        [self refreshEditorConfigControls];
-        [self updateStatusForCurrentConfig];
-        [self autosaveSelectedTaskIfPossible];
-        [self beginEditingRecognitionActionConfigForSuccess:NO mode:_failureActionMode];
-        return;
+    if ([self modeIsRecognitionTask:_failureActionMode]) {
+        [self ensureMutableBranchActionConfigForSuccess:NO mode:_failureActionMode];
     }
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
@@ -8633,8 +8849,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     [self dismissConfigKeyboardAndSync];
     AnClickActionMode successMode = [self normalizedImageActionMode:_imageActionMode];
-    if (![self modeIsRecognitionTask:successMode]) {
-        _statusLabel.text = @"先选择成功后识图/识字/识色";
+    if (successMode == AnClickActionModeJump) {
+        _statusLabel.text = @"跳转任务请在下方选择目标";
         return;
     }
 
@@ -8648,8 +8864,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     [self dismissConfigKeyboardAndSync];
     AnClickActionMode failureMode = [self normalizedFailureActionMode:_failureActionMode];
-    if (![self modeIsRecognitionTask:failureMode]) {
-        _statusLabel.text = @"先选择失败后识图/识字/识色";
+    if (failureMode == AnClickActionModeNone) {
+        _statusLabel.text = @"先选择失败后动作";
+        return;
+    }
+    if (failureMode == AnClickActionModeJump) {
+        _statusLabel.text = @"跳转任务请在下方选择目标";
         return;
     }
 
@@ -9037,23 +9257,29 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)beginTemplateCapture {
     if (![self panelCanUseCurrentScene]) {
+        _branchTemplateCaptureActive = NO;
+        _branchTemplateCaptureMode = AnClickActionModeNone;
         return;
     }
-    if (_actionMode == AnClickActionModeNone) {
-        _actionMode = AnClickActionModeImage;
-        _imageUsesMatchPoint = YES;
-        [self refreshModeButtons];
-        [self refreshEditorConfigControls];
-    }
-    if (_actionMode != AnClickActionModeImage) {
-        _actionMode = AnClickActionModeImage;
-        _imageUsesMatchPoint = YES;
-        [self refreshModeButtons];
-        [self refreshEditorConfigControls];
+    if (!_branchTemplateCaptureActive) {
+        if (_actionMode == AnClickActionModeNone) {
+            _actionMode = AnClickActionModeImage;
+            _imageUsesMatchPoint = YES;
+            [self refreshModeButtons];
+            [self refreshEditorConfigControls];
+        }
+        if (_actionMode != AnClickActionModeImage) {
+            _actionMode = AnClickActionModeImage;
+            _imageUsesMatchPoint = YES;
+            [self refreshModeButtons];
+            [self refreshEditorConfigControls];
+        }
     }
 
     UIWindow *hostWindow = [self hostWindow];
     if (!hostWindow) {
+        _branchTemplateCaptureActive = NO;
+        _branchTemplateCaptureMode = AnClickActionModeNone;
         _statusLabel.text = @"无窗口";
         return;
     }
@@ -9069,12 +9295,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         UIWindow *capturedWindow = nil;
         strongSelf->_captureSnapshot = [AnClickCore captureCurrentWindowImageWithWindow:&capturedWindow];
         if (!strongSelf->_captureSnapshot.CGImage) {
+            strongSelf->_branchTemplateCaptureActive = NO;
+            strongSelf->_branchTemplateCaptureMode = AnClickActionModeNone;
             [strongSelf restorePanelAfterExternalTap];
             strongSelf->_statusLabel.text = @"截图失败";
             return;
         }
         UIWindow *overlayWindow = capturedWindow ?: hostWindow;
         if (![strongSelf capturedImage:strongSelf->_captureSnapshot matchesWindow:overlayWindow]) {
+            strongSelf->_branchTemplateCaptureActive = NO;
+            strongSelf->_branchTemplateCaptureMode = AnClickActionModeNone;
             [strongSelf restorePanelAfterExternalTap];
             strongSelf->_captureSnapshot = nil;
             strongSelf->_statusLabel.text = @"截图方向异常 请重试";
@@ -9484,6 +9714,29 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIImage *templateImage = [UIImage imageWithCGImage:croppedRef scale:scale orientation:_captureSnapshot.imageOrientation];
     CGImageRelease(croppedRef);
     NSData *pngData = UIImagePNGRepresentation(templateImage);
+    if (_branchTemplateCaptureActive) {
+        BOOL success = _branchTemplateCaptureSuccess;
+        AnClickActionMode mode = _branchTemplateCaptureMode;
+        NSString *path = [self newTemplatePath];
+        BOOL saved = [pngData writeToFile:path atomically:YES];
+        if (saved) {
+            NSMutableDictionary *config = [self ensureMutableBranchActionConfigForSuccess:success mode:mode];
+            if (config) {
+                config[@"templatePath"] = path;
+                config[@"useMatchPoint"] = @YES;
+                if (![config[@"threshold"] respondsToSelector:@selector(doubleValue)]) {
+                    config[@"threshold"] = @0.80;
+                }
+                [self storeBranchActionConfig:config success:success mode:mode];
+            }
+        }
+        [self finishTemplateCapture];
+        [self refreshEditorConfigControls];
+        [self refreshTaskList];
+        [self updateStatusForCurrentConfig];
+        _statusLabel.text = saved ? (success ? @"成功后识图模板已保存" : @"失败后识图模板已保存") : @"保存失败";
+        return;
+    }
     BOOL saved = [pngData writeToFile:[self writableTemplatePath] atomically:YES];
     [self finishTemplateCapture];
     [self refreshTemplatePreview];
@@ -9493,6 +9746,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)cancelTemplateCapture {
+    _branchTemplateCaptureActive = NO;
+    _branchTemplateCaptureMode = AnClickActionModeNone;
     [self finishTemplateCapture];
     _statusLabel.text = @"取消";
 }
@@ -9505,6 +9760,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _selectionView = nil;
     _captureSnapshot = nil;
     _captureDrawingSelection = NO;
+    _branchTemplateCaptureActive = NO;
+    _branchTemplateCaptureMode = AnClickActionModeNone;
     [self restorePanelAfterExternalTap];
 }
 
@@ -9687,6 +9944,36 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             strongSelf->_recognitionBoxView = nil;
         }
     });
+}
+
+- (void)beginSuccessBranchTemplateCapture {
+    [self beginBranchTemplateCaptureForSuccess:YES];
+}
+
+- (void)beginFailureBranchTemplateCapture {
+    [self beginBranchTemplateCaptureForSuccess:NO];
+}
+
+- (void)beginBranchTemplateCaptureForSuccess:(BOOL)success {
+    if (![self currentActionIsRecognitionMode]) {
+        _statusLabel.text = success ? @"识别动作才有成功后截图" : @"识别动作才有失败后截图";
+        return;
+    }
+    AnClickActionMode mode = success
+        ? [self normalizedImageActionMode:_imageActionMode]
+        : [self normalizedFailureActionMode:_failureActionMode];
+    if (mode != AnClickActionModeImage) {
+        _statusLabel.text = success ? @"先选择成功后识图" : @"先选择失败后识图";
+        return;
+    }
+    if (![self ensureMutableBranchActionConfigForSuccess:success mode:mode]) {
+        _statusLabel.text = @"先保存主任务";
+        return;
+    }
+    _branchTemplateCaptureActive = YES;
+    _branchTemplateCaptureSuccess = success;
+    _branchTemplateCaptureMode = mode;
+    [self beginTemplateCapture];
 }
 
 - (void)showMultiTapMarkersForScreenPoints:(NSArray<NSValue *> *)points inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
@@ -11767,6 +12054,58 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     NSDictionary *ownerTask = _taskItems[(NSUInteger)_selectedTaskIndex];
     return [self branchActionConfigForTask:ownerTask success:success expectedMode:mode];
+}
+
+- (NSMutableDictionary *)ensureMutableBranchActionConfigForSuccess:(BOOL)success mode:(AnClickActionMode)mode {
+    if (![self isSelectableActionMode:mode] ||
+        mode == AnClickActionModeJump ||
+        _selectedTaskIndex < 0 ||
+        _selectedTaskIndex >= (NSInteger)_taskItems.count) {
+        return nil;
+    }
+
+    NSMutableDictionary *ownerTask = [_taskItems[(NSUInteger)_selectedTaskIndex] mutableCopy];
+    if (!ownerTask) {
+        ownerTask = [NSMutableDictionary dictionary];
+    }
+
+    NSDictionary *existingConfig = [self branchActionConfigForTask:ownerTask success:success expectedMode:mode];
+    if (!existingConfig && [self modeIsRecognitionTask:mode]) {
+        existingConfig = [self legacyRecognitionActionTaskForTask:ownerTask success:success expectedMode:mode];
+    }
+
+    NSMutableDictionary *config = existingConfig ? [existingConfig mutableCopy] : [self draftActionTaskForMode:mode];
+    config[@"mode"] = @(mode);
+    ownerTask[[self branchActionConfigKeyForSuccess:success]] = config;
+    if ([self modeIsRecognitionTask:mode]) {
+        ownerTask[[self recognitionActionConfigKeyForSuccess:success]] = config;
+    }
+    [ownerTask removeObjectForKey:success ? @"successActionTaskIndex" : @"failureActionTaskIndex"];
+    _taskItems[(NSUInteger)_selectedTaskIndex] = ownerTask;
+    [self persistCurrentTaskList];
+    [self refreshCollapsedButtonTitle];
+    return config;
+}
+
+- (void)storeBranchActionConfig:(NSMutableDictionary *)config success:(BOOL)success mode:(AnClickActionMode)mode {
+    if (!config ||
+        _selectedTaskIndex < 0 ||
+        _selectedTaskIndex >= (NSInteger)_taskItems.count) {
+        return;
+    }
+    config[@"mode"] = @(mode);
+    NSMutableDictionary *ownerTask = [_taskItems[(NSUInteger)_selectedTaskIndex] mutableCopy];
+    if (!ownerTask) {
+        ownerTask = [NSMutableDictionary dictionary];
+    }
+    ownerTask[[self branchActionConfigKeyForSuccess:success]] = [config mutableCopy];
+    if ([self modeIsRecognitionTask:mode]) {
+        ownerTask[[self recognitionActionConfigKeyForSuccess:success]] = [config mutableCopy];
+    }
+    [ownerTask removeObjectForKey:success ? @"successActionTaskIndex" : @"failureActionTaskIndex"];
+    _taskItems[(NSUInteger)_selectedTaskIndex] = ownerTask;
+    [self persistCurrentTaskList];
+    [self refreshCollapsedButtonTitle];
 }
 
 - (void)beginEditingRecognitionActionConfigForSuccess:(BOOL)success mode:(AnClickActionMode)mode {
@@ -14963,6 +15302,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)beginColorPicking {
     UIWindow *hostWindow = [self hostWindow];
     if (!hostWindow) {
+        _branchColorPickActive = NO;
+        _branchColorPickMode = AnClickActionModeNone;
         _statusLabel.text = @"无窗口";
         return;
     }
@@ -14977,12 +15318,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         UIWindow *capturedWindow = nil;
         UIImage *image = [AnClickCore captureCurrentWindowImageWithWindow:&capturedWindow];
         if (!image.CGImage) {
+            strongSelf->_branchColorPickActive = NO;
+            strongSelf->_branchColorPickMode = AnClickActionModeNone;
             strongSelf->_statusLabel.text = @"截图失败";
             [strongSelf restorePanelAfterExternalTap];
             return;
         }
         UIWindow *overlayWindow = capturedWindow ?: hostWindow;
         if (![strongSelf capturedImage:image matchesWindow:overlayWindow]) {
+            strongSelf->_branchColorPickActive = NO;
+            strongSelf->_branchColorPickMode = AnClickActionModeNone;
             strongSelf->_statusLabel.text = @"截图方向异常 请重试";
             [strongSelf showToast:strongSelf->_statusLabel.text];
             [strongSelf restorePanelAfterExternalTap];
@@ -14990,6 +15335,36 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
         [strongSelf showColorPickOverlayWithImage:image hostWindow:overlayWindow];
     });
+}
+
+- (void)beginSuccessBranchColorPicking {
+    [self beginBranchColorPickingForSuccess:YES];
+}
+
+- (void)beginFailureBranchColorPicking {
+    [self beginBranchColorPickingForSuccess:NO];
+}
+
+- (void)beginBranchColorPickingForSuccess:(BOOL)success {
+    if (![self currentActionIsRecognitionMode]) {
+        _statusLabel.text = success ? @"识别动作才有成功后取色" : @"识别动作才有失败后取色";
+        return;
+    }
+    AnClickActionMode mode = success
+        ? [self normalizedImageActionMode:_imageActionMode]
+        : [self normalizedFailureActionMode:_failureActionMode];
+    if (mode != AnClickActionModeColor) {
+        _statusLabel.text = success ? @"先选择成功后识色" : @"先选择失败后识色";
+        return;
+    }
+    if (![self ensureMutableBranchActionConfigForSuccess:success mode:mode]) {
+        _statusLabel.text = @"先保存主任务";
+        return;
+    }
+    _branchColorPickActive = YES;
+    _branchColorPickSuccess = success;
+    _branchColorPickMode = mode;
+    [self beginColorPicking];
 }
 
 - (void)showColorPickOverlayWithImage:(UIImage *)image hostWindow:(UIWindow *)hostWindow {
@@ -15348,12 +15723,38 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _selectedColorPickSampleIndex = -1;
     _hasPendingColorPickPoint = NO;
     [self clearColorPickPixelData];
+    _branchColorPickActive = NO;
+    _branchColorPickMode = AnClickActionModeNone;
     [self restorePanelAfterExternalTap];
 }
 
 - (void)confirmColorPicking {
     if (_pendingColorPickSamples.count == 0) {
         _colorPickInfoLabel.text = @"先点选颜色";
+        return;
+    }
+    if (_branchColorPickActive) {
+        BOOL success = _branchColorPickSuccess;
+        AnClickActionMode mode = _branchColorPickMode;
+        NSArray<NSDictionary *> *samples = [self colorSamplesForPersistence:_pendingColorPickSamples];
+        NSDictionary *anchor = samples.firstObject;
+        NSMutableDictionary *config = [self ensureMutableBranchActionConfigForSuccess:success mode:mode];
+        if (config && anchor) {
+            config[@"colorPoints"] = samples;
+            config[@"colorPointScreenSize"] = [self currentScreenCoordinateSizeValue];
+            config[@"colorRed"] = @([anchor[@"red"] integerValue]);
+            config[@"colorGreen"] = @([anchor[@"green"] integerValue]);
+            config[@"colorBlue"] = @([anchor[@"blue"] integerValue]);
+            if (![config[@"colorTolerance"] respondsToSelector:@selector(doubleValue)]) {
+                config[@"colorTolerance"] = @18.0;
+            }
+            [self storeBranchActionConfig:config success:success mode:mode];
+        }
+        [self finishColorPickingOverlay];
+        [self refreshEditorConfigControls];
+        [self refreshTaskList];
+        [self updateStatusForCurrentConfig];
+        _statusLabel.text = success ? @"成功后识色已保存" : @"失败后识色已保存";
         return;
     }
     [self applyTargetColorSamples:_pendingColorPickSamples];
@@ -15365,6 +15766,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)cancelColorPicking {
+    _branchColorPickActive = NO;
+    _branchColorPickMode = AnClickActionModeNone;
     [self finishColorPickingOverlay];
     _statusLabel.text = @"取消取色";
 }
