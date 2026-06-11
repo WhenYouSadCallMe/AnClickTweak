@@ -13677,13 +13677,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                   success:success
                                                  inWindow:currentHostWindow
                                                generation:runGeneration
-                                               completion:^(__unused NSTimeInterval actionDelay) {
+                                               completion:^(NSTimeInterval actionDelay) {
             if (![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"]) {
                 return;
             }
-            UIWindow *nextHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:currentHostWindow];
-            NSUInteger nextIndex = [strongSelf nextTaskIndexAfterRecognitionTask:task currentIndex:index success:success];
-            [strongSelf continueTaskRunToIndex:nextIndex inWindow:nextHostWindow generation:runGeneration];
+            __weak typeof(strongSelf) nestedWeakSelf = strongSelf;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(0.0, actionDelay) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                __strong typeof(nestedWeakSelf) nestedSelf = nestedWeakSelf;
+                if (!nestedSelf ||
+                    ![nestedSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"]) {
+                    return;
+                }
+                UIWindow *nextHostWindow = [nestedSelf currentUsableHostWindowForTaskRunFallback:currentHostWindow];
+                NSUInteger nextIndex = [nestedSelf nextTaskIndexAfterRecognitionTask:task currentIndex:index success:success];
+                [nestedSelf continueTaskRunToIndex:nextIndex inWindow:nextHostWindow generation:runGeneration];
+            });
         }];
     });
 }
