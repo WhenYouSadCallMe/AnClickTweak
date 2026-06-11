@@ -287,6 +287,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)untrackNetworkTask:(NSURLSessionDataTask *)task;
 - (void)cancelActiveNetworkTasks;
 - (void)stopTaskRunWithStatus:(NSString *)status showToast:(BOOL)showToast;
+- (NSTimeInterval)estimatedActionDurationForTask:(NSDictionary *)task success:(BOOL)success actionMode:(AnClickActionMode)actionMode depth:(NSUInteger)depth;
+- (NSTimeInterval)estimatedTaskDurationForTask:(NSDictionary *)task depth:(NSUInteger)depth;
 @end
 
 @implementation AnClickUI {
@@ -8013,15 +8015,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     NSMutableArray<NSString *> *rows = [NSMutableArray array];
     if ([self modeIsRecognitionTask:mode]) {
-        [rows addObject:[NSString stringWithFormat:@"条件：%@", [self recognitionConditionSummaryForTask:config] ?: @"未设置"]];
-        [rows addObject:[NSString stringWithFormat:@"节奏：%@", [self recognitionTimingFlowSummaryForTask:config] ?: @"首次0毫秒"]];
         [rows addObject:[NSString stringWithFormat:@"成功：%@", [self recognitionBranchActionSummaryForTask:config success:YES includePrefix:NO] ?: @"无动作"]];
         [rows addObject:[NSString stringWithFormat:@"失败：%@", [self recognitionBranchActionSummaryForTask:config success:NO includePrefix:NO] ?: @"无动作"]];
         return rows;
     }
 
     [rows addObject:[NSString stringWithFormat:@"动作：%@", [self branchNonRecognitionActionSummaryForTask:config]]];
-    [rows addObject:[NSString stringWithFormat:@"节奏：%@", [self commonSuffixForTask:config].length > 0 ? [[self commonSuffixForTask:config] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] : @"首次0毫秒"]];
     return rows;
 }
 
@@ -11049,9 +11048,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)recognitionNestedSummaryForTask:(NSDictionary *)task depth:(NSUInteger)depth {
-    NSString *condition = [self recognitionConditionSummaryForTask:task] ?: @"条件未设置";
     if (depth >= 3) {
-        return [NSString stringWithFormat:@"%@ %@", [self actionNameForMode:[self modeForTask:task]], condition];
+        return [self actionNameForMode:[self modeForTask:task]];
     }
 
     NSString *successText = [self recognitionBranchActionSummaryForTask:task
@@ -11062,9 +11060,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                                 success:NO
                                                           includePrefix:NO
                                                                   depth:depth + 1] ?: @"无动作";
-    return [NSString stringWithFormat:@"%@ %@；成功->%@；失败->%@",
+    return [NSString stringWithFormat:@"%@：成功->%@；失败->%@",
                                       [self actionNameForMode:[self modeForTask:task]],
-                                      condition,
                                       successText,
                                       failureText];
 }
@@ -11174,22 +11171,29 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSArray<NSDictionary *> *)recognitionFlowRowsForTask:(NSDictionary *)task {
     return @[
-        @{@"tag": @"条件",
-          @"text": [self recognitionConditionSummaryForTask:task] ?: @"未设置",
-          @"color": [self accentColorForActionMode:[self modeForTask:task]]},
         @{@"tag": @"成功",
           @"text": [self recognitionBranchActionSummaryForTask:task success:YES includePrefix:NO] ?: @"无动作",
           @"color": [self themeSuccessColor]},
         @{@"tag": @"失败",
           @"text": [self recognitionBranchActionSummaryForTask:task success:NO includePrefix:NO] ?: @"无动作 继续后续",
           @"color": [self themeDangerColor]},
-        @{@"tag": @"节奏",
-          @"text": [self recognitionTimingFlowSummaryForTask:task] ?: @"首次0毫秒",
-          @"color": [self themeWarningColor]},
     ];
 }
 
 - (NSString *)commonSuffixForTask:(NSDictionary *)task {
+    if ([self modeIsRecognitionTask:[self modeForTask:task]]) {
+        NSMutableArray<NSString *> *recognitionParts = [NSMutableArray array];
+        NSString *successActionSummary = [self recognitionSuccessActionSummaryForTask:task];
+        if (successActionSummary.length > 0) {
+            [recognitionParts addObject:successActionSummary];
+        }
+        NSString *failureActionSummary = [self recognitionFailureActionSummaryForTask:task];
+        if (failureActionSummary.length > 0) {
+            [recognitionParts addObject:failureActionSummary];
+        }
+        return recognitionParts.count > 0 ? [@" " stringByAppendingString:[recognitionParts componentsJoinedByString:@" "]] : @"";
+    }
+
     NSTimeInterval delay = [task[@"delay"] doubleValue];
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
     if (delay > 0.001) {
@@ -11244,7 +11248,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *name = (mode == AnClickActionModeNone) ? @"未设置" : [self actionNameForMode:mode];
     NSString *desc = [self trimmedActionDescription:task[@"desc"]];
     NSString *subtitle = desc.length > 0 ? desc : (mode == AnClickActionModeNone ? @"未设置" : @"已设置");
-    if (desc.length == 0 && mode == AnClickActionModeMacro) {
+    if (desc.length == 0 && [self modeIsRecognitionTask:mode]) {
+        subtitle = @"已设置";
+    } else if (desc.length == 0 && mode == AnClickActionModeMacro) {
         NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
         double speed = [self macroPlaybackSpeedForTask:task];
         NSString *speedText = fabs(speed - 1.0) > 0.001
@@ -12150,6 +12156,65 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return [self durationForRecordedEvents:_recordedMacroEvents playbackSpeed:_macroPlaybackSpeed];
     }
     return 0.30;
+}
+
+- (NSTimeInterval)estimatedActionDurationForTask:(NSDictionary *)task
+                                         success:(BOOL)success
+                                      actionMode:(AnClickActionMode)actionMode
+                                           depth:(NSUInteger)depth {
+    if (actionMode == AnClickActionModeNone || actionMode == AnClickActionModeJump) {
+        return 0.0;
+    }
+    if (actionMode == AnClickActionModeNetwork) {
+        return [self networkTimeoutForTask:task] + 0.25;
+    }
+    if ([self modeIsRecognitionTask:actionMode]) {
+        NSDictionary *config = [self branchActionConfigForTask:task success:success expectedMode:actionMode];
+        if (config && depth < 4) {
+            return [self estimatedTaskDurationForTask:config depth:depth + 1];
+        }
+    }
+    return [self durationForTaskMode:actionMode];
+}
+
+- (NSTimeInterval)estimatedTaskDurationForTask:(NSDictionary *)task depth:(NSUInteger)depth {
+    AnClickActionMode mode = [self modeForTask:task];
+    NSInteger repeatCount = [self repeatCountForTask:task];
+    NSTimeInterval delay = [task[@"delay"] respondsToSelector:@selector(doubleValue)] ? MAX(0.0, [task[@"delay"] doubleValue]) : 0.0;
+    NSTimeInterval configuredInterval = [self actionIntervalForTask:task];
+    NSTimeInterval duration = [self durationForTaskMode:mode];
+
+    if (mode == AnClickActionModeImage ||
+        mode == AnClickActionModeOCR ||
+        mode == AnClickActionModeColor) {
+        AnClickActionMode successMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+        AnClickActionMode failureMode = [self failureActionModeForTask:task];
+        NSTimeInterval baseDuration = mode == AnClickActionModeOCR ? 0.95 : 0.75;
+        NSTimeInterval successDuration = [self estimatedActionDurationForTask:task success:YES actionMode:successMode depth:depth];
+        NSTimeInterval failureDuration = [self estimatedActionDurationForTask:task success:NO actionMode:failureMode depth:depth];
+        duration = baseDuration + MAX(successDuration, failureDuration);
+    } else if (mode == AnClickActionModeNetwork) {
+        duration = 0.85;
+    } else if (mode == AnClickActionModeMacro) {
+        NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
+        duration = [self durationForRecordedEvents:events playbackSpeed:[self macroPlaybackSpeedForTask:task]];
+    } else if (mode == AnClickActionModeLongPress) {
+        duration = [self longPressOperationDurationForDuration:[self longPressDurationForTask:task]];
+    }
+
+    BOOL pointTapRepeatMode = mode == AnClickActionModeTap ||
+        mode == AnClickActionModeDoubleTap ||
+        mode == AnClickActionModeTwoFingerTap;
+    if (repeatCount > 1 && pointTapRepeatMode) {
+        NSTimeInterval minimumStep = (mode == AnClickActionModeDoubleTap)
+            ? (AnClickDefaultTapPressDuration + AnClickDefaultDoubleTapInterval + AnClickDefaultTapPressDuration)
+            : AnClickDefaultTapPressDuration;
+        NSTimeInterval step = MAX(minimumStep, configuredInterval);
+        return delay + step * repeatCount;
+    }
+
+    NSTimeInterval interval = duration + configuredInterval;
+    return delay + duration + interval * MAX(0, repeatCount - 1);
 }
 
 - (NSTimeInterval)delayForTask:(NSDictionary *)task {
@@ -14831,21 +14896,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSTimeInterval duration = [self durationForTaskMode:mode];
     if (mode == AnClickActionModeImage) {
         AnClickActionMode imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
-        NSTimeInterval actionDuration = [self modeIsRecognitionTask:imageActionMode]
-            ? 0.0
-            : (imageActionMode == AnClickActionModeNetwork ? [self networkTimeoutForTask:task] + 0.25 : [self durationForTaskMode:imageActionMode]);
+        NSTimeInterval actionDuration = [self estimatedActionDurationForTask:task success:YES actionMode:imageActionMode depth:0];
         duration = 0.75 + actionDuration;
     } else if (mode == AnClickActionModeOCR) {
         AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
-        NSTimeInterval actionDuration = [self modeIsRecognitionTask:actionMode]
-            ? 0.0
-            : (actionMode == AnClickActionModeNetwork ? [self networkTimeoutForTask:task] + 0.25 : [self durationForTaskMode:actionMode]);
+        NSTimeInterval actionDuration = [self estimatedActionDurationForTask:task success:YES actionMode:actionMode depth:0];
         duration = 0.95 + actionDuration;
     } else if (mode == AnClickActionModeColor) {
         AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
-        NSTimeInterval actionDuration = [self modeIsRecognitionTask:actionMode]
-            ? 0.0
-            : (actionMode == AnClickActionModeNetwork ? [self networkTimeoutForTask:task] + 0.25 : [self durationForTaskMode:actionMode]);
+        NSTimeInterval actionDuration = [self estimatedActionDurationForTask:task success:YES actionMode:actionMode depth:0];
         duration = 0.75 + actionDuration;
     } else if (mode == AnClickActionModeNetwork) {
         duration = 0.85;
