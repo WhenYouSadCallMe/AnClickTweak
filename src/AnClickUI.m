@@ -4330,7 +4330,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _toolTitleLabel.textColor = [self themeSecondaryTextColor];
     _toolTitleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
 
-    _editorTitleLabel.text = (_actionMode == AnClickActionModeNone) ? @"选择动作" : [self currentActionName];
+    NSString *branchTitle = [self branchRecognitionContextTitle];
+    _editorTitleLabel.text = branchTitle.length > 0 ? [NSString stringWithFormat:@"%@配置", branchTitle] : ((_actionMode == AnClickActionModeNone) ? @"选择动作" : [self currentActionName]);
     _editorTitleLabel.frame = CGRectMake(66, compactHeight ? 21.0 : 22.0, width - 132, 30);
 
     UIView *divider = [_panelView viewWithTag:8811];
@@ -4388,7 +4389,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat bottomButtonWidth = floor((width - side * 2.0 - 12.0) / 2.0);
     _cancelEditButton.frame = CGRectMake(side, bottomButtonY, bottomButtonWidth, bottomButtonHeight);
     _saveTaskButton.frame = CGRectMake(side + bottomButtonWidth + 12.0, bottomButtonY, bottomButtonWidth, bottomButtonHeight);
-    [_saveTaskButton setTitle:@"确定" forState:UIControlStateNormal];
+    NSString *saveTitle = branchTitle.length > 0 ? [NSString stringWithFormat:@"保存%@", branchTitle] : @"确定";
+    [_saveTaskButton setTitle:saveTitle forState:UIControlStateNormal];
     [self updateButtonShadowPath:_cancelEditButton];
     [self updateButtonShadowPath:_saveTaskButton];
     for (UIButton *button in _modeButtons) {
@@ -5823,6 +5825,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSString *)currentActionName {
     return [self actionNameForMode:_actionMode];
+}
+
+- (NSString *)branchRecognitionContextTitle {
+    if (!_editingBranchRecognitionConfig || ![self modeIsRecognitionTask:_editingBranchActionMode]) {
+        return nil;
+    }
+    return [NSString stringWithFormat:@"%@后%@",
+            _editingBranchRecognitionSuccess ? @"成功" : @"失败",
+            [self actionNameForMode:_editingBranchActionMode]];
 }
 
 - (NSString *)actionNameForMode:(AnClickActionMode)mode {
@@ -7430,9 +7441,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return y;
     }
     _successActionTaskField.hidden = YES;
-    _successActionTaskCaptionLabel.hidden = YES;
-    _successActionTaskEditButton.hidden = YES;
-    return y;
+    _successActionTaskCaptionLabel.text = [NSString stringWithFormat:@"成功后%@配置", [self actionNameForMode:successMode]];
+    _successActionTaskCaptionLabel.hidden = NO;
+    _successActionTaskCaptionLabel.frame = CGRectMake(side, y, width, 20);
+
+    NSDictionary *config = [self currentStoredRecognitionActionConfigForSuccess:YES mode:successMode];
+    NSString *summary = config ? [self recognitionConditionSummaryForTask:config] : @"未设置";
+    [_successActionTaskEditButton setTitle:[NSString stringWithFormat:@"%@ · %@", [self actionNameForMode:successMode], summary] forState:UIControlStateNormal];
+    [self styleNormalButton:_successActionTaskEditButton];
+    _successActionTaskEditButton.hidden = NO;
+    _successActionTaskEditButton.frame = CGRectMake(side, y + 22.0, width, 38);
+    [self updateButtonShadowPath:_successActionTaskEditButton];
+    return y + 68.0;
 }
 
 - (CGFloat)layoutFailureActionTaskFieldAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
@@ -7441,9 +7461,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return y;
     }
     _failureActionTaskField.hidden = YES;
-    _failureActionTaskCaptionLabel.hidden = YES;
-    _failureActionTaskEditButton.hidden = YES;
-    return y;
+    _failureActionTaskCaptionLabel.text = [NSString stringWithFormat:@"失败后%@配置", [self actionNameForMode:failureMode]];
+    _failureActionTaskCaptionLabel.hidden = NO;
+    _failureActionTaskCaptionLabel.frame = CGRectMake(side, y, width, 20);
+
+    NSDictionary *config = [self currentStoredRecognitionActionConfigForSuccess:NO mode:failureMode];
+    NSString *summary = config ? [self recognitionConditionSummaryForTask:config] : @"未设置";
+    [_failureActionTaskEditButton setTitle:[NSString stringWithFormat:@"%@ · %@", [self actionNameForMode:failureMode], summary] forState:UIControlStateNormal];
+    [self styleNormalButton:_failureActionTaskEditButton];
+    _failureActionTaskEditButton.hidden = NO;
+    _failureActionTaskEditButton.frame = CGRectMake(side, y + 22.0, width, 38);
+    [self updateButtonShadowPath:_failureActionTaskEditButton];
+    return y + 68.0;
 }
 
 - (CGFloat)layoutSingleField:(UITextField *)field caption:(UILabel *)caption title:(NSString *)title y:(CGFloat)y {
@@ -7732,7 +7761,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _editorBackButton.hidden = NO;
     _cancelEditButton.hidden = NO;
     _collapseButton.hidden = NO;
-    _editorTitleLabel.text = (_actionMode == AnClickActionModeNone) ? @"选择动作" : [self currentActionName];
+    NSString *branchTitle = [self branchRecognitionContextTitle];
+    _editorTitleLabel.text = branchTitle.length > 0 ? [NSString stringWithFormat:@"%@配置", branchTitle] : ((_actionMode == AnClickActionModeNone) ? @"选择动作" : [self currentActionName]);
     _descriptionField.hidden = NO;
     _descriptionCaptionLabel.hidden = NO;
     if (!_descriptionField.isFirstResponder) {
@@ -7773,10 +7803,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         CGFloat side = 18.0;
         CGFloat width = _panelView.bounds.size.width;
         CGFloat contentWidth = width - side * 2.0;
-        _primaryConfigLabel.text = @"识别图像";
+        _primaryConfigLabel.text = branchTitle.length > 0 ? [NSString stringWithFormat:@"%@ · 识别图像", branchTitle] : @"识别图像";
         _primaryConfigLabel.hidden = NO;
         _primaryConfigLabel.frame = CGRectMake(side, configTopY, contentWidth, 20);
-        [_captureButton setTitle:@"截图选择识别图像" forState:UIControlStateNormal];
+        [_captureButton setTitle:(branchTitle.length > 0 ? [NSString stringWithFormat:@"%@截图选择识别图像", branchTitle] : @"截图选择识别图像") forState:UIControlStateNormal];
         _captureButton.hidden = NO;
         _captureButton.frame = CGRectMake(side, configTopY + 22.0, contentWidth, 40);
         [self styleSegmentButton:_captureButton selected:YES];
@@ -7838,7 +7868,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         CGFloat width = _panelView.bounds.size.width;
         CGFloat contentWidth = width - side * 2.0;
         AnClickOCRMatchMode effectiveMatchMode = [self effectiveOCRMatchModeForText:_ocrTargetText ?: @""];
-        _primaryConfigLabel.text = effectiveMatchMode == AnClickOCRMatchModeRegex ? @"正则表达式" : @"目标文字";
+        NSString *ocrTitle = effectiveMatchMode == AnClickOCRMatchModeRegex ? @"正则表达式" : @"目标文字";
+        _primaryConfigLabel.text = branchTitle.length > 0 ? [NSString stringWithFormat:@"%@ · %@", branchTitle, ocrTitle] : ocrTitle;
         _primaryConfigLabel.hidden = NO;
         _primaryConfigLabel.frame = CGRectMake(side, configTopY, contentWidth, 20);
         [self setStyledPlaceholder:(effectiveMatchMode == AnClickOCRMatchModeRegex ? @"输入正则表达式" : @"目标文字")
@@ -7906,7 +7937,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         CGFloat side = 18.0;
         CGFloat width = _panelView.bounds.size.width;
         CGFloat contentWidth = width - side * 2.0;
-        _primaryConfigLabel.text = @"目标颜色";
+        _primaryConfigLabel.text = branchTitle.length > 0 ? [NSString stringWithFormat:@"%@ · 目标颜色", branchTitle] : @"目标颜色";
         _primaryConfigLabel.hidden = NO;
         _primaryConfigLabel.frame = CGRectMake(side, configTopY, contentWidth, 20);
 
