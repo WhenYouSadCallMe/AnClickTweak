@@ -7429,20 +7429,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (![self modeIsRecognitionTask:successMode]) {
         return y;
     }
-
-    _successActionTaskCaptionLabel.text = [NSString stringWithFormat:@"成功后%@独立配置", [self actionNameForMode:successMode]];
-    _successActionTaskCaptionLabel.hidden = NO;
-    _successActionTaskCaptionLabel.frame = CGRectMake(side, y, width, 20);
-
     _successActionTaskField.hidden = YES;
-
-    NSString *buttonTitle = [NSString stringWithFormat:@"设置成功后%@", [self actionNameForMode:successMode]];
-    [_successActionTaskEditButton setTitle:buttonTitle forState:UIControlStateNormal];
-    [self styleNormalButton:_successActionTaskEditButton];
-    _successActionTaskEditButton.hidden = NO;
-    _successActionTaskEditButton.frame = CGRectMake(side, y + 22.0, width, 38);
-    [self updateButtonShadowPath:_successActionTaskEditButton];
-    return y + 68.0;
+    _successActionTaskCaptionLabel.hidden = YES;
+    _successActionTaskEditButton.hidden = YES;
+    return y;
 }
 
 - (CGFloat)layoutFailureActionTaskFieldAtY:(CGFloat)y side:(CGFloat)side width:(CGFloat)width {
@@ -7450,20 +7440,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (![self modeIsRecognitionTask:failureMode]) {
         return y;
     }
-
-    _failureActionTaskCaptionLabel.text = [NSString stringWithFormat:@"失败后%@独立配置", [self actionNameForMode:failureMode]];
-    _failureActionTaskCaptionLabel.hidden = NO;
-    _failureActionTaskCaptionLabel.frame = CGRectMake(side, y, width, 20);
-
     _failureActionTaskField.hidden = YES;
-
-    NSString *buttonTitle = [NSString stringWithFormat:@"设置失败后%@", [self actionNameForMode:failureMode]];
-    [_failureActionTaskEditButton setTitle:buttonTitle forState:UIControlStateNormal];
-    [self styleNormalButton:_failureActionTaskEditButton];
-    _failureActionTaskEditButton.hidden = NO;
-    _failureActionTaskEditButton.frame = CGRectMake(side, y + 22.0, width, 38);
-    [self updateButtonShadowPath:_failureActionTaskEditButton];
-    return y + 68.0;
+    _failureActionTaskCaptionLabel.hidden = YES;
+    _failureActionTaskEditButton.hidden = YES;
+    return y;
 }
 
 - (CGFloat)layoutSingleField:(UITextField *)field caption:(UILabel *)caption title:(NSString *)title y:(CGFloat)y {
@@ -8411,6 +8391,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _failureActionMode != AnClickActionModeNetwork) {
         _networkPostBodyUsesOCRResult = NO;
     }
+    if (!_editingBranchRecognitionConfig && [self modeIsRecognitionTask:_imageActionMode]) {
+        [self beginEditingRecognitionActionConfigForSuccess:YES mode:_imageActionMode];
+        return;
+    }
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
     [self autosaveSelectedTaskIfPossible];
@@ -8432,6 +8416,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_imageActionMode != AnClickActionModeNetwork &&
         _failureActionMode != AnClickActionModeNetwork) {
         _networkPostBodyUsesOCRResult = NO;
+    }
+    if (!_editingBranchRecognitionConfig && [self modeIsRecognitionTask:_failureActionMode]) {
+        [self beginEditingRecognitionActionConfigForSuccess:NO mode:_failureActionMode];
+        return;
     }
     [self refreshEditorConfigControls];
     [self updateStatusForCurrentConfig];
@@ -11490,7 +11478,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self modeForTask:(NSDictionary *)config] == expectedMode) {
         return (NSDictionary *)config;
     }
+    return nil;
+}
 
+- (NSDictionary *)legacyRecognitionActionTaskForTask:(NSDictionary *)task success:(BOOL)success expectedMode:(AnClickActionMode)expectedMode {
+    if (![self modeIsRecognitionTask:expectedMode]) {
+        return nil;
+    }
     NSInteger legacyIndex = success
         ? [self validRecognitionSuccessActionTaskIndexForTask:task]
         : [self validRecognitionFailureActionTaskIndexForTask:task];
@@ -11522,8 +11516,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSMutableDictionary *ownerTask = [self taskDictionaryFromCurrentConfigRequireComplete:NO];
     if (ownerTask) {
         NSDictionary *existingConfig = [self currentStoredRecognitionActionConfigForSuccess:success mode:mode];
+        if (!existingConfig) {
+            existingConfig = [self legacyRecognitionActionTaskForTask:_taskItems[(NSUInteger)_selectedTaskIndex]
+                                                             success:success
+                                                        expectedMode:mode];
+        }
         if (existingConfig) {
-            ownerTask[[self recognitionActionConfigKeyForSuccess:success]] = existingConfig;
+            ownerTask[[self recognitionActionConfigKeyForSuccess:success]] = [existingConfig mutableCopy];
         }
         [ownerTask removeObjectForKey:success ? @"successActionTaskIndex" : @"failureActionTaskIndex"];
         _taskItems[(NSUInteger)_selectedTaskIndex] = ownerTask;
