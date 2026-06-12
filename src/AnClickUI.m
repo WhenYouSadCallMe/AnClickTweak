@@ -685,15 +685,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (UIColor *)themePanelDarkColor {
-    return [UIColor colorWithRed:0.965 green:0.975 blue:0.992 alpha:1.0];
+    return [UIColor colorWithRed:0.955 green:0.970 blue:0.992 alpha:0.88];
 }
 
 - (UIColor *)themeSurfaceColor {
-    return UIColor.whiteColor;
+    return [UIColor colorWithRed:1.000 green:1.000 blue:1.000 alpha:0.78];
 }
 
 - (UIColor *)themeControlFillColor {
-    return [UIColor colorWithRed:0.975 green:0.980 blue:0.990 alpha:1.0];
+    return [UIColor colorWithRed:0.965 green:0.975 blue:0.992 alpha:0.72];
 }
 
 - (UIColor *)themePrimaryTextColor {
@@ -705,23 +705,42 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (UIColor *)themeSeparatorColor {
-    return [UIColor colorWithRed:0.82 green:0.84 blue:0.90 alpha:1.0];
+    return [UIColor colorWithRed:0.76 green:0.80 blue:0.88 alpha:1.0];
+}
+
+- (UIColor *)glassHighlightBorderColor {
+    return [UIColor colorWithRed:1.00 green:1.00 blue:1.00 alpha:0.72];
+}
+
+- (UIColor *)neumorphicShadowColor {
+    return [UIColor colorWithRed:0.40 green:0.48 blue:0.62 alpha:1.0];
+}
+
+- (UIColor *)branchRoleColorForSuccess:(BOOL)success {
+    return success
+        ? [UIColor colorWithRed:0.02 green:0.52 blue:0.23 alpha:1.0]
+        : [UIColor colorWithRed:0.86 green:0.07 blue:0.10 alpha:1.0];
+}
+
+- (UIColor *)branchRoleFillColorForSuccess:(BOOL)success {
+    UIColor *color = [self branchRoleColorForSuccess:success];
+    return [color colorWithAlphaComponent:success ? 0.13 : 0.12];
 }
 
 - (UIColor *)editorSectionTintColorAtIndex:(NSUInteger)index {
     switch (index % 6) {
         case 0:
-            return [UIColor colorWithRed:1.000 green:1.000 blue:1.000 alpha:1.0];
+            return [UIColor colorWithRed:1.000 green:1.000 blue:1.000 alpha:0.72];
         case 1:
-            return [UIColor colorWithRed:0.940 green:0.975 blue:1.000 alpha:1.0];
+            return [UIColor colorWithRed:0.930 green:0.970 blue:1.000 alpha:0.70];
         case 2:
-            return [UIColor colorWithRed:0.940 green:0.992 blue:0.965 alpha:1.0];
+            return [UIColor colorWithRed:0.930 green:0.990 blue:0.965 alpha:0.70];
         case 3:
-            return [UIColor colorWithRed:1.000 green:0.965 blue:0.925 alpha:1.0];
+            return [UIColor colorWithRed:1.000 green:0.965 blue:0.920 alpha:0.70];
         case 4:
-            return [UIColor colorWithRed:0.950 green:0.940 blue:1.000 alpha:1.0];
+            return [UIColor colorWithRed:0.950 green:0.940 blue:1.000 alpha:0.70];
         case 5:
-            return [UIColor colorWithRed:0.925 green:0.990 blue:1.000 alpha:1.0];
+            return [UIColor colorWithRed:0.925 green:0.990 blue:1.000 alpha:0.70];
         default:
             return [self themeSurfaceColor];
     }
@@ -1079,10 +1098,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     [[view viewWithTag:AnClickBackdropBlurViewTag] removeFromSuperview];
-    view.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.96];
+    view.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.78];
     UIBlurEffect *effect = nil;
     if (@available(iOS 13.0, *)) {
-        effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterialLight];
+        effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialLight];
     } else {
         effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleExtraLight];
     }
@@ -1093,17 +1112,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     blurView.userInteractionEnabled = NO;
     blurView.layer.cornerRadius = cornerRadius;
     blurView.clipsToBounds = YES;
+    blurView.contentView.backgroundColor = [[self themePanelDarkColor] colorWithAlphaComponent:0.38];
     [view insertSubview:blurView atIndex:0];
 }
 
 - (void)applyFrostedRoundButtonStyle:(UIButton *)button {
-    button.backgroundColor = [self themeControlFillColor];
+    button.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.78];
+    button.layer.cornerRadius = MAX(8.0, button.layer.cornerRadius);
+    button.layer.masksToBounds = NO;
     button.layer.borderWidth = 1.0;
-    button.layer.borderColor = [self themeSeparatorColor].CGColor;
-    button.layer.shadowColor = UIColor.blackColor.CGColor;
-    button.layer.shadowOffset = CGSizeMake(0, 1);
-    button.layer.shadowRadius = 2.0;
-    button.layer.shadowOpacity = 0.05;
+    button.layer.borderColor = [[self glassHighlightBorderColor] colorWithAlphaComponent:0.80].CGColor;
+    button.layer.shadowColor = [self neumorphicShadowColor].CGColor;
+    button.layer.shadowOffset = CGSizeMake(3, 4);
+    button.layer.shadowRadius = 8.0;
+    button.layer.shadowOpacity = 0.10;
     [button setTitleColor:[self themeHighlightColor] forState:UIControlStateNormal];
     button.tintColor = [self themeHighlightColor];
     [self updateButtonShadowPath:button];
@@ -1706,12 +1728,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _panelView = [[UIView alloc] initWithFrame:_panelWindow.bounds];
     [self installDarkBlurInView:_panelView cornerRadius:16.0];
     _panelView.layer.cornerRadius = 16.0;
-    _panelView.layer.borderWidth = 1.0;
-    _panelView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72].CGColor;
-    _panelView.layer.shadowColor = UIColor.blackColor.CGColor;
-    _panelView.layer.shadowOpacity = 0.12;
-    _panelView.layer.shadowRadius = 22.0;
-    _panelView.layer.shadowOffset = CGSizeMake(0, 8);
+    _panelView.layer.borderWidth = 1.2;
+    _panelView.layer.borderColor = [[self glassHighlightBorderColor] colorWithAlphaComponent:0.86].CGColor;
+    _panelView.layer.shadowColor = [self neumorphicShadowColor].CGColor;
+    _panelView.layer.shadowOpacity = 0.22;
+    _panelView.layer.shadowRadius = 24.0;
+    _panelView.layer.shadowOffset = CGSizeMake(8, 12);
     [controller.view addSubview:_panelView];
 
     UIPanGestureRecognizer *panelPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelPan:)];
@@ -2100,11 +2122,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         sectionView.backgroundColor = [self themeSurfaceColor];
         sectionView.layer.cornerRadius = 8.0;
         sectionView.layer.borderWidth = 1.0;
-        sectionView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72].CGColor;
-        sectionView.layer.shadowColor = UIColor.blackColor.CGColor;
-        sectionView.layer.shadowOffset = CGSizeMake(0, 2);
-        sectionView.layer.shadowRadius = 8.0;
-        sectionView.layer.shadowOpacity = 0.045;
+        sectionView.layer.borderColor = [[self glassHighlightBorderColor] colorWithAlphaComponent:0.62].CGColor;
+        sectionView.layer.shadowColor = [self neumorphicShadowColor].CGColor;
+        sectionView.layer.shadowOffset = CGSizeMake(4, 5);
+        sectionView.layer.shadowRadius = 10.0;
+        sectionView.layer.shadowOpacity = 0.075;
         [_editorSectionViews addObject:sectionView];
     }
 
@@ -2244,10 +2266,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_failureActionTaskField addTarget:self action:@selector(actionTimingEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
     [_panelView addSubview:_failureActionTaskField];
 
-    _successActionTaskEditButton = [self panelButtonWithTitle:@"设置配置" action:@selector(editSuccessRecognitionActionTask)];
+    _successActionTaskEditButton = [self panelButtonWithTitle:@"设置动作" action:@selector(editSuccessRecognitionActionTask)];
     [_panelView addSubview:_successActionTaskEditButton];
 
-    _failureActionTaskEditButton = [self panelButtonWithTitle:@"设置配置" action:@selector(editFailureRecognitionActionTask)];
+    _failureActionTaskEditButton = [self panelButtonWithTitle:@"设置动作" action:@selector(editFailureRecognitionActionTask)];
     [_panelView addSubview:_failureActionTaskEditButton];
 
     _recognitionIntervalField = [self configTextFieldWithPlaceholder:@"1000"];
@@ -2456,28 +2478,62 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     button.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
 
     if (selected) {
-        button.backgroundColor = accentColor;
-        button.layer.borderWidth = 1.0;
-        button.layer.borderColor = [accentColor colorWithAlphaComponent:0.86].CGColor;
-        button.layer.shadowColor = UIColor.blackColor.CGColor;
-        button.layer.shadowOffset = CGSizeMake(0, 3);
-        button.layer.shadowRadius = 7.0;
-        button.layer.shadowOpacity = 0.13;
+        button.backgroundColor = [accentColor colorWithAlphaComponent:0.92];
+        button.layer.borderWidth = 1.2;
+        button.layer.borderColor = [[self glassHighlightBorderColor] colorWithAlphaComponent:0.82].CGColor;
+        button.layer.shadowColor = accentColor.CGColor;
+        button.layer.shadowOffset = CGSizeMake(0, 4);
+        button.layer.shadowRadius = 10.0;
+        button.layer.shadowOpacity = 0.24;
         [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
         button.tintColor = UIColor.whiteColor;
     } else {
-        button.backgroundColor = [accentColor colorWithAlphaComponent:0.075];
+        button.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.82];
         button.layer.borderWidth = 1.0;
-        button.layer.borderColor = [accentColor colorWithAlphaComponent:0.22].CGColor;
-        button.layer.shadowColor = UIColor.blackColor.CGColor;
-        button.layer.shadowOffset = CGSizeMake(0, 1);
-        button.layer.shadowRadius = 3.0;
-        button.layer.shadowOpacity = 0.025;
+        button.layer.borderColor = [accentColor colorWithAlphaComponent:0.28].CGColor;
+        button.layer.shadowColor = [self neumorphicShadowColor].CGColor;
+        button.layer.shadowOffset = CGSizeMake(3, 4);
+        button.layer.shadowRadius = 8.0;
+        button.layer.shadowOpacity = 0.07;
         [button setTitleColor:[self themePrimaryTextColor] forState:UIControlStateNormal];
         button.tintColor = accentColor;
     }
 
     [self updateButtonShadowPath:button];
+}
+
+- (void)applyBranchRoleStyleToView:(UIView *)view success:(BOOL)success strong:(BOOL)strong {
+    if (!view) {
+        return;
+    }
+    UIColor *roleColor = [self branchRoleColorForSuccess:success];
+    view.layer.cornerRadius = MAX(view.layer.cornerRadius, 8.0);
+    view.layer.masksToBounds = NO;
+    view.layer.borderWidth = strong ? 1.8 : 1.3;
+    view.layer.borderColor = [roleColor colorWithAlphaComponent:strong ? 0.94 : 0.78].CGColor;
+    view.layer.shadowColor = roleColor.CGColor;
+    view.layer.shadowOffset = CGSizeMake(0, strong ? 4.0 : 2.0);
+    view.layer.shadowRadius = strong ? 9.0 : 6.0;
+    view.layer.shadowOpacity = strong ? 0.20 : 0.12;
+}
+
+- (void)applyBranchRoleStyleToButton:(UIButton *)button success:(BOOL)success strong:(BOOL)strong {
+    [self applyBranchRoleStyleToView:button success:success strong:strong];
+    UIColor *roleColor = [self branchRoleColorForSuccess:success];
+    button.backgroundColor = [[self branchRoleFillColorForSuccess:success] colorWithAlphaComponent:strong ? 0.18 : 0.14];
+    [button setTitleColor:roleColor forState:UIControlStateNormal];
+    button.tintColor = roleColor;
+    [self updateButtonShadowPath:button];
+}
+
+- (void)applyBranchRoleStyleToLabel:(UILabel *)label success:(BOOL)success strong:(BOOL)strong {
+    if (!label) {
+        return;
+    }
+    [self applyBranchRoleStyleToView:label success:success strong:strong];
+    label.backgroundColor = [self branchRoleFillColorForSuccess:success];
+    label.textColor = strong ? [self branchRoleColorForSuccess:success] : [self themePrimaryTextColor];
+    label.clipsToBounds = YES;
 }
 
 - (void)setStyledPlaceholder:(NSString *)placeholder forField:(UITextField *)field alpha:(CGFloat)alpha {
@@ -2495,14 +2551,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     field.font = monospaced
         ? [UIFont monospacedDigitSystemFontOfSize:15 weight:UIFontWeightSemibold]
         : [UIFont systemFontOfSize:15 weight:UIFontWeightRegular];
-    field.backgroundColor = [UIColor colorWithRed:0.985 green:0.988 blue:0.996 alpha:1.0];
+    field.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.80];
     field.layer.cornerRadius = 8.0;
     field.layer.borderWidth = 1.0;
-    field.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72].CGColor;
-    field.layer.shadowColor = UIColor.blackColor.CGColor;
-    field.layer.shadowOffset = CGSizeMake(0, 1);
-    field.layer.shadowRadius = 3.0;
-    field.layer.shadowOpacity = 0.018;
+    field.layer.borderColor = [[self glassHighlightBorderColor] colorWithAlphaComponent:0.76].CGColor;
+    field.layer.shadowColor = [self neumorphicShadowColor].CGColor;
+    field.layer.shadowOffset = CGSizeMake(2, 3);
+    field.layer.shadowRadius = 7.0;
+    field.layer.shadowOpacity = 0.06;
     field.clearButtonMode = UITextFieldViewModeWhileEditing;
     field.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 12, 1)];
     field.leftViewMode = UITextFieldViewModeAlways;
@@ -4403,7 +4459,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat height = bottomY - topY + [self editorSectionTopPadding] + [self editorSectionBottomPadding];
     sectionView.hidden = NO;
     sectionView.backgroundColor = [self editorSectionTintColorAtIndex:index];
-    sectionView.layer.borderColor = [self editorSectionBorderColorAtIndex:index].CGColor;
+    sectionView.layer.borderWidth = 1.0;
+    sectionView.layer.borderColor = [[self editorSectionBorderColorAtIndex:index] colorWithAlphaComponent:0.72].CGColor;
+    sectionView.layer.shadowColor = [self neumorphicShadowColor].CGColor;
+    sectionView.layer.shadowOffset = CGSizeMake(4, 5);
+    sectionView.layer.shadowRadius = 10.0;
+    sectionView.layer.shadowOpacity = 0.075;
     sectionView.frame = CGRectMake(side, y, _editorContentScrollView.bounds.size.width - side * 2.0, height);
     sectionView.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:sectionView.bounds cornerRadius:sectionView.layer.cornerRadius].CGPath;
     [_editorContentScrollView sendSubviewToBack:sectionView];
@@ -7908,7 +7969,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                     rowGap:8.0];
     for (UIButton *button in buttons) {
         AnClickActionMode mode = [self branchRecognitionActionModeForButton:button];
-        [self styleSegmentButton:button selected:mode == selectedMode];
+        BOOL selected = mode == selectedMode;
+        [self styleSegmentButton:button selected:selected];
+        NSInteger tag = button.tag;
+        if ((tag >= AnClickBranchSuccessSuccessActionTagBase && tag < AnClickBranchSuccessFailureActionTagBase) ||
+            (tag >= AnClickBranchFailureSuccessActionTagBase && tag < AnClickBranchFailureFailureActionTagBase)) {
+            [self applyBranchRoleStyleToButton:button success:YES strong:selected];
+        } else if ((tag >= AnClickBranchSuccessFailureActionTagBase && tag < AnClickBranchFailureSuccessActionTagBase) ||
+                   tag >= AnClickBranchFailureFailureActionTagBase) {
+            [self applyBranchRoleStyleToButton:button success:NO strong:selected];
+        }
     }
     return nextY;
 }
@@ -7927,6 +7997,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     successCaption.text = @"识别成功后动作类型";
     successCaption.hidden = NO;
+    successCaption.textColor = [self branchRoleColorForSuccess:YES];
     successCaption.frame = CGRectMake(side, y, width, 20.0);
     CGFloat rowY = [self layoutBranchRecognitionActionButtons:successButtons
                                                      selected:successMode
@@ -7936,6 +8007,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     failureCaption.text = @"识别失败后动作类型";
     failureCaption.hidden = NO;
+    failureCaption.textColor = [self branchRoleColorForSuccess:NO];
     failureCaption.frame = CGRectMake(side, rowY, width, 20.0);
     rowY = [self layoutBranchRecognitionActionButtons:failureButtons
                                              selected:failureMode
@@ -7962,11 +8034,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self styleSegmentButton:captureButton selected:YES];
         captureButton.hidden = NO;
         captureButton.frame = CGRectMake(side, y, width, 38.0);
+        [self applyBranchRoleStyleToButton:captureButton success:success strong:YES];
         [self updateButtonShadowPath:captureButton];
 
         previewView.image = image;
         previewView.hidden = NO;
         previewView.frame = CGRectMake(side, y + 46.0, width, 54.0);
+        [self applyBranchRoleStyleToView:previewView success:success strong:NO];
         rowY = y + 108.0;
     } else if (mode == AnClickActionModeOCR) {
         UITextField *field = success ? _successBranchOCRTargetField : _failureBranchOCRTargetField;
@@ -7976,6 +8050,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self setStyledPlaceholder:[NSString stringWithFormat:@"%@目标文字", prefix] forField:field alpha:0.32];
         field.hidden = NO;
         field.frame = CGRectMake(side, y, width, 40.0);
+        [self applyBranchRoleStyleToView:field success:success strong:NO];
         rowY = y + 48.0;
     } else if (mode == AnClickActionModeColor) {
         UIView *swatchView = success ? _successBranchColorPreviewView : _failureBranchColorPreviewView;
@@ -7984,11 +8059,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         swatchView.hidden = NO;
         swatchView.frame = CGRectMake(side, y, swatchSize, swatchSize);
         swatchView.backgroundColor = [self branchColorForConfig:config];
+        [self applyBranchRoleStyleToView:swatchView success:success strong:NO];
 
         [pickButton setTitle:[self branchColorButtonTitleForConfig:config prefix:prefix] forState:UIControlStateNormal];
         [self styleNormalButton:pickButton];
         pickButton.hidden = NO;
         pickButton.frame = CGRectMake(side + swatchSize + 10.0, y, width - swatchSize - 10.0, 40.0);
+        [self applyBranchRoleStyleToButton:pickButton success:success strong:YES];
         [self updateButtonShadowPath:pickButton];
         rowY = y + 48.0;
     }
@@ -8065,6 +8142,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     caption.text = [NSString stringWithFormat:@"%@后%@动作", prefix, actionName];
     caption.hidden = NO;
+    caption.textColor = [self branchRoleColorForSuccess:success];
     caption.frame = CGRectMake(side, y, width, 20);
 
     CGFloat rowY = y + 24.0;
@@ -8084,15 +8162,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             continue;
         }
         label.text = rows[i];
-        label.textColor = (i == 0 && !config) ? [self themeDangerColor] : [self themePrimaryTextColor];
         label.frame = CGRectMake(side, rowY, width, rowHeight);
+        [self applyBranchRoleStyleToLabel:label success:success strong:i == 0];
+        if (i == 0 && !config) {
+            label.textColor = [self themeDangerColor];
+        }
         rowY += rowHeight + 4.0;
     }
 
-    [button setTitle:[NSString stringWithFormat:@"%@%@后%@截图/参数", config ? @"编辑" : @"设置", prefix, actionName] forState:UIControlStateNormal];
+    [button setTitle:[NSString stringWithFormat:@"%@%@后%@动作", config ? @"编辑" : @"设置", prefix, actionName] forState:UIControlStateNormal];
     [self styleNormalButton:button];
     button.hidden = NO;
     button.frame = CGRectMake(side, rowY + 4.0, width, 38);
+    [self applyBranchRoleStyleToButton:button success:success strong:YES];
     [self updateButtonShadowPath:button];
     return CGRectGetMaxY(button.frame) + 8.0;
 }
