@@ -98,6 +98,11 @@ static const NSInteger AnClickColorPickRowTagBase = 43200;
 static const NSUInteger AnClickColorPickMaxSamples = 32;
 static const NSUInteger AnClickMultiTapMaxPoints = 32;
 static const NSUInteger ACPostPairLimit = 8;
+static NSString * const AnClickTaskExpandedKey = @"isExpanded";
+static NSString * const AnClickTaskListCellIdentifier = @"AnClickTaskListCell";
+static const NSInteger AnClickTaskListEditButtonTagBase = 51000;
+static const NSInteger AnClickTaskListRunButtonTagBase = 52000;
+static const NSInteger AnClickTaskListCollapseButtonTagBase = 53000;
 static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.10;
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
 static void (*AnClickOriginalSpringBoardHandlePhysicalButtonEvent)(id self, SEL _cmd, id event);
@@ -251,7 +256,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 @property (nonatomic, assign, getter=isRecording) BOOL recording;
 @end
 
-@interface AnClickUI : NSObject <UITextFieldDelegate, UIGestureRecognizerDelegate, UIPickerViewDataSource, UIPickerViewDelegate, UIScrollViewDelegate>
+@interface AnClickUI : NSObject <UITextFieldDelegate, UIGestureRecognizerDelegate, UIPickerViewDataSource, UIPickerViewDelegate, UIScrollViewDelegate, UITableViewDataSource, UITableViewDelegate>
 + (instancetype)shared;
 - (void)show;
 - (void)handleScreenGeometryChanged;
@@ -367,7 +372,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_successJumpTaskButton;
     UIButton *_failureJumpTaskButton;
     NSArray<UIButton *> *_modeButtons;
-    UIScrollView *_taskListView;
+    UITableView *_taskListView;
     UIScrollView *_editorContentScrollView;
     NSMutableArray<UIView *> *_editorSectionViews;
     UILabel *_statusLabel;
@@ -577,6 +582,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSInteger _globalStopMinute;
     NSInteger _globalStopSecond;
     NSInteger _currentGlobalRunCycle;
+    NSInteger _taskRunSingleStepStopIndex;
     NSInteger _taskRunResumeCycle;
     NSUInteger _taskRunResumeIndex;
     NSInteger _targetColorRed;
@@ -1630,6 +1636,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _recognitionFailureActionTaskIndex = -1;
     _editingBranchOwnerTaskIndex = -1;
     _editingBranchActionMode = AnClickActionModeNone;
+    _taskRunSingleStepStopIndex = -1;
     _globalDelayMilliseconds = 0;
     _globalRunRepeatCount = 1;
     _globalStartEnabled = NO;
@@ -2394,11 +2401,24 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [_networkPostValueModeButtons addObject:modeButton];
     }
 
-    _taskListView = [[UIScrollView alloc] initWithFrame:CGRectMake(8, 84, panelWidth - 16, panelHeight - 92)];
-    _taskListView.backgroundColor = [self themeControlFillColor];
-    _taskListView.layer.cornerRadius = 4;
-    _taskListView.layer.borderWidth = 1;
-    _taskListView.layer.borderColor = [self themeSeparatorColor].CGColor;
+    _taskListView = [[UITableView alloc] initWithFrame:CGRectMake(8, 84, panelWidth - 16, panelHeight - 92) style:UITableViewStylePlain];
+    _taskListView.backgroundColor = UIColor.clearColor;
+    _taskListView.dataSource = self;
+    _taskListView.delegate = self;
+    _taskListView.separatorStyle = UITableViewCellSeparatorStyleNone;
+    _taskListView.estimatedRowHeight = 60.0;
+    _taskListView.rowHeight = UITableViewAutomaticDimension;
+    _taskListView.showsVerticalScrollIndicator = YES;
+    _taskListView.alwaysBounceVertical = YES;
+    _taskListView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
+    _taskListView.contentInset = UIEdgeInsetsMake(4.0, 0.0, 4.0, 0.0);
+    _taskListView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
+    _taskListView.layer.cornerRadius = 10.0;
+    _taskListView.clipsToBounds = YES;
+    if (@available(iOS 11.0, *)) {
+        _taskListView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+    }
+    [_taskListView registerClass:UITableViewCell.class forCellReuseIdentifier:AnClickTaskListCellIdentifier];
     [_panelView addSubview:_taskListView];
 
     _previewView = [[UIImageView alloc] initWithFrame:CGRectMake(8, 296, panelWidth - 16, MAX(70.0, panelHeight - 304))];
@@ -4869,7 +4889,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSMutableArray *result = [NSMutableArray array];
     for (NSDictionary *task in tasks) {
         if ([task isKindOfClass:NSDictionary.class]) {
-            [result addObject:[task mutableCopy]];
+            NSMutableDictionary *mutableTask = [task mutableCopy];
+            if (!mutableTask[AnClickTaskExpandedKey]) {
+                mutableTask[AnClickTaskExpandedKey] = @NO;
+            }
+            [result addObject:mutableTask];
         }
     }
     return result;
@@ -11540,6 +11564,248 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 }
 
+- (BOOL)taskIsExpanded:(NSDictionary *)task {
+    return [task[AnClickTaskExpandedKey] boolValue];
+}
+
+- (NSMutableDictionary *)mutableTaskAtIndex:(NSUInteger)index {
+    if (index >= _taskItems.count) {
+        return nil;
+    }
+    NSMutableDictionary *task = _taskItems[index];
+    if (![task isKindOfClass:NSMutableDictionary.class]) {
+        task = [task mutableCopy];
+        _taskItems[index] = task;
+    }
+    return task;
+}
+
+- (NSString *)taskListHeaderTitleForTask:(NSDictionary *)task index:(NSUInteger)index {
+    AnClickActionMode mode = [self modeForTask:task];
+    NSString *name = mode == AnClickActionModeNone ? @"未设置" : [self actionNameForMode:mode];
+    return [NSString stringWithFormat:@"#%02lu %@", (unsigned long)index + 1, name];
+}
+
+- (NSString *)taskListSummaryForTask:(NSDictionary *)task index:(NSUInteger)index {
+    NSString *title = [self titleForTask:task index:index];
+    NSRange newline = [title rangeOfString:@"\n"];
+    if (newline.location != NSNotFound && newline.location + 1 < title.length) {
+        return [title substringFromIndex:newline.location + 1];
+    }
+    return title;
+}
+
+- (NSString *)taskListIconNameForMode:(AnClickActionMode)mode {
+    switch (mode) {
+        case AnClickActionModeTap:
+        case AnClickActionModeDoubleTap:
+        case AnClickActionModeTwoFingerTap:
+            return @"hand.tap.fill";
+        case AnClickActionModeLongPress:
+            return @"hand.point.up.left.fill";
+        case AnClickActionModeSwipe:
+            return @"arrow.left.and.right";
+        case AnClickActionModePinchIn:
+        case AnClickActionModePinchOut:
+            return @"arrow.up.left.and.arrow.down.right";
+        case AnClickActionModeRotate:
+            return @"rotate.right";
+        case AnClickActionModeImage:
+            return @"photo.fill";
+        case AnClickActionModeMacro:
+            return @"record.circle.fill";
+        case AnClickActionModeOCR:
+            return @"text.viewfinder";
+        case AnClickActionModeColor:
+            return @"eyedropper.full";
+        case AnClickActionModeNetwork:
+            return @"network";
+        case AnClickActionModeJump:
+            return @"arrow.triangle.branch";
+        default:
+            return @"circle";
+    }
+}
+
+- (UILabel *)taskListLabelWithText:(NSString *)text font:(UIFont *)font color:(UIColor *)color lines:(NSInteger)lines {
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    label.text = text ?: @"";
+    label.font = font;
+    label.textColor = color ?: [self themePrimaryTextColor];
+    label.numberOfLines = lines;
+    label.adjustsFontSizeToFitWidth = lines == 1;
+    label.minimumScaleFactor = 0.72;
+    label.lineBreakMode = lines == 1 ? NSLineBreakByTruncatingMiddle : NSLineBreakByTruncatingTail;
+    return label;
+}
+
+- (UIView *)taskListMetricViewWithTitle:(NSString *)title value:(NSString *)value tint:(UIColor *)tint {
+    UIView *view = [[UIView alloc] initWithFrame:CGRectZero];
+    view.translatesAutoresizingMaskIntoConstraints = NO;
+    view.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.86];
+    view.layer.cornerRadius = 7.0;
+    view.layer.borderWidth = 1.0;
+    view.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.55].CGColor;
+
+    UILabel *titleLabel = [self taskListLabelWithText:title
+                                                font:[UIFont systemFontOfSize:10.5 weight:UIFontWeightSemibold]
+                                               color:[self themeSecondaryTextColor]
+                                               lines:1];
+    UILabel *valueLabel = [self taskListLabelWithText:value.length > 0 ? value : @"-"
+                                                font:[UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightSemibold]
+                                               color:tint ?: [self themePrimaryTextColor]
+                                               lines:1];
+    [view addSubview:titleLabel];
+    [view addSubview:valueLabel];
+    [NSLayoutConstraint activateConstraints:@[
+        [titleLabel.topAnchor constraintEqualToAnchor:view.topAnchor constant:4.0],
+        [titleLabel.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:7.0],
+        [titleLabel.trailingAnchor constraintEqualToAnchor:view.trailingAnchor constant:-7.0],
+        [valueLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:1.0],
+        [valueLabel.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:7.0],
+        [valueLabel.trailingAnchor constraintEqualToAnchor:view.trailingAnchor constant:-7.0],
+        [valueLabel.bottomAnchor constraintLessThanOrEqualToAnchor:view.bottomAnchor constant:-4.0],
+        [view.heightAnchor constraintEqualToConstant:40.0],
+    ]];
+    return view;
+}
+
+- (UIButton *)taskListSmallButtonWithTitle:(NSString *)title tag:(NSInteger)tag action:(SEL)action tint:(UIColor *)tint {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+    button.tag = tag;
+    [button setTitle:title forState:UIControlStateNormal];
+    [button setTitleColor:tint ?: [self themeHighlightColor] forState:UIControlStateNormal];
+    button.tintColor = tint ?: [self themeHighlightColor];
+    button.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightBold];
+    button.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.92];
+    button.layer.cornerRadius = 7.0;
+    button.layer.borderWidth = 1.0;
+    button.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.58].CGColor;
+    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return button;
+}
+
+- (UIView *)taskListBranchLineWithTitle:(NSString *)title detail:(NSString *)detail success:(BOOL)success {
+    UIView *view = [[UIView alloc] initWithFrame:CGRectZero];
+    view.translatesAutoresizingMaskIntoConstraints = NO;
+    UIColor *roleColor = [self branchRoleColorForSuccess:success];
+    view.backgroundColor = [roleColor colorWithAlphaComponent:0.08];
+    view.layer.cornerRadius = 7.0;
+    view.layer.borderWidth = 1.0;
+    view.layer.borderColor = [roleColor colorWithAlphaComponent:0.32].CGColor;
+
+    UILabel *markLabel = [self taskListLabelWithText:success ? @"✓" : @"✕"
+                                               font:[UIFont systemFontOfSize:14 weight:UIFontWeightBold]
+                                              color:roleColor
+                                              lines:1];
+    UILabel *titleLabel = [self taskListLabelWithText:title
+                                                font:[UIFont systemFontOfSize:12 weight:UIFontWeightBold]
+                                               color:roleColor
+                                               lines:1];
+    UILabel *detailLabel = [self taskListLabelWithText:detail.length > 0 ? detail : @"未设置"
+                                                 font:[UIFont systemFontOfSize:12 weight:UIFontWeightMedium]
+                                                color:[self themePrimaryTextColor]
+                                                lines:1];
+    [view addSubview:markLabel];
+    [view addSubview:titleLabel];
+    [view addSubview:detailLabel];
+    [NSLayoutConstraint activateConstraints:@[
+        [view.heightAnchor constraintEqualToConstant:30.0],
+        [markLabel.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:8.0],
+        [markLabel.centerYAnchor constraintEqualToAnchor:view.centerYAnchor],
+        [markLabel.widthAnchor constraintEqualToConstant:15.0],
+        [titleLabel.leadingAnchor constraintEqualToAnchor:markLabel.trailingAnchor constant:3.0],
+        [titleLabel.centerYAnchor constraintEqualToAnchor:view.centerYAnchor],
+        [titleLabel.widthAnchor constraintEqualToConstant:39.0],
+        [detailLabel.leadingAnchor constraintEqualToAnchor:titleLabel.trailingAnchor constant:5.0],
+        [detailLabel.trailingAnchor constraintEqualToAnchor:view.trailingAnchor constant:-8.0],
+        [detailLabel.centerYAnchor constraintEqualToAnchor:view.centerYAnchor],
+    ]];
+    return view;
+}
+
+- (BOOL)primaryPointForTask:(NSDictionary *)task point:(CGPoint *)point {
+    NSValue *pointValue = task[@"point"];
+    if ([pointValue isKindOfClass:NSValue.class]) {
+        if (point) {
+            *point = [self resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
+        }
+        return YES;
+    }
+    NSArray *path = [task[@"path"] isKindOfClass:NSArray.class] ? task[@"path"] : nil;
+    NSValue *pathPoint = path.firstObject;
+    if ([pathPoint isKindOfClass:NSValue.class]) {
+        if (point) {
+            *point = pathPoint.CGPointValue;
+        }
+        return YES;
+    }
+    NSArray *multiPoints = [self storedMultiTapPointsForTask:task];
+    NSValue *multiPoint = multiPoints.firstObject;
+    if ([multiPoint isKindOfClass:NSValue.class]) {
+        if (point) {
+            *point = multiPoint.CGPointValue;
+        }
+        return YES;
+    }
+    return NO;
+}
+
+- (NSDictionary *)primaryColorSampleForTask:(NSDictionary *)task {
+    NSArray<NSDictionary *> *samples = [self mutableColorSamplesArrayFromObject:task[@"colorPoints"]];
+    if (samples.count > 0) {
+        return samples.firstObject;
+    }
+    if ([task[@"colorRed"] respondsToSelector:@selector(integerValue)] &&
+        [task[@"colorGreen"] respondsToSelector:@selector(integerValue)] &&
+        [task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
+        return @{
+            @"red": @([task[@"colorRed"] integerValue]),
+            @"green": @([task[@"colorGreen"] integerValue]),
+            @"blue": @([task[@"colorBlue"] integerValue]),
+        };
+    }
+    return nil;
+}
+
+- (NSString *)thresholdSummaryForTask:(NSDictionary *)task {
+    AnClickActionMode mode = [self modeForTask:task];
+    if (mode == AnClickActionModeColor) {
+        double tolerance = [task[@"colorTolerance"] respondsToSelector:@selector(doubleValue)]
+            ? MIN(255.0, MAX(0.0, [task[@"colorTolerance"] doubleValue]))
+            : 18.0;
+        return [NSString stringWithFormat:@"%.0f", tolerance];
+    }
+    if (mode == AnClickActionModeImage) {
+        double threshold = [task[@"threshold"] respondsToSelector:@selector(doubleValue)]
+            ? MIN(1.0, MAX(0.0, [task[@"threshold"] doubleValue]))
+            : 0.80;
+        return [NSString stringWithFormat:@"%.0f%%", threshold * 100.0];
+    }
+    if (mode == AnClickActionModeOCR) {
+        return [self ocrMatchModeTitleForMode:[self ocrMatchModeForTask:task]];
+    }
+    return @"-";
+}
+
+- (NSString *)recognitionTargetSummaryForTask:(NSDictionary *)task {
+    AnClickActionMode mode = [self modeForTask:task];
+    if (mode == AnClickActionModeImage) {
+        return [task[@"templatePath"] isKindOfClass:NSString.class] ? @"已截图" : @"未截图";
+    }
+    if (mode == AnClickActionModeOCR) {
+        NSString *text = [self trimmedActionDescription:task[@"ocrText"]];
+        return text.length > 0 ? [self ocrDisplayTextForText:text matchMode:[self ocrMatchModeForTask:task]] : @"未设置";
+    }
+    if (mode == AnClickActionModeColor) {
+        NSDictionary *sample = [self primaryColorSampleForTask:task];
+        return sample ? [self colorHexStringForSample:sample] : @"未取色";
+    }
+    return @"-";
+}
+
 - (void)refreshTaskList {
     [self refreshCollapsedButtonTitle];
     BOOL hasTasks = _taskItems.count > 0;
@@ -11551,99 +11817,409 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    for (UIView *view in _taskListView.subviews) {
-        [view removeFromSuperview];
-    }
-
-    CGFloat rowHeight = [self taskListRowHeight];
-    CGFloat cardHeight = [self taskListCardHeight];
-    CGFloat width = _taskListView.bounds.size.width;
     if (_taskItems.count == 0) {
-        UILabel *emptyLabel = [[UILabel alloc] initWithFrame:CGRectMake(12.0, 18.0, width - 24.0, 46.0)];
+        UILabel *emptyLabel = [[UILabel alloc] initWithFrame:_taskListView.bounds];
         emptyLabel.text = @"暂无任务  点击添加";
         emptyLabel.textAlignment = NSTextAlignmentCenter;
         emptyLabel.textColor = [self themeSecondaryTextColor];
         emptyLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
         emptyLabel.adjustsFontSizeToFitWidth = YES;
         emptyLabel.minimumScaleFactor = 0.7;
-        [_taskListView addSubview:emptyLabel];
+        _taskListView.backgroundView = emptyLabel;
+    } else {
+        _taskListView.backgroundView = nil;
     }
-    for (NSUInteger i = 0; i < _taskItems.count; i++) {
-        CGFloat rowY = 8.0 + rowHeight * i;
-        NSDictionary *task = _taskItems[i];
-        BOOL flowRow = [self modeIsRecognitionTask:[self modeForTask:task]];
-        UIButton *deleteButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        deleteButton.tag = 50000 + (NSInteger)i;
-        deleteButton.frame = CGRectMake(width - 88.0, rowY, 82.0, cardHeight);
-        [deleteButton setTitle:@"删除" forState:UIControlStateNormal];
-        [deleteButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-        deleteButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-        deleteButton.backgroundColor = [self themeDangerColor];
-        deleteButton.layer.cornerRadius = 8.0;
-        deleteButton.layer.borderWidth = 1;
-        deleteButton.layer.borderColor = [[self themeDangerColor] colorWithAlphaComponent:0.86].CGColor;
-        deleteButton.layer.shadowColor = UIColor.blackColor.CGColor;
-        deleteButton.layer.shadowOffset = CGSizeMake(0, 2);
-        deleteButton.layer.shadowRadius = 4.0;
-        deleteButton.layer.shadowOpacity = 0.12;
-        deleteButton.hidden = (NSInteger)i != _revealedDeleteTaskIndex;
-        deleteButton.alpha = deleteButton.hidden ? 0.0 : 1.0;
-        [deleteButton addTarget:self action:@selector(deleteTaskButtonAtIndex:) forControlEvents:UIControlEventTouchUpInside];
-        [_taskListView addSubview:deleteButton];
-        [self updateButtonShadowPath:deleteButton];
+    [_taskListView reloadData];
+}
 
-        UIButton *row = [UIButton buttonWithType:UIButtonTypeSystem];
-        row.tag = (NSInteger)i;
-        row.frame = CGRectMake(6.0, rowY, width - 12.0, cardHeight);
-        [row setTitleColor:[self themePrimaryTextColor] forState:UIControlStateNormal];
-        row.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-        row.titleLabel.numberOfLines = flowRow ? 1 : 3;
-        row.titleLabel.adjustsFontSizeToFitWidth = YES;
-        row.titleLabel.minimumScaleFactor = 0.62;
-        row.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
-        row.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
-        row.titleEdgeInsets = flowRow ? UIEdgeInsetsZero : UIEdgeInsetsMake(0, 14, 0, 34);
-        BOOL selected = (NSInteger)i == _selectedTaskIndex;
-        row.backgroundColor = selected
-            ? [[self themeHighlightColor] colorWithAlphaComponent:0.12]
-            : [self themeSurfaceColor];
-        row.layer.cornerRadius = 12;
-        row.clipsToBounds = YES;
-        row.layer.borderWidth = 1;
-        row.layer.borderColor = selected
-            ? [[self themeHighlightColor] colorWithAlphaComponent:0.55].CGColor
-            : [[self themeSeparatorColor] colorWithAlphaComponent:0.82].CGColor;
-        row.layer.shadowColor = UIColor.blackColor.CGColor;
-        row.layer.shadowOffset = CGSizeMake(0, 1);
-        row.layer.shadowRadius = 3.0;
-        row.layer.shadowOpacity = selected ? 0.08 : 0.035;
-        if ((NSInteger)i == _revealedDeleteTaskIndex) {
-            row.transform = CGAffineTransformMakeTranslation(-88.0, 0);
-        }
-        [self updateButtonShadowPath:row];
-        if (flowRow) {
-            [row setTitle:@"" forState:UIControlStateNormal];
-            [self addRecognitionFlowSubviewsToRow:row task:task index:i selected:selected];
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return tableView == _taskListView ? (NSInteger)_taskItems.count : 0;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:AnClickTaskListCellIdentifier forIndexPath:indexPath];
+    for (UIView *view in cell.contentView.subviews) {
+        [view removeFromSuperview];
+    }
+    cell.backgroundColor = UIColor.clearColor;
+    cell.contentView.backgroundColor = UIColor.clearColor;
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    cell.clipsToBounds = NO;
+    cell.contentView.clipsToBounds = NO;
+
+    if (indexPath.row < 0 || indexPath.row >= (NSInteger)_taskItems.count) {
+        return cell;
+    }
+
+    NSDictionary *task = _taskItems[(NSUInteger)indexPath.row];
+    AnClickActionMode mode = [self modeForTask:task];
+    BOOL expanded = [self taskIsExpanded:task];
+    BOOL selected = indexPath.row == _selectedTaskIndex;
+    UIColor *accent = [self accentColorForActionMode:mode];
+
+    UIView *cardView = [[UIView alloc] initWithFrame:CGRectZero];
+    cardView.translatesAutoresizingMaskIntoConstraints = NO;
+    cardView.backgroundColor = expanded
+        ? [[self themeSurfaceColor] colorWithAlphaComponent:0.92]
+        : [self themeSurfaceColor];
+    cardView.layer.cornerRadius = 10.0;
+    cardView.layer.borderWidth = selected || expanded ? 1.3 : 1.0;
+    cardView.layer.borderColor = (selected || expanded
+        ? [accent colorWithAlphaComponent:0.56]
+        : [[self themeSeparatorColor] colorWithAlphaComponent:0.72]).CGColor;
+    cardView.layer.shadowColor = [self neumorphicShadowColor].CGColor;
+    cardView.layer.shadowOffset = CGSizeMake(3.0, 4.0);
+    cardView.layer.shadowRadius = expanded ? 9.0 : 5.0;
+    cardView.layer.shadowOpacity = expanded ? 0.11 : 0.055;
+    [cell.contentView addSubview:cardView];
+
+    UIView *accentRail = [[UIView alloc] initWithFrame:CGRectZero];
+    accentRail.translatesAutoresizingMaskIntoConstraints = NO;
+    accentRail.backgroundColor = accent;
+    [cardView addSubview:accentRail];
+
+    UIImageView *iconView = [[UIImageView alloc] initWithFrame:CGRectZero];
+    iconView.translatesAutoresizingMaskIntoConstraints = NO;
+    iconView.contentMode = UIViewContentModeScaleAspectFit;
+    iconView.tintColor = expanded ? UIColor.whiteColor : accent;
+    if (@available(iOS 13.0, *)) {
+        iconView.image = [UIImage systemImageNamed:[self taskListIconNameForMode:mode]];
+    }
+    [cardView addSubview:iconView];
+
+    UILabel *fallbackIconLabel = nil;
+    if (!iconView.image) {
+        fallbackIconLabel = [self taskListLabelWithText:@"●"
+                                                  font:[UIFont systemFontOfSize:13 weight:UIFontWeightBold]
+                                                 color:expanded ? UIColor.whiteColor : accent
+                                                 lines:1];
+        fallbackIconLabel.textAlignment = NSTextAlignmentCenter;
+        [cardView addSubview:fallbackIconLabel];
+    }
+
+    UILabel *titleLabel = [self taskListLabelWithText:[self taskListHeaderTitleForTask:task index:(NSUInteger)indexPath.row]
+                                                font:[UIFont systemFontOfSize:15 weight:UIFontWeightBold]
+                                               color:expanded ? UIColor.whiteColor : [self themePrimaryTextColor]
+                                               lines:1];
+    [cardView addSubview:titleLabel];
+
+    UILabel *summaryLabel = [self taskListLabelWithText:[self taskListSummaryForTask:task index:(NSUInteger)indexPath.row]
+                                                  font:[UIFont systemFontOfSize:12.5 weight:UIFontWeightMedium]
+                                                 color:expanded ? [[UIColor whiteColor] colorWithAlphaComponent:0.88] : [self themeSecondaryTextColor]
+                                                 lines:expanded ? 1 : 2];
+    [cardView addSubview:summaryLabel];
+
+    UILabel *arrowLabel = [self taskListLabelWithText:expanded ? @"▲" : @"▼"
+                                                font:[UIFont systemFontOfSize:13 weight:UIFontWeightBold]
+                                               color:expanded ? UIColor.whiteColor : [self themeSecondaryTextColor]
+                                               lines:1];
+    arrowLabel.textAlignment = NSTextAlignmentCenter;
+    [cardView addSubview:arrowLabel];
+
+    UIView *headerFill = nil;
+    if (expanded) {
+        headerFill = [[UIView alloc] initWithFrame:CGRectZero];
+        headerFill.translatesAutoresizingMaskIntoConstraints = NO;
+        headerFill.backgroundColor = accent;
+        headerFill.userInteractionEnabled = NO;
+        [cardView insertSubview:headerFill atIndex:0];
+    }
+
+    NSMutableArray<NSLayoutConstraint *> *constraints = [NSMutableArray arrayWithArray:@[
+        [cardView.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:5.0],
+        [cardView.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:6.0],
+        [cardView.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-6.0],
+        [cardView.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-5.0],
+        [accentRail.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor],
+        [accentRail.topAnchor constraintEqualToAnchor:cardView.topAnchor],
+        [accentRail.bottomAnchor constraintEqualToAnchor:cardView.bottomAnchor],
+        [accentRail.widthAnchor constraintEqualToConstant:expanded ? 0.0 : 4.0],
+        [iconView.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:14.0],
+        [iconView.topAnchor constraintEqualToAnchor:cardView.topAnchor constant:14.0],
+        [iconView.widthAnchor constraintEqualToConstant:18.0],
+        [iconView.heightAnchor constraintEqualToConstant:18.0],
+        [titleLabel.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:8.0],
+        [titleLabel.topAnchor constraintEqualToAnchor:cardView.topAnchor constant:9.0],
+        [titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:arrowLabel.leadingAnchor constant:-8.0],
+        [summaryLabel.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
+        [summaryLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:2.0],
+        [summaryLabel.trailingAnchor constraintEqualToAnchor:arrowLabel.leadingAnchor constant:-8.0],
+        [arrowLabel.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-12.0],
+        [arrowLabel.centerYAnchor constraintEqualToAnchor:titleLabel.centerYAnchor],
+        [arrowLabel.widthAnchor constraintEqualToConstant:24.0],
+    ]];
+    if (fallbackIconLabel) {
+        [constraints addObjectsFromArray:@[
+            [fallbackIconLabel.centerXAnchor constraintEqualToAnchor:iconView.centerXAnchor],
+            [fallbackIconLabel.centerYAnchor constraintEqualToAnchor:iconView.centerYAnchor],
+            [fallbackIconLabel.widthAnchor constraintEqualToAnchor:iconView.widthAnchor],
+            [fallbackIconLabel.heightAnchor constraintEqualToAnchor:iconView.heightAnchor],
+        ]];
+    }
+    if (headerFill) {
+        [constraints addObjectsFromArray:@[
+            [headerFill.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor],
+            [headerFill.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor],
+            [headerFill.topAnchor constraintEqualToAnchor:cardView.topAnchor],
+            [headerFill.heightAnchor constraintEqualToConstant:44.0],
+        ]];
+    }
+
+    UIView *lastView = summaryLabel;
+    if (expanded) {
+        UILabel *detailTitle = [self taskListLabelWithText:@"详细配置"
+                                                     font:[UIFont systemFontOfSize:13 weight:UIFontWeightBold]
+                                                    color:[self themePrimaryTextColor]
+                                                    lines:1];
+        [cardView addSubview:detailTitle];
+
+        CGPoint point = CGPointZero;
+        BOOL hasPoint = [self primaryPointForTask:task point:&point];
+        UIView *xBox = [self taskListMetricViewWithTitle:@"X" value:hasPoint ? [NSString stringWithFormat:@"%.0f", point.x] : @"自动" tint:accent];
+        UIView *yBox = [self taskListMetricViewWithTitle:@"Y" value:hasPoint ? [NSString stringWithFormat:@"%.0f", point.y] : @"自动" tint:accent];
+        UIButton *editPointButton = [self taskListSmallButtonWithTitle:@"修改"
+                                                                    tag:AnClickTaskListEditButtonTagBase + indexPath.row
+                                                                 action:@selector(editTaskButtonAtIndex:)
+                                                                   tint:[self themeHighlightColor]];
+        [cardView addSubview:xBox];
+        [cardView addSubview:yBox];
+        [cardView addSubview:editPointButton];
+
+        UIView *delayBox = [self taskListMetricViewWithTitle:@"前置延时"
+                                                       value:[self millisecondsSummaryTextForDuration:[self delayForTask:task]]
+                                                        tint:[self themePrimaryTextColor]];
+        UIView *intervalBox = [self taskListMetricViewWithTitle:@"后置延时"
+                                                          value:[self millisecondsSummaryTextForDuration:[self actionIntervalForTask:task]]
+                                                           tint:[self themePrimaryTextColor]];
+        UIView *pressBox = [self taskListMetricViewWithTitle:@"长按时长"
+                                                       value:mode == AnClickActionModeLongPress ? [self longPressDurationSummaryText:[self longPressDurationForTask:task]] : @"0ms"
+                                                        tint:[self themePrimaryTextColor]];
+        [cardView addSubview:delayBox];
+        [cardView addSubview:intervalBox];
+        [cardView addSubview:pressBox];
+
+        UIView *targetBox = [self taskListMetricViewWithTitle:[self modeIsRecognitionTask:mode] ? @"识别目标" : @"动作目标"
+                                                        value:[self recognitionTargetSummaryForTask:task]
+                                                         tint:accent];
+        UIView *thresholdBox = [self taskListMetricViewWithTitle:mode == AnClickActionModeColor ? @"容差" : @"阈值"
+                                                           value:[self thresholdSummaryForTask:task]
+                                                            tint:accent];
+        [cardView addSubview:targetBox];
+        [cardView addSubview:thresholdBox];
+
+        UIView *swatchView = [[UIView alloc] initWithFrame:CGRectZero];
+        swatchView.translatesAutoresizingMaskIntoConstraints = NO;
+        swatchView.layer.cornerRadius = 8.0;
+        swatchView.layer.borderWidth = 1.0;
+        swatchView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72].CGColor;
+        NSDictionary *sample = [self primaryColorSampleForTask:task];
+        if (sample) {
+            swatchView.backgroundColor = [UIColor colorWithRed:MIN(255, MAX(0, [sample[@"red"] integerValue])) / 255.0
+                                                         green:MIN(255, MAX(0, [sample[@"green"] integerValue])) / 255.0
+                                                          blue:MIN(255, MAX(0, [sample[@"blue"] integerValue])) / 255.0
+                                                         alpha:1.0];
         } else {
-            [row setTitle:[self titleForTask:task index:i] forState:UIControlStateNormal];
+            swatchView.backgroundColor = [accent colorWithAlphaComponent:0.18];
         }
-        [row addTarget:self action:@selector(selectTaskButton:) forControlEvents:UIControlEventTouchUpInside];
+        [cardView addSubview:swatchView];
 
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleTaskPan:)];
-        pan.cancelsTouchesInView = YES;
-        pan.delegate = self;
-        [row addGestureRecognizer:pan];
+        NSString *successText = [self modeIsRecognitionTask:mode] ? [self recognitionSuccessActionSummaryForTask:task] : @"成功后顺序继续";
+        NSString *failureText = [self modeIsRecognitionTask:mode] ? [self recognitionFailureActionSummaryForTask:task] : @"失败分支未启用";
+        UIView *successLine = [self taskListBranchLineWithTitle:@"成功" detail:successText success:YES];
+        UIView *failureLine = [self taskListBranchLineWithTitle:@"失败" detail:failureText success:NO];
+        [cardView addSubview:successLine];
+        [cardView addSubview:failureLine];
 
-        UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleTaskLongPress:)];
-        longPress.minimumPressDuration = 0.55;
-        [row addGestureRecognizer:longPress];
-        [_taskListView addSubview:row];
+        UIButton *runButton = [self taskListSmallButtonWithTitle:@"运行此单步测试"
+                                                             tag:AnClickTaskListRunButtonTagBase + indexPath.row
+                                                          action:@selector(runSingleTaskTestButtonAtIndex:)
+                                                            tint:[self themeHighlightColor]];
+        UIButton *collapseButton = [self taskListSmallButtonWithTitle:@"折叠 ▲"
+                                                                  tag:AnClickTaskListCollapseButtonTagBase + indexPath.row
+                                                               action:@selector(collapseTaskButtonAtIndex:)
+                                                                 tint:[self themeHighlightColor]];
+        [cardView addSubview:runButton];
+        [cardView addSubview:collapseButton];
+
+        CGFloat side = 12.0;
+        CGFloat gap = 7.0;
+        [constraints addObjectsFromArray:@[
+            [detailTitle.topAnchor constraintEqualToAnchor:summaryLabel.bottomAnchor constant:18.0],
+            [detailTitle.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
+            [detailTitle.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
+
+            [xBox.topAnchor constraintEqualToAnchor:detailTitle.bottomAnchor constant:7.0],
+            [xBox.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
+            [yBox.topAnchor constraintEqualToAnchor:xBox.topAnchor],
+            [yBox.leadingAnchor constraintEqualToAnchor:xBox.trailingAnchor constant:gap],
+            [yBox.widthAnchor constraintEqualToAnchor:xBox.widthAnchor],
+            [editPointButton.leadingAnchor constraintEqualToAnchor:yBox.trailingAnchor constant:gap],
+            [editPointButton.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
+            [editPointButton.topAnchor constraintEqualToAnchor:xBox.topAnchor],
+            [editPointButton.heightAnchor constraintEqualToAnchor:xBox.heightAnchor],
+            [editPointButton.widthAnchor constraintEqualToConstant:54.0],
+
+            [delayBox.topAnchor constraintEqualToAnchor:xBox.bottomAnchor constant:7.0],
+            [delayBox.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
+            [intervalBox.topAnchor constraintEqualToAnchor:delayBox.topAnchor],
+            [intervalBox.leadingAnchor constraintEqualToAnchor:delayBox.trailingAnchor constant:gap],
+            [intervalBox.widthAnchor constraintEqualToAnchor:delayBox.widthAnchor],
+            [pressBox.topAnchor constraintEqualToAnchor:delayBox.topAnchor],
+            [pressBox.leadingAnchor constraintEqualToAnchor:intervalBox.trailingAnchor constant:gap],
+            [pressBox.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
+            [pressBox.widthAnchor constraintEqualToAnchor:delayBox.widthAnchor],
+
+            [swatchView.topAnchor constraintEqualToAnchor:delayBox.bottomAnchor constant:8.0],
+            [swatchView.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
+            [swatchView.widthAnchor constraintEqualToConstant:40.0],
+            [swatchView.heightAnchor constraintEqualToConstant:40.0],
+            [targetBox.topAnchor constraintEqualToAnchor:swatchView.topAnchor],
+            [targetBox.leadingAnchor constraintEqualToAnchor:swatchView.trailingAnchor constant:gap],
+            [thresholdBox.topAnchor constraintEqualToAnchor:swatchView.topAnchor],
+            [thresholdBox.leadingAnchor constraintEqualToAnchor:targetBox.trailingAnchor constant:gap],
+            [thresholdBox.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
+            [thresholdBox.widthAnchor constraintEqualToAnchor:targetBox.widthAnchor multiplier:0.72],
+
+            [successLine.topAnchor constraintEqualToAnchor:targetBox.bottomAnchor constant:8.0],
+            [successLine.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
+            [successLine.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
+            [failureLine.topAnchor constraintEqualToAnchor:successLine.bottomAnchor constant:6.0],
+            [failureLine.leadingAnchor constraintEqualToAnchor:successLine.leadingAnchor],
+            [failureLine.trailingAnchor constraintEqualToAnchor:successLine.trailingAnchor],
+
+            [runButton.topAnchor constraintEqualToAnchor:failureLine.bottomAnchor constant:8.0],
+            [runButton.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
+            [runButton.heightAnchor constraintEqualToConstant:34.0],
+            [collapseButton.topAnchor constraintEqualToAnchor:runButton.topAnchor],
+            [collapseButton.leadingAnchor constraintEqualToAnchor:runButton.trailingAnchor constant:gap],
+            [collapseButton.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
+            [collapseButton.widthAnchor constraintEqualToAnchor:runButton.widthAnchor multiplier:0.62],
+            [collapseButton.heightAnchor constraintEqualToAnchor:runButton.heightAnchor],
+        ]];
+        lastView = runButton;
     }
-    _taskListView.contentSize = CGSizeMake(width, MAX(_taskListView.bounds.size.height + 1.0, 16.0 + rowHeight * _taskItems.count));
+
+    if (expanded) {
+        [constraints addObject:[cardView.bottomAnchor constraintEqualToAnchor:lastView.bottomAnchor constant:12.0]];
+    } else {
+        [constraints addObject:[summaryLabel.bottomAnchor constraintEqualToAnchor:cardView.bottomAnchor constant:-10.0]];
+    }
+    [NSLayoutConstraint activateConstraints:constraints];
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (tableView != _taskListView ||
+        indexPath.row < 0 ||
+        indexPath.row >= (NSInteger)_taskItems.count) {
+        return;
+    }
+
+    NSMutableDictionary *task = [self mutableTaskAtIndex:(NSUInteger)indexPath.row];
+    BOOL expanded = ![self taskIsExpanded:task];
+    NSMutableArray<NSIndexPath *> *reloadIndexPaths = [NSMutableArray arrayWithObject:indexPath];
+    for (NSUInteger i = 0; i < _taskItems.count; i++) {
+        if ((NSInteger)i == indexPath.row) {
+            continue;
+        }
+        NSMutableDictionary *otherTask = [self mutableTaskAtIndex:i];
+        if ([self taskIsExpanded:otherTask]) {
+            otherTask[AnClickTaskExpandedKey] = @NO;
+            [reloadIndexPaths addObject:[NSIndexPath indexPathForRow:(NSInteger)i inSection:0]];
+        }
+    }
+    task[AnClickTaskExpandedKey] = @(expanded);
+    _selectedTaskIndex = indexPath.row;
+    _revealedDeleteTaskIndex = -1;
+    [tableView performBatchUpdates:^{
+        [tableView reloadRowsAtIndexPaths:reloadIndexPaths withRowAnimation:UITableViewRowAnimationFade];
+    } completion:nil];
+    [self persistCurrentTaskList];
+    _statusLabel.text = expanded
+        ? [NSString stringWithFormat:@"展开任务%ld", (long)indexPath.row + 1]
+        : [NSString stringWithFormat:@"折叠任务%ld", (long)indexPath.row + 1];
+}
+
+- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (tableView != _taskListView || editingStyle != UITableViewCellEditingStyleDelete) {
+        return;
+    }
+    [self deleteTaskAtIndex:indexPath.row];
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForDeleteConfirmationButtonForRowAtIndexPath:(NSIndexPath *)indexPath {
+    return @"删除";
+}
+
+- (void)editTaskButtonAtIndex:(UIButton *)sender {
+    NSInteger index = sender.tag - AnClickTaskListEditButtonTagBase;
+    [self selectTaskAtIndex:index];
+}
+
+- (void)collapseTaskButtonAtIndex:(UIButton *)sender {
+    NSInteger index = sender.tag - AnClickTaskListCollapseButtonTagBase;
+    if (index < 0 || index >= (NSInteger)_taskItems.count) {
+        return;
+    }
+    NSMutableDictionary *task = [self mutableTaskAtIndex:(NSUInteger)index];
+    task[AnClickTaskExpandedKey] = @NO;
+    NSIndexPath *indexPath = [NSIndexPath indexPathForRow:index inSection:0];
+    [_taskListView performBatchUpdates:^{
+        [_taskListView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationFade];
+    } completion:nil];
+    [self persistCurrentTaskList];
+    _statusLabel.text = [NSString stringWithFormat:@"折叠任务%ld", (long)index + 1];
+}
+
+- (void)runSingleTaskTestButtonAtIndex:(UIButton *)sender {
+    NSInteger index = sender.tag - AnClickTaskListRunButtonTagBase;
+    if (index < 0 || index >= (NSInteger)_taskItems.count) {
+        _statusLabel.text = @"任务不存在";
+        return;
+    }
+    if (_taskRunActive || _taskRunPausedForForeground) {
+        [self stopTaskRunWithStatus:@"已停止"];
+        return;
+    }
+    if (![self panelCanUseCurrentScene]) {
+        return;
+    }
+    UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        _statusLabel.text = @"无窗口";
+        [self showToast:@"无窗口"];
+        return;
+    }
+    if ([AnClickRecorder shared].isRecording) {
+        _statusLabel.text = @"录制中无法测试";
+        [self showToast:@"录制中无法测试"];
+        return;
+    }
+
+    NSDictionary *task = _taskItems[(NSUInteger)index];
+    if (![self taskIsComplete:task]) {
+        [self selectTaskAtIndex:index];
+        [self showToast:_statusLabel.text ?: @"先补全任务"];
+        return;
+    }
+
+    [self cancelRunningTaskSideEffects];
+    _selectedTaskIndex = index;
+    _taskRunActive = YES;
+    [self clearTaskRunPauseState];
+    _taskRunSingleStepStopIndex = index;
+    _currentGlobalRunCycle = 0;
+    NSUInteger runGeneration = ++_taskRunGeneration;
+    [self startTaskRunRuntimeTimerReset:YES];
+    _statusLabel.text = [NSString stringWithFormat:@"单步测试任务%ld", (long)index + 1];
+    [self showToast:_statusLabel.text];
+    [self refreshTaskList];
+    [self runTaskAtIndex:(NSUInteger)index inWindow:hostWindow generation:runGeneration];
 }
 
 - (void)addTaskFromCurrentConfig {
     NSMutableDictionary *task = [NSMutableDictionary dictionary];
+    task[AnClickTaskExpandedKey] = @NO;
     [_taskItems addObject:task];
     _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
     _revealedDeleteTaskIndex = -1;
@@ -11743,6 +12319,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL updatingExistingTask = _selectedTaskIndex >= 0 &&
         _selectedTaskIndex < (NSInteger)_taskItems.count &&
         [_taskItems[(NSUInteger)_selectedTaskIndex] count] > 0;
+    BOOL wasExpanded = updatingExistingTask && [self taskIsExpanded:_taskItems[(NSUInteger)_selectedTaskIndex]];
+    task[AnClickTaskExpandedKey] = @(wasExpanded);
     if (_selectedTaskIndex < 0 || _selectedTaskIndex >= (NSInteger)_taskItems.count) {
         [_taskItems addObject:task];
         _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
@@ -15216,6 +15794,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self cancelRunningTaskSideEffects];
     _taskRunActive = YES;
     [self clearTaskRunPauseState];
+    _taskRunSingleStepStopIndex = -1;
     _currentGlobalRunCycle = 0;
     NSUInteger runGeneration = ++_taskRunGeneration;
     [self startTaskRunRuntimeTimerReset:YES];
@@ -15243,6 +15822,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     _taskRunActive = NO;
     [self clearTaskRunPauseState];
+    _taskRunSingleStepStopIndex = -1;
     _currentGlobalRunCycle = 0;
     _taskRunGeneration++;
     [self cancelRunningTaskSideEffects];
@@ -15251,6 +15831,24 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (showToast) {
         [self showToast:_statusLabel.text];
     }
+    _volumeShortcutRunSuppressToasts = NO;
+    [self refreshCollapsedButtonTitle];
+    [self refreshTaskList];
+}
+
+- (void)finishSingleStepTaskRunWithStatus:(NSString *)status {
+    if (!_taskRunActive && !_taskRunPausedForForeground) {
+        return;
+    }
+    _taskRunActive = NO;
+    [self clearTaskRunPauseState];
+    _taskRunSingleStepStopIndex = -1;
+    _currentGlobalRunCycle = 0;
+    _taskRunGeneration++;
+    [self cancelRunningTaskSideEffects];
+    [self stopTaskRunRuntimeTimerReset:YES];
+    _statusLabel.text = status.length > 0 ? status : @"单步测试完成";
+    [self showToast:_statusLabel.text];
     _volumeShortcutRunSuppressToasts = NO;
     [self refreshCollapsedButtonTitle];
     [self refreshTaskList];
@@ -15269,6 +15867,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     UIWindow *currentHostWindow = [self currentUsableHostWindowForTaskRunFallback:hostWindow];
     [self rememberTaskRunResumePointAtIndex:index inGlobalNetworkGate:NO scheduled:_taskRunResumeScheduled];
+
+    if (_taskRunSingleStepStopIndex >= 0 && (NSInteger)index != _taskRunSingleStepStopIndex) {
+        [self finishSingleStepTaskRunWithStatus:@"单步测试完成"];
+        return;
+    }
 
     if (index >= _taskItems.count) {
         _currentGlobalRunCycle++;
