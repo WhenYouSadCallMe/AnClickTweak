@@ -11583,7 +11583,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (NSString *)taskListHeaderTitleForTask:(NSDictionary *)task index:(NSUInteger)index {
     AnClickActionMode mode = [self modeForTask:task];
     NSString *name = mode == AnClickActionModeNone ? @"未设置" : [self actionNameForMode:mode];
-    return [NSString stringWithFormat:@"#%02lu %@", (unsigned long)index + 1, name];
+    return [NSString stringWithFormat:@"%02lu %@", (unsigned long)index + 1, name];
 }
 
 - (NSString *)taskListSummaryForTask:(NSDictionary *)task index:(NSUInteger)index {
@@ -11593,6 +11593,27 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return [title substringFromIndex:newline.location + 1];
     }
     return title;
+}
+
+- (NSString *)taskListCollapsedLineForTask:(NSDictionary *)task index:(NSUInteger)index {
+    NSString *summary = [self taskListSummaryForTask:task index:index];
+    NSString *prefix = [self taskListHeaderTitleForTask:task index:index];
+    if (summary.length == 0 || [summary isEqualToString:@"已设置"]) {
+        return prefix;
+    }
+    return [NSString stringWithFormat:@"%@ · %@", prefix, summary];
+}
+
+- (NSString *)taskListExpandedHeaderForTask:(NSDictionary *)task index:(NSUInteger)index {
+    AnClickActionMode mode = [self modeForTask:task];
+    NSString *name = mode == AnClickActionModeNone ? @"未设置" : [self actionNameForMode:mode];
+    if ([self modeIsRecognitionTask:mode]) {
+        AnClickActionMode successMode = [self successActionModeForTask:task];
+        if (successMode != AnClickActionModeNone) {
+            name = [NSString stringWithFormat:@"%@+%@", name, [self actionNameForMode:successMode]];
+        }
+    }
+    return [NSString stringWithFormat:@"%02lu 【%@】 点击查看详情", (unsigned long)index + 1, name];
 }
 
 - (NSString *)taskListIconNameForMode:(AnClickActionMode)mode {
@@ -11643,32 +11664,33 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (UIView *)taskListMetricViewWithTitle:(NSString *)title value:(NSString *)value tint:(UIColor *)tint {
     UIView *view = [[UIView alloc] initWithFrame:CGRectZero];
     view.translatesAutoresizingMaskIntoConstraints = NO;
-    view.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.86];
-    view.layer.cornerRadius = 7.0;
+    view.backgroundColor = [UIColor colorWithRed:0.944 green:0.947 blue:0.965 alpha:1.0];
+    view.layer.cornerRadius = 6.0;
     view.layer.borderWidth = 1.0;
-    view.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.55].CGColor;
+    view.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.42].CGColor;
 
-    UILabel *titleLabel = [self taskListLabelWithText:title
-                                                font:[UIFont systemFontOfSize:10.5 weight:UIFontWeightSemibold]
-                                               color:[self themeSecondaryTextColor]
-                                               lines:1];
     UILabel *valueLabel = [self taskListLabelWithText:value.length > 0 ? value : @"-"
-                                                font:[UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightSemibold]
+                                                font:[UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightMedium]
                                                color:tint ?: [self themePrimaryTextColor]
                                                lines:1];
-    [view addSubview:titleLabel];
+    valueLabel.textAlignment = NSTextAlignmentCenter;
     [view addSubview:valueLabel];
     [NSLayoutConstraint activateConstraints:@[
-        [titleLabel.topAnchor constraintEqualToAnchor:view.topAnchor constant:4.0],
-        [titleLabel.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:7.0],
-        [titleLabel.trailingAnchor constraintEqualToAnchor:view.trailingAnchor constant:-7.0],
-        [valueLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:1.0],
-        [valueLabel.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:7.0],
-        [valueLabel.trailingAnchor constraintEqualToAnchor:view.trailingAnchor constant:-7.0],
-        [valueLabel.bottomAnchor constraintLessThanOrEqualToAnchor:view.bottomAnchor constant:-4.0],
-        [view.heightAnchor constraintEqualToConstant:40.0],
+        [valueLabel.topAnchor constraintEqualToAnchor:view.topAnchor constant:4.0],
+        [valueLabel.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:6.0],
+        [valueLabel.trailingAnchor constraintEqualToAnchor:view.trailingAnchor constant:-6.0],
+        [valueLabel.bottomAnchor constraintEqualToAnchor:view.bottomAnchor constant:-4.0],
+        [view.heightAnchor constraintEqualToConstant:28.0],
     ]];
     return view;
+}
+
+- (UILabel *)taskListCaptionWithText:(NSString *)text {
+    UILabel *label = [self taskListLabelWithText:text
+                                            font:[UIFont systemFontOfSize:12 weight:UIFontWeightBold]
+                                           color:[self themePrimaryTextColor]
+                                           lines:1];
+    return label;
 }
 
 - (UIButton *)taskListSmallButtonWithTitle:(NSString *)title tag:(NSInteger)tag action:(SEL)action tint:(UIColor *)tint {
@@ -11679,10 +11701,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [button setTitleColor:tint ?: [self themeHighlightColor] forState:UIControlStateNormal];
     button.tintColor = tint ?: [self themeHighlightColor];
     button.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightBold];
-    button.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.92];
+    button.backgroundColor = [UIColor colorWithRed:0.940 green:0.943 blue:0.962 alpha:1.0];
     button.layer.cornerRadius = 7.0;
-    button.layer.borderWidth = 1.0;
-    button.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.58].CGColor;
+    button.layer.borderWidth = 0.0;
+    button.layer.borderColor = UIColor.clearColor.CGColor;
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
 }
@@ -11859,18 +11881,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     UIView *cardView = [[UIView alloc] initWithFrame:CGRectZero];
     cardView.translatesAutoresizingMaskIntoConstraints = NO;
-    cardView.backgroundColor = expanded
-        ? [[self themeSurfaceColor] colorWithAlphaComponent:0.92]
-        : [self themeSurfaceColor];
+    cardView.backgroundColor = UIColor.whiteColor;
     cardView.layer.cornerRadius = 10.0;
-    cardView.layer.borderWidth = selected || expanded ? 1.3 : 1.0;
+    cardView.layer.borderWidth = selected || expanded ? 1.0 : 0.8;
     cardView.layer.borderColor = (selected || expanded
-        ? [accent colorWithAlphaComponent:0.56]
-        : [[self themeSeparatorColor] colorWithAlphaComponent:0.72]).CGColor;
-    cardView.layer.shadowColor = [self neumorphicShadowColor].CGColor;
-    cardView.layer.shadowOffset = CGSizeMake(3.0, 4.0);
-    cardView.layer.shadowRadius = expanded ? 9.0 : 5.0;
-    cardView.layer.shadowOpacity = expanded ? 0.11 : 0.055;
+        ? [accent colorWithAlphaComponent:0.50]
+        : [[self themeSeparatorColor] colorWithAlphaComponent:0.34]).CGColor;
+    cardView.layer.shadowColor = UIColor.blackColor.CGColor;
+    cardView.layer.shadowOffset = CGSizeMake(0.0, 2.0);
+    cardView.layer.shadowRadius = expanded ? 8.0 : 5.0;
+    cardView.layer.shadowOpacity = expanded ? 0.12 : 0.09;
     [cell.contentView addSubview:cardView];
 
     UIView *accentRail = [[UIView alloc] initWithFrame:CGRectZero];
@@ -11897,17 +11917,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [cardView addSubview:fallbackIconLabel];
     }
 
-    UILabel *titleLabel = [self taskListLabelWithText:[self taskListHeaderTitleForTask:task index:(NSUInteger)indexPath.row]
-                                                font:[UIFont systemFontOfSize:15 weight:UIFontWeightBold]
+    UILabel *titleLabel = [self taskListLabelWithText:(expanded
+            ? [self taskListExpandedHeaderForTask:task index:(NSUInteger)indexPath.row]
+            : [self taskListCollapsedLineForTask:task index:(NSUInteger)indexPath.row])
+                                                font:[UIFont systemFontOfSize:(expanded ? 14.0 : 13.0) weight:UIFontWeightBold]
                                                color:expanded ? UIColor.whiteColor : [self themePrimaryTextColor]
                                                lines:1];
     [cardView addSubview:titleLabel];
-
-    UILabel *summaryLabel = [self taskListLabelWithText:[self taskListSummaryForTask:task index:(NSUInteger)indexPath.row]
-                                                  font:[UIFont systemFontOfSize:12.5 weight:UIFontWeightMedium]
-                                                 color:expanded ? [[UIColor whiteColor] colorWithAlphaComponent:0.88] : [self themeSecondaryTextColor]
-                                                 lines:expanded ? 1 : 2];
-    [cardView addSubview:summaryLabel];
 
     UILabel *arrowLabel = [self taskListLabelWithText:expanded ? @"▲" : @"▼"
                                                 font:[UIFont systemFontOfSize:13 weight:UIFontWeightBold]
@@ -11925,27 +11941,25 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [cardView insertSubview:headerFill atIndex:0];
     }
 
+    NSLayoutYAxisAnchor *headerCenterAnchor = expanded ? headerFill.centerYAnchor : cardView.centerYAnchor;
     NSMutableArray<NSLayoutConstraint *> *constraints = [NSMutableArray arrayWithArray:@[
-        [cardView.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:5.0],
-        [cardView.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:6.0],
-        [cardView.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-6.0],
-        [cardView.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-5.0],
+        [cardView.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:4.0],
+        [cardView.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:5.0],
+        [cardView.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-5.0],
+        [cardView.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-4.0],
         [accentRail.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor],
         [accentRail.topAnchor constraintEqualToAnchor:cardView.topAnchor],
         [accentRail.bottomAnchor constraintEqualToAnchor:cardView.bottomAnchor],
         [accentRail.widthAnchor constraintEqualToConstant:expanded ? 0.0 : 4.0],
-        [iconView.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:14.0],
-        [iconView.topAnchor constraintEqualToAnchor:cardView.topAnchor constant:14.0],
-        [iconView.widthAnchor constraintEqualToConstant:18.0],
-        [iconView.heightAnchor constraintEqualToConstant:18.0],
+        [iconView.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:13.0],
+        [iconView.centerYAnchor constraintEqualToAnchor:headerCenterAnchor],
+        [iconView.widthAnchor constraintEqualToConstant:16.0],
+        [iconView.heightAnchor constraintEqualToConstant:16.0],
         [titleLabel.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:8.0],
-        [titleLabel.topAnchor constraintEqualToAnchor:cardView.topAnchor constant:9.0],
+        [titleLabel.centerYAnchor constraintEqualToAnchor:iconView.centerYAnchor],
         [titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:arrowLabel.leadingAnchor constant:-8.0],
-        [summaryLabel.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
-        [summaryLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:2.0],
-        [summaryLabel.trailingAnchor constraintEqualToAnchor:arrowLabel.leadingAnchor constant:-8.0],
         [arrowLabel.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-12.0],
-        [arrowLabel.centerYAnchor constraintEqualToAnchor:titleLabel.centerYAnchor],
+        [arrowLabel.centerYAnchor constraintEqualToAnchor:iconView.centerYAnchor],
         [arrowLabel.widthAnchor constraintEqualToConstant:24.0],
     ]];
     if (fallbackIconLabel) {
@@ -11961,11 +11975,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [headerFill.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor],
             [headerFill.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor],
             [headerFill.topAnchor constraintEqualToAnchor:cardView.topAnchor],
-            [headerFill.heightAnchor constraintEqualToConstant:44.0],
+            [headerFill.heightAnchor constraintEqualToConstant:36.0],
         ]];
     }
 
-    UIView *lastView = summaryLabel;
+    UIView *lastView = titleLabel;
     if (expanded) {
         UILabel *detailTitle = [self taskListLabelWithText:@"详细配置"
                                                      font:[UIFont systemFontOfSize:13 weight:UIFontWeightBold]
@@ -11973,11 +11987,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                     lines:1];
         [cardView addSubview:detailTitle];
 
+        UILabel *coordinateCaption = [self taskListCaptionWithText:@"坐标:"];
+        [cardView addSubview:coordinateCaption];
+
         CGPoint point = CGPointZero;
         BOOL hasPoint = [self primaryPointForTask:task point:&point];
-        UIView *xBox = [self taskListMetricViewWithTitle:@"X" value:hasPoint ? [NSString stringWithFormat:@"%.0f", point.x] : @"自动" tint:accent];
-        UIView *yBox = [self taskListMetricViewWithTitle:@"Y" value:hasPoint ? [NSString stringWithFormat:@"%.0f", point.y] : @"自动" tint:accent];
-        UIButton *editPointButton = [self taskListSmallButtonWithTitle:@"修改"
+        UIView *xBox = [self taskListMetricViewWithTitle:@"X" value:hasPoint ? [NSString stringWithFormat:@"X: %.0f", point.x] : @"X: 自动" tint:[self themePrimaryTextColor]];
+        UIView *yBox = [self taskListMetricViewWithTitle:@"Y" value:hasPoint ? [NSString stringWithFormat:@"Y: %.0f", point.y] : @"Y: 自动" tint:[self themePrimaryTextColor]];
+        UIButton *editPointButton = [self taskListSmallButtonWithTitle:@"✎"
                                                                     tag:AnClickTaskListEditButtonTagBase + indexPath.row
                                                                  action:@selector(editTaskButtonAtIndex:)
                                                                    tint:[self themeHighlightColor]];
@@ -11985,23 +12002,43 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [cardView addSubview:yBox];
         [cardView addSubview:editPointButton];
 
-        UIView *delayBox = [self taskListMetricViewWithTitle:@"前置延时"
+        UILabel *delayCaption = [self taskListCaptionWithText:@"延时"];
+        UILabel *intervalCaption = [self taskListCaptionWithText:@"后置"];
+        UILabel *pressCaption = [self taskListCaptionWithText:@"长按"];
+        [cardView addSubview:delayCaption];
+        [cardView addSubview:intervalCaption];
+        [cardView addSubview:pressCaption];
+
+        UIView *delayBox = [self taskListMetricViewWithTitle:@"前置"
                                                        value:[self millisecondsSummaryTextForDuration:[self delayForTask:task]]
                                                         tint:[self themePrimaryTextColor]];
-        UIView *intervalBox = [self taskListMetricViewWithTitle:@"后置延时"
+        UIView *intervalBox = [self taskListMetricViewWithTitle:@"后置"
                                                           value:[self millisecondsSummaryTextForDuration:[self actionIntervalForTask:task]]
                                                            tint:[self themePrimaryTextColor]];
-        UIView *pressBox = [self taskListMetricViewWithTitle:@"长按时长"
+        UIView *pressBox = [self taskListMetricViewWithTitle:@"长按"
                                                        value:mode == AnClickActionModeLongPress ? [self longPressDurationSummaryText:[self longPressDurationForTask:task]] : @"0ms"
                                                         tint:[self themePrimaryTextColor]];
         [cardView addSubview:delayBox];
         [cardView addSubview:intervalBox];
         [cardView addSubview:pressBox];
 
-        UIView *targetBox = [self taskListMetricViewWithTitle:[self modeIsRecognitionTask:mode] ? @"识别目标" : @"动作目标"
+        NSString *targetTitle = @"动作目标";
+        if (mode == AnClickActionModeImage) {
+            targetTitle = @"识图目标";
+        } else if (mode == AnClickActionModeOCR) {
+            targetTitle = @"识字目标";
+        } else if (mode == AnClickActionModeColor) {
+            targetTitle = @"识色目标";
+        }
+        UILabel *targetCaption = [self taskListCaptionWithText:targetTitle];
+        UILabel *thresholdCaption = [self taskListCaptionWithText:@"阈值（相似度）"];
+        [cardView addSubview:targetCaption];
+        [cardView addSubview:thresholdCaption];
+
+        UIView *targetBox = [self taskListMetricViewWithTitle:@"目标"
                                                         value:[self recognitionTargetSummaryForTask:task]
                                                          tint:accent];
-        UIView *thresholdBox = [self taskListMetricViewWithTitle:mode == AnClickActionModeColor ? @"容差" : @"阈值"
+        UIView *thresholdBox = [self taskListMetricViewWithTitle:@"阈值"
                                                            value:[self thresholdSummaryForTask:task]
                                                             tint:accent];
         [cardView addSubview:targetBox];
@@ -12041,15 +12078,22 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [cardView addSubview:runButton];
         [cardView addSubview:collapseButton];
 
-        CGFloat side = 12.0;
-        CGFloat gap = 7.0;
+        UILabel *logicCaption = [self taskListCaptionWithText:@"逻辑跳转"];
+        [cardView addSubview:logicCaption];
+
+        CGFloat side = 14.0;
+        CGFloat gap = 8.0;
         [constraints addObjectsFromArray:@[
-            [detailTitle.topAnchor constraintEqualToAnchor:summaryLabel.bottomAnchor constant:18.0],
+            [detailTitle.topAnchor constraintEqualToAnchor:headerFill.bottomAnchor constant:9.0],
             [detailTitle.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
             [detailTitle.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
 
+            [coordinateCaption.topAnchor constraintEqualToAnchor:detailTitle.bottomAnchor constant:11.0],
+            [coordinateCaption.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
+            [coordinateCaption.widthAnchor constraintEqualToConstant:42.0],
+            [coordinateCaption.centerYAnchor constraintEqualToAnchor:xBox.centerYAnchor],
             [xBox.topAnchor constraintEqualToAnchor:detailTitle.bottomAnchor constant:7.0],
-            [xBox.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
+            [xBox.leadingAnchor constraintEqualToAnchor:coordinateCaption.trailingAnchor constant:4.0],
             [yBox.topAnchor constraintEqualToAnchor:xBox.topAnchor],
             [yBox.leadingAnchor constraintEqualToAnchor:xBox.trailingAnchor constant:gap],
             [yBox.widthAnchor constraintEqualToAnchor:xBox.widthAnchor],
@@ -12057,9 +12101,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [editPointButton.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
             [editPointButton.topAnchor constraintEqualToAnchor:xBox.topAnchor],
             [editPointButton.heightAnchor constraintEqualToAnchor:xBox.heightAnchor],
-            [editPointButton.widthAnchor constraintEqualToConstant:54.0],
+            [editPointButton.widthAnchor constraintEqualToConstant:36.0],
 
-            [delayBox.topAnchor constraintEqualToAnchor:xBox.bottomAnchor constant:7.0],
+            [delayCaption.topAnchor constraintEqualToAnchor:xBox.bottomAnchor constant:7.0],
+            [delayCaption.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
+            [intervalCaption.topAnchor constraintEqualToAnchor:delayCaption.topAnchor],
+            [intervalCaption.leadingAnchor constraintEqualToAnchor:delayCaption.trailingAnchor constant:gap],
+            [intervalCaption.widthAnchor constraintEqualToAnchor:delayCaption.widthAnchor],
+            [pressCaption.topAnchor constraintEqualToAnchor:delayCaption.topAnchor],
+            [pressCaption.leadingAnchor constraintEqualToAnchor:intervalCaption.trailingAnchor constant:gap],
+            [pressCaption.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
+            [pressCaption.widthAnchor constraintEqualToAnchor:delayCaption.widthAnchor],
+
+            [delayBox.topAnchor constraintEqualToAnchor:delayCaption.bottomAnchor constant:2.0],
             [delayBox.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
             [intervalBox.topAnchor constraintEqualToAnchor:delayBox.topAnchor],
             [intervalBox.leadingAnchor constraintEqualToAnchor:delayBox.trailingAnchor constant:gap],
@@ -12069,10 +12123,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [pressBox.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
             [pressBox.widthAnchor constraintEqualToAnchor:delayBox.widthAnchor],
 
-            [swatchView.topAnchor constraintEqualToAnchor:delayBox.bottomAnchor constant:8.0],
+            [targetCaption.topAnchor constraintEqualToAnchor:delayBox.bottomAnchor constant:8.0],
+            [targetCaption.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
+            [thresholdCaption.topAnchor constraintEqualToAnchor:targetCaption.topAnchor],
+            [thresholdCaption.leadingAnchor constraintEqualToAnchor:cardView.centerXAnchor constant:6.0],
+            [thresholdCaption.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
+
+            [swatchView.topAnchor constraintEqualToAnchor:targetCaption.bottomAnchor constant:4.0],
             [swatchView.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
-            [swatchView.widthAnchor constraintEqualToConstant:40.0],
-            [swatchView.heightAnchor constraintEqualToConstant:40.0],
+            [swatchView.widthAnchor constraintEqualToConstant:34.0],
+            [swatchView.heightAnchor constraintEqualToConstant:34.0],
             [targetBox.topAnchor constraintEqualToAnchor:swatchView.topAnchor],
             [targetBox.leadingAnchor constraintEqualToAnchor:swatchView.trailingAnchor constant:gap],
             [thresholdBox.topAnchor constraintEqualToAnchor:swatchView.topAnchor],
@@ -12080,7 +12140,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [thresholdBox.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
             [thresholdBox.widthAnchor constraintEqualToAnchor:targetBox.widthAnchor multiplier:0.72],
 
-            [successLine.topAnchor constraintEqualToAnchor:targetBox.bottomAnchor constant:8.0],
+            [logicCaption.topAnchor constraintEqualToAnchor:targetBox.bottomAnchor constant:9.0],
+            [logicCaption.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
+            [logicCaption.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
+
+            [successLine.topAnchor constraintEqualToAnchor:logicCaption.bottomAnchor constant:5.0],
             [successLine.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
             [successLine.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
             [failureLine.topAnchor constraintEqualToAnchor:successLine.bottomAnchor constant:6.0],
@@ -12102,7 +12166,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (expanded) {
         [constraints addObject:[cardView.bottomAnchor constraintEqualToAnchor:lastView.bottomAnchor constant:12.0]];
     } else {
-        [constraints addObject:[summaryLabel.bottomAnchor constraintEqualToAnchor:cardView.bottomAnchor constant:-10.0]];
+        [constraints addObject:[titleLabel.bottomAnchor constraintEqualToAnchor:cardView.bottomAnchor constant:-10.0]];
     }
     [NSLayoutConstraint activateConstraints:constraints];
     return cell;
