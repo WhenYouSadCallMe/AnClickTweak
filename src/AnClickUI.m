@@ -8,39 +8,13 @@
 #import <sys/sysctl.h>
 #import <unistd.h>
 #import <math.h>
+#import "AnClickTypes.h"
+#import "AnClickTaskModel.h"
 
 #if ANCLICK_RELEASE_SILENT
 #undef NSLog
 #define NSLog(...) do {} while (0)
 #endif
-
-typedef NS_ENUM(NSInteger, AnClickActionMode) {
-    AnClickActionModeNone = -1,
-    AnClickActionModeTap = 0,
-    AnClickActionModeDoubleTap = 1,
-    AnClickActionModeLongPress = 2,
-    AnClickActionModeSwipe = 3,
-    AnClickActionModeTwoFingerTap = 4,
-    AnClickActionModePinchIn = 5,
-    AnClickActionModePinchOut = 6,
-    AnClickActionModeRotate = 7,
-    AnClickActionModeImage = 8,
-    AnClickActionModeMacro = 9,
-    AnClickActionModeOCR = 10,
-    AnClickActionModeColor = 11,
-    AnClickActionModeNetwork = 12,
-    AnClickActionModeJump = 13,
-    AnClickActionModeCount = 14,
-};
-
-typedef NS_ENUM(NSInteger, AnClickOCRMode) {
-    AnClickOCRModeAppleVision = 0,
-};
-
-typedef NS_ENUM(NSInteger, AnClickOCRMatchMode) {
-    AnClickOCRMatchModeContains = 0,
-    AnClickOCRMatchModeRegex = 1,
-};
 
 typedef NS_OPTIONS(NSInteger, AnClickCaptureSelectionEditMode) {
     AnClickCaptureSelectionEditModeNone = 0,
@@ -1089,6 +1063,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             NSString.class,
             NSNumber.class,
             NSValue.class,
+            AnClickTaskModel.class,
             nil];
 }
 
@@ -4919,20 +4894,27 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (NSMutableArray<NSMutableDictionary *> *)copyTaskItemsForSaving {
     NSMutableArray *tasks = [NSMutableArray arrayWithCapacity:_taskItems.count];
     for (NSDictionary *task in _taskItems) {
-        [tasks addObject:[task mutableCopy]];
+        AnClickTaskModel *model = [[AnClickTaskModel alloc] initWithDictionary:task];
+        [tasks addObject:[model dictionaryRepresentation]];
     }
     return tasks;
 }
 
 - (NSMutableArray<NSMutableDictionary *> *)mutableTasksFromSavedTasks:(NSArray *)tasks {
     NSMutableArray *result = [NSMutableArray array];
-    for (NSDictionary *task in tasks) {
-        if ([task isKindOfClass:NSDictionary.class]) {
-            NSMutableDictionary *mutableTask = [task mutableCopy];
-            if (!mutableTask[AnClickTaskExpandedKey]) {
-                mutableTask[AnClickTaskExpandedKey] = @NO;
+    for (id task in tasks) {
+        AnClickTaskModel *model = nil;
+        if ([task isKindOfClass:AnClickTaskModel.class]) {
+            model = task;
+        } else if ([task isKindOfClass:NSDictionary.class]) {
+            model = [[AnClickTaskModel alloc] initWithDictionary:task];
+        }
+        if (model) {
+            NSMutableDictionary *dictionary = [model dictionaryRepresentation];
+            if (!dictionary[AnClickTaskExpandedKey]) {
+                dictionary[AnClickTaskExpandedKey] = @NO;
             }
-            [result addObject:mutableTask];
+            [result addObject:dictionary];
         }
     }
     return result;
