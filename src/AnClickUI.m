@@ -247,6 +247,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)reclampPanelWindowForCurrentScreenAllowHeavyRefresh:(BOOL)allowHeavyRefresh;
 - (void)refreshActivePanelOverlayLayoutAllowHeavyRefresh:(BOOL)allowHeavyRefresh;
 - (void)refreshTaskEditorViewFromCurrentState;
+- (void)updateStatusForCurrentConfig;
 - (BOOL)screenCoordinateSizeIsValid:(CGSize)size;
 - (CGSize)currentScreenCoordinateSize;
 - (NSValue *)currentScreenCoordinateSizeValue;
@@ -3367,6 +3368,41 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 }
 
+- (void)styleHomeTopIconButton:(UIButton *)button blueCircle:(BOOL)blueCircle {
+    if (!button) {
+        return;
+    }
+    button.backgroundColor = blueCircle ? [self themeHighlightColor] : [self themeControlFillColor];
+    button.tintColor = blueCircle ? UIColor.whiteColor : [self themePrimaryTextColor];
+    [button setTitleColor:button.tintColor forState:UIControlStateNormal];
+    button.layer.cornerRadius = CGRectGetHeight(button.bounds) * 0.5;
+    button.layer.borderWidth = blueCircle ? 0.0 : 1.0;
+    button.layer.borderColor = [self themeSeparatorColor].CGColor;
+    button.layer.shadowColor = [self neumorphicShadowColor].CGColor;
+    button.layer.shadowOpacity = blueCircle ? 0.20 : 0.12;
+    button.layer.shadowRadius = 4.0;
+    button.layer.shadowOffset = CGSizeMake(0.0, 2.0);
+    [self updateButtonShadowPath:button];
+}
+
+- (UILabel *)homeToolbarLabelWithTag:(NSInteger)tag text:(NSString *)text {
+    UILabel *label = [_panelView viewWithTag:tag];
+    if (![label isKindOfClass:UILabel.class]) {
+        [label removeFromSuperview];
+        label = [[UILabel alloc] initWithFrame:CGRectZero];
+        label.tag = tag;
+        [_panelView addSubview:label];
+    }
+    label.hidden = NO;
+    label.text = text ?: @"";
+    label.textAlignment = NSTextAlignmentCenter;
+    label.textColor = [self themeSecondaryTextColor];
+    label.font = [UIFont systemFontOfSize:9.5 weight:UIFontWeightSemibold];
+    label.adjustsFontSizeToFitWidth = YES;
+    label.minimumScaleFactor = 0.72;
+    return label;
+}
+
 - (void)layoutTaskHomeControls {
     if (!_panelView) {
         return;
@@ -3444,13 +3480,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [_panelView bringSubviewToFront:stopLabel];
         [_panelView bringSubviewToFront:recordLabel];
     }
-}
-
-- (CGFloat)editorConfigTopY {
-    BOOL compactHeight = _panelView && _panelView.bounds.size.height < 430.0;
-    CGFloat captionHeight = compactHeight ? 18.0 : 20.0;
-    CGFloat fieldHeight = compactHeight ? 36.0 : 40.0;
-    return captionHeight + 2.0 + fieldHeight + [self editorSectionTopPadding] + [self editorSectionBottomPadding] + [self editorSectionGap];
 }
 
 - (void)showTaskHome {
@@ -4880,6 +4909,40 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSString *)currentActionName {
     return [self actionNameForMode:_actionMode];
+}
+
+- (void)updateStatusForCurrentConfig {
+    if (!_statusLabel || _taskRunActive) {
+        return;
+    }
+    if (_actionMode == AnClickActionModeNone) {
+        _statusLabel.text = @"请选择动作类型";
+        return;
+    }
+    NSString *name = [self currentActionName];
+    if (_editingBranchRecognitionConfig) {
+        NSString *role = _editingBranchRecognitionSuccess ? @"成功后" : @"失败后";
+        NSString *branchName = _editingBranchActionMode == AnClickActionModeNone
+            ? name
+            : [self actionNameForMode:_editingBranchActionMode];
+        _statusLabel.text = [NSString stringWithFormat:@"配置%@%@动作", role, branchName];
+    } else {
+        _statusLabel.text = [NSString stringWithFormat:@"配置%@", name];
+    }
+}
+
+- (void)clearSuccessBranchTargetSelection {
+    _recognitionSuccessBranchIndex = -1;
+    _recognitionSuccessActionTaskIndex = -1;
+    _successActionPoint = CGPointZero;
+    _hasSuccessActionPoint = NO;
+}
+
+- (void)clearFailureBranchTargetSelection {
+    _recognitionFailureBranchIndex = -1;
+    _recognitionFailureActionTaskIndex = -1;
+    _failureActionPoint = CGPointZero;
+    _hasFailureActionPoint = NO;
 }
 
 - (NSString *)branchRecognitionContextTitle {
