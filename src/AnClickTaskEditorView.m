@@ -272,6 +272,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 @property (nonatomic, assign) NSInteger taskIndex;
 @property (nonatomic, copy) NSString *branchTitle;
 @property (nonatomic, copy) NSString *actionName;
+@property (nonatomic, weak) UITextField *activeTextField;
+@property (nonatomic, assign) UIEdgeInsets baseContentInset;
+@property (nonatomic, assign) UIEdgeInsets baseScrollIndicatorInsets;
 @end
 
 @implementation AnClickTaskEditorView
@@ -284,8 +287,13 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         _branchTitle = @"";
         _actionName = @"动作";
         [self buildView];
+        [self registerKeyboardObservers];
     }
     return self;
+}
+
+- (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
 }
 
 - (void)buildView {
@@ -365,6 +373,27 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         [_tableView.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
         [_tableView.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
     ]];
+    _baseContentInset = _tableView.contentInset;
+    if (@available(iOS 13.0, *)) {
+        _baseScrollIndicatorInsets = _tableView.verticalScrollIndicatorInsets;
+    } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        _baseScrollIndicatorInsets = _tableView.scrollIndicatorInsets;
+#pragma clang diagnostic pop
+    }
+}
+
+- (void)registerKeyboardObservers {
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center addObserver:self
+               selector:@selector(handleKeyboardWillChangeFrame:)
+                   name:UIKeyboardWillChangeFrameNotification
+                 object:nil];
+    [center addObserver:self
+               selector:@selector(handleKeyboardWillHide:)
+                   name:UIKeyboardWillHideNotification
+                 object:nil];
 }
 
 - (void)configureWithModel:(AnClickTaskModel *)model
@@ -394,6 +423,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if (self.model.actionMode == AnClickActionModeNone && (section == 1 || section == 2)) {
+        return 0;
+    }
     return [self rowsForSection:section].count;
 }
 
@@ -648,6 +680,75 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             break;
     }
     [self notifyModelChanged];
+}
+
+- (void)textFieldDidBeginEditing:(UITextField *)textField {
+    self.activeTextField = textField;
+    [self scrollActiveFieldIntoViewAnimated:YES];
+}
+
+- (void)textFieldDidEndEditing:(UITextField *)textField {
+    if (self.activeTextField == textField) {
+        self.activeTextField = nil;
+    }
+}
+
+- (void)handleKeyboardWillChangeFrame:(NSNotification *)notification {
+    CGRect keyboardFrame = [notification.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+    CGRect localKeyboardFrame = [self convertRect:keyboardFrame fromView:nil];
+    CGFloat overlap = MAX(0.0, CGRectGetMaxY(self.bounds) - CGRectGetMinY(localKeyboardFrame));
+    NSTimeInterval duration = [notification.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+    UIViewAnimationOptions options = (UIViewAnimationOptions)([notification.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue] << 16);
+    UIEdgeInsets contentInset = self.baseContentInset;
+    contentInset.bottom += overlap;
+    UIEdgeInsets indicatorInsets = self.baseScrollIndicatorInsets;
+    indicatorInsets.bottom += overlap;
+    [UIView animateWithDuration:duration
+                          delay:0.0
+                        options:options
+                     animations:^{
+                         self.tableView.contentInset = contentInset;
+                         if (@available(iOS 13.0, *)) {
+                             self.tableView.verticalScrollIndicatorInsets = indicatorInsets;
+                         } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+                             self.tableView.scrollIndicatorInsets = indicatorInsets;
+#pragma clang diagnostic pop
+                         }
+                     }
+                     completion:^(__unused BOOL finished) {
+                         [self scrollActiveFieldIntoViewAnimated:YES];
+                     }];
+}
+
+- (void)handleKeyboardWillHide:(NSNotification *)notification {
+    NSTimeInterval duration = [notification.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+    UIViewAnimationOptions options = (UIViewAnimationOptions)([notification.userInfo[UIKeyboardAnimationCurveUserInfoKey] integerValue] << 16);
+    [UIView animateWithDuration:duration
+                          delay:0.0
+                        options:options
+                     animations:^{
+                         self.tableView.contentInset = self.baseContentInset;
+                         if (@available(iOS 13.0, *)) {
+                             self.tableView.verticalScrollIndicatorInsets = self.baseScrollIndicatorInsets;
+                         } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+                             self.tableView.scrollIndicatorInsets = self.baseScrollIndicatorInsets;
+#pragma clang diagnostic pop
+                         }
+                     }
+                     completion:nil];
+}
+
+- (void)scrollActiveFieldIntoViewAnimated:(BOOL)animated {
+    if (!self.activeTextField || !self.activeTextField.window) {
+        return;
+    }
+    CGRect fieldRect = [self.activeTextField convertRect:self.activeTextField.bounds toView:self.tableView];
+    fieldRect = CGRectInset(fieldRect, -12.0, -16.0);
+    [self.tableView scrollRectToVisible:fieldRect animated:animated];
 }
 
 - (void)handleSliderChanged:(UISlider *)slider {
