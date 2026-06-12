@@ -22,9 +22,11 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
 
 typedef NS_ENUM(NSInteger, AnClickOCRMode) {
     AnClickOCRModeAppleVision = 0,
+    AnClickOCRModeTesseract = 1,
 };
 
 typedef NS_ENUM(NSInteger, AnClickOCRMatchMode) {
     AnClickOCRMatchModeContains = 0,
     AnClickOCRMatchModeRegex = 1,
+    AnClickOCRMatchModeEqual = 2,
 };

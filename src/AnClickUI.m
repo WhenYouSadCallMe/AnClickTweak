@@ -4989,6 +4989,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     model.networkRetryForever = _networkRetryForever;
     model.networkTimeout = _networkTimeout;
     model.networkPostPairs = _networkPostPairs ?: @[];
+    model.recognitionRetryUntilFound = _recognitionRetryUntilFound;
+    model.recognitionRetryInterval = _recognitionRetryInterval;
 
     if ([self hasManualPointForMode:_actionMode]) {
         model.point = [NSValue valueWithCGPoint:_manualActionPoints[(NSUInteger)_actionMode]];
@@ -4996,22 +4998,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     if (_actionMode == AnClickActionModeSwipe) {
         model.path = [self manualSwipePath] ?: @[];
-        NSMutableDictionary *extra = [model.extraFields mutableCopy] ?: [NSMutableDictionary dictionary];
-        extra[@"pathScreenSize"] = [self currentScreenCoordinateSizeValue];
-        model.extraFields = extra;
+        model.pathScreenSize = [self currentScreenCoordinateSizeValue];
     }
     if (_actionMode == AnClickActionModeTwoFingerTap) {
         model.multiPoints = _multiTapPoints ?: @[];
-        NSMutableDictionary *extra = [model.extraFields mutableCopy] ?: [NSMutableDictionary dictionary];
-        extra[@"multiPointScreenSize"] = [self currentScreenCoordinateSizeValue];
-        model.extraFields = extra;
+        model.multiPointScreenSize = [self currentScreenCoordinateSizeValue];
     }
     if (_actionMode == AnClickActionModeMacro) {
         model.events = _recordedMacroEvents ?: @[];
-        NSMutableDictionary *extra = [model.extraFields mutableCopy] ?: [NSMutableDictionary dictionary];
-        extra[@"eventsScreenSize"] = [NSValue valueWithCGSize:_hasRecordedMacroScreenSize ? _recordedMacroScreenSize : [self currentScreenCoordinateSize]];
-        extra[@"macroSpeed"] = @([self normalizedMacroPlaybackSpeed:_macroPlaybackSpeed]);
-        model.extraFields = extra;
+        model.eventsScreenSize = [NSValue valueWithCGSize:_hasRecordedMacroScreenSize ? _recordedMacroScreenSize : [self currentScreenCoordinateSize]];
+        model.macroSpeed = [self normalizedMacroPlaybackSpeed:_macroPlaybackSpeed];
     }
 
     NSArray<NSDictionary *> *colorSamples = [self effectiveTargetColorSamples];
@@ -5021,30 +5017,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         model.colorGreen = MIN(255, MAX(0, [anchor[@"green"] integerValue]));
         model.colorBlue = MIN(255, MAX(0, [anchor[@"blue"] integerValue]));
         model.colorPoints = colorSamples;
-        NSMutableDictionary *extra = [model.extraFields mutableCopy] ?: [NSMutableDictionary dictionary];
-        extra[@"colorPointScreenSize"] = [self currentScreenCoordinateSizeValue];
-        model.extraFields = extra;
+        model.colorPointScreenSize = [self currentScreenCoordinateSizeValue];
     } else {
         model.colorRed = _targetColorRed;
         model.colorGreen = _targetColorGreen;
         model.colorBlue = _targetColorBlue;
     }
 
-    NSMutableDictionary *extra = [model.extraFields mutableCopy] ?: [NSMutableDictionary dictionary];
-    extra[@"pressDurationMs"] = @((NSInteger)llround([self normalizedLongPressDuration:_longPressDuration] * 1000.0));
-    if (_recognitionSuccessBranchIndex >= 0) {
-        extra[@"successBranchIndex"] = @(_recognitionSuccessBranchIndex);
-    }
-    if (_recognitionFailureBranchIndex >= 0) {
-        extra[@"failureBranchIndex"] = @(_recognitionFailureBranchIndex);
-    }
-    if (_recognitionSuccessActionTaskIndex >= 0) {
-        extra[@"successActionTaskIndex"] = @(_recognitionSuccessActionTaskIndex);
-    }
-    if (_recognitionFailureActionTaskIndex >= 0) {
-        extra[@"failureActionTaskIndex"] = @(_recognitionFailureActionTaskIndex);
-    }
-    model.extraFields = extra;
+    model.longPressDuration = [self normalizedLongPressDuration:_longPressDuration];
+    model.successBranchIndex = _recognitionSuccessBranchIndex;
+    model.failureBranchIndex = _recognitionFailureBranchIndex;
+    model.successActionTaskIndex = _recognitionSuccessActionTaskIndex;
+    model.failureActionTaskIndex = _recognitionFailureActionTaskIndex;
     return model;
 }
 
@@ -5101,12 +5085,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     if (model.actionMode == AnClickActionModeMacro) {
         _recordedMacroEvents = model.events.count > 0 ? [model.events copy] : nil;
-        _recordedMacroScreenSize = [self screenCoordinateSizeFromObject:model.extraFields[@"eventsScreenSize"]];
+        _recordedMacroScreenSize = [self screenCoordinateSizeFromObject:model.eventsScreenSize];
         _hasRecordedMacroScreenSize = [self screenCoordinateSizeIsValid:_recordedMacroScreenSize];
-        id speedValue = model.extraFields[@"macroSpeed"];
-        if ([speedValue respondsToSelector:@selector(doubleValue)]) {
-            _macroPlaybackSpeed = [self normalizedMacroPlaybackSpeed:[speedValue doubleValue]];
-        }
+        _macroPlaybackSpeed = [self normalizedMacroPlaybackSpeed:model.macroSpeed];
     }
 
     _targetColorRed = MIN(255, MAX(0, model.colorRed));
@@ -5119,14 +5100,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _targetColorSamples = [NSMutableArray array];
     }
 
-    id longPressValue = model.extraFields[@"pressDurationMs"];
-    if ([longPressValue respondsToSelector:@selector(doubleValue)]) {
-        _longPressDuration = [self normalizedLongPressDuration:[longPressValue doubleValue] / 1000.0];
-    }
-    id successBranchValue = model.extraFields[@"successBranchIndex"];
-    id failureBranchValue = model.extraFields[@"failureBranchIndex"];
-    _recognitionSuccessBranchIndex = [successBranchValue respondsToSelector:@selector(integerValue)] ? [successBranchValue integerValue] : -1;
-    _recognitionFailureBranchIndex = [failureBranchValue respondsToSelector:@selector(integerValue)] ? [failureBranchValue integerValue] : -1;
+    _longPressDuration = [self normalizedLongPressDuration:model.longPressDuration];
+    _recognitionRetryUntilFound = model.recognitionRetryUntilFound;
+    _recognitionRetryInterval = MIN(30.0, MAX(0.2, model.recognitionRetryInterval));
+    _recognitionSuccessBranchIndex = model.successBranchIndex;
+    _recognitionFailureBranchIndex = model.failureBranchIndex;
+    _recognitionSuccessActionTaskIndex = model.successActionTaskIndex;
+    _recognitionFailureActionTaskIndex = model.failureActionTaskIndex;
     if (_recognitionSuccessBranchIndex >= 0 &&
         (_actionMode == AnClickActionModeImage || _actionMode == AnClickActionModeOCR || _actionMode == AnClickActionModeColor)) {
         _imageActionMode = AnClickActionModeJump;
@@ -5144,19 +5124,26 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         mode == AnClickActionModeDoubleTap ||
         mode == AnClickActionModeLongPress ||
         mode == AnClickActionModeTwoFingerTap ||
+        mode == AnClickActionModePinchIn ||
+        mode == AnClickActionModePinchOut ||
+        mode == AnClickActionModeRotate ||
         mode == AnClickActionModeSwipe ||
         mode == AnClickActionModeImage ||
         mode == AnClickActionModeMacro ||
         mode == AnClickActionModeOCR ||
         mode == AnClickActionModeColor ||
         mode == AnClickActionModeNetwork ||
+        mode == AnClickActionModeJump ||
         mode == AnClickActionModeDelay;
 }
 
 - (BOOL)isReusablePointActionMode:(AnClickActionMode)mode {
     return mode == AnClickActionModeTap ||
         mode == AnClickActionModeDoubleTap ||
-        mode == AnClickActionModeLongPress;
+        mode == AnClickActionModeLongPress ||
+        mode == AnClickActionModePinchIn ||
+        mode == AnClickActionModePinchOut ||
+        mode == AnClickActionModeRotate;
 }
 
 - (void)clearTransientEditorStateForActionMode:(AnClickActionMode)mode {
@@ -5221,15 +5208,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (matchMode == AnClickOCRMatchModeRegex) {
         targetText = [self ocrTextByRemovingRegexPrefix:targetText];
     }
-    return targetText.length > 0 ? targetText : (matchMode == AnClickOCRMatchModeRegex ? @"先填正则表达式" : @"先填文字");
+    if (targetText.length > 0) {
+        return targetText;
+    }
+    if (matchMode == AnClickOCRMatchModeRegex) {
+        return @"先填正则表达式";
+    }
+    if (matchMode == AnClickOCRMatchModeEqual) {
+        return @"先填精确文字";
+    }
+    return @"先填文字";
 }
 
 - (AnClickOCRMatchMode)ocrMatchModeForTask:(NSDictionary *)task {
     NSNumber *modeNumber = task[@"ocrMatchMode"];
     if (modeNumber) {
-        return modeNumber.integerValue == AnClickOCRMatchModeRegex
-            ? AnClickOCRMatchModeRegex
-            : AnClickOCRMatchModeContains;
+        if (modeNumber.integerValue == AnClickOCRMatchModeRegex) {
+            return AnClickOCRMatchModeRegex;
+        }
+        if (modeNumber.integerValue == AnClickOCRMatchModeEqual) {
+            return AnClickOCRMatchModeEqual;
+        }
+        return AnClickOCRMatchModeContains;
     }
     NSString *targetText = [self trimmedActionDescription:task[@"ocrText"]];
     if ([self ocrTextHasRegexPrefix:targetText ?: @""]) {
@@ -5243,11 +5243,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (AnClickOCRMatchMode)effectiveOCRMatchModeForText:(__unused NSString *)text {
-    return _ocrMatchMode == AnClickOCRMatchModeRegex ? AnClickOCRMatchModeRegex : AnClickOCRMatchModeContains;
+    if (_ocrMatchMode == AnClickOCRMatchModeRegex) {
+        return AnClickOCRMatchModeRegex;
+    }
+    if (_ocrMatchMode == AnClickOCRMatchModeEqual) {
+        return AnClickOCRMatchModeEqual;
+    }
+    return AnClickOCRMatchModeContains;
 }
 
 - (NSString *)ocrMatchModeTitleForMode:(AnClickOCRMatchMode)mode {
-    return mode == AnClickOCRMatchModeRegex ? @"正则匹配" : @"文字匹配";
+    if (mode == AnClickOCRMatchModeRegex) {
+        return @"正则匹配";
+    }
+    if (mode == AnClickOCRMatchModeEqual) {
+        return @"等于匹配";
+    }
+    return @"包含匹配";
 }
 
 - (AnClickActionMode)modeForTask:(NSDictionary *)task {
@@ -10268,6 +10280,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)performNetworkRequestWithURLString:(NSString *)urlString
                                     method:(NSString *)method
+                                   headers:(NSDictionary *)headers
                                   postBody:(NSString *)postBody
                                   trueText:(NSString *)trueText
                                  falseText:(NSString *)falseText
@@ -10291,6 +10304,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *normalizedMethod = [[self trimmedActionDescription:method] uppercaseString];
     BOOL usesPost = [normalizedMethod isEqualToString:@"POST"];
     request.HTTPMethod = usesPost ? @"POST" : @"GET";
+    if ([headers isKindOfClass:NSDictionary.class]) {
+        [headers enumerateKeysAndObjectsUsingBlock:^(id key, id value, __unused BOOL *stop) {
+            if (![key isKindOfClass:NSString.class]) {
+                return;
+            }
+            NSString *headerValue = [value isKindOfClass:NSString.class] ? value : [value description];
+            if (headerValue.length > 0) {
+                [request setValue:headerValue forHTTPHeaderField:key];
+            }
+        }];
+    }
     if (usesPost) {
         NSString *bodyText = postBody ?: @"";
         request.HTTPBody = [bodyText dataUsingEncoding:NSUTF8StringEncoding];
@@ -10379,7 +10403,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self showToast:oneShot ? @"网络仅请求" : @"网络请求中"];
     NSString *method = [self networkMethodForTask:task];
     NSString *postBody = [self networkPostBodyForTask:task];
-    [self performNetworkRequestWithURLString:url method:method postBody:postBody trueText:contains falseText:falseText defaultExpectedTrue:NO timeout:timeout completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
+    [self performNetworkRequestWithURLString:url method:method headers:task[@"networkHeaders"] postBody:postBody trueText:contains falseText:falseText defaultExpectedTrue:NO timeout:timeout completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
         if (runGeneration != 0 && (!self->_taskRunActive || runGeneration != self->_taskRunGeneration)) {
             return;
         }
@@ -11773,6 +11797,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
         return YES;
     }
+    if (mode == AnClickActionModeJump) {
+        id value = task[@"jumpTaskIndex"] ?: task[@"targetTaskIndex"] ?: task[@"jumpTaskId"];
+        NSInteger targetIndex = [value respondsToSelector:@selector(integerValue)] ? [value integerValue] : -1;
+        if (targetIndex < 0 || targetIndex >= (NSInteger)_taskItems.count) {
+            _statusLabel.text = @"任务跳转目标无效";
+            return NO;
+        }
+        return YES;
+    }
     if (mode == AnClickActionModeDelay) {
         if ([self delayForTask:task] <= 0.001) {
             _statusLabel.text = @"任务延时未设置";
@@ -12002,7 +12035,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *contains = _globalNetworkContainsText;
     NSString *falseText = _globalNetworkFalseText;
     __weak typeof(self) weakSelf = self;
-    [self performNetworkRequestWithURLString:url method:@"GET" postBody:nil trueText:contains falseText:falseText defaultExpectedTrue:NO timeout:8.0 completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
+    [self performNetworkRequestWithURLString:url method:@"GET" headers:nil postBody:nil trueText:contains falseText:falseText defaultExpectedTrue:NO timeout:8.0 completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf ||
             ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
@@ -12178,6 +12211,24 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSDictionary *task = _taskItems[index];
     AnClickActionMode mode = [self modeForTask:task];
     [self showToast:[self toastTextForTask:task index:index]];
+    if (mode == AnClickActionModeJump) {
+        if (![self taskIsComplete:task]) {
+            _taskRunActive = NO;
+            [self clearTaskRunPauseState];
+            [self cancelRunningTaskSideEffects];
+            [self stopTaskRunRuntimeTimerReset:YES];
+            [self expandPanel];
+            [self showToast:_statusLabel.text];
+            _volumeShortcutRunSuppressToasts = NO;
+            [self refreshCollapsedButtonTitle];
+            return;
+        }
+        id value = task[@"jumpTaskIndex"] ?: task[@"targetTaskIndex"] ?: task[@"jumpTaskId"];
+        NSUInteger targetIndex = (NSUInteger)MAX(0, [value integerValue]);
+        _statusLabel.text = [NSString stringWithFormat:@"跳转任务%lu", (unsigned long)targetIndex + 1];
+        [self continueTaskRunToIndex:targetIndex inWindow:currentHostWindow generation:runGeneration];
+        return;
+    }
     if (mode == AnClickActionModeNetwork) {
         if (![self taskIsComplete:task]) {
             _taskRunActive = NO;

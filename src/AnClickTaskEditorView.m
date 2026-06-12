@@ -1,17 +1,50 @@
 #import "AnClickTaskEditorView.h"
+#import <math.h>
 
 typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindActionGrid = 0,
     ACEditorRowKindCoordinate,
+    ACEditorRowKindSwipeStart,
+    ACEditorRowKindSwipeEnd,
     ACEditorRowKindPointPick,
+    ACEditorRowKindJitter,
+    ACEditorRowKindPressure,
+    ACEditorRowKindRepeat,
+    ACEditorRowKindDoubleTapInterval,
     ACEditorRowKindTemplate,
+    ACEditorRowKindTemplatePath,
+    ACEditorRowKindTemplateROI,
+    ACEditorRowKindMatchClickOffset,
     ACEditorRowKindColor,
+    ACEditorRowKindColorMatchMode,
     ACEditorRowKindThreshold,
+    ACEditorRowKindOCRMode,
+    ACEditorRowKindOCRMatchMode,
     ACEditorRowKindOCRText,
+    ACEditorRowKindOCRSimilarity,
     ACEditorRowKindNetworkURL,
+    ACEditorRowKindNetworkMethod,
+    ACEditorRowKindNetworkHeaders,
+    ACEditorRowKindNetworkBody,
+    ACEditorRowKindNetworkRetryMode,
+    ACEditorRowKindNetworkRetryLimit,
+    ACEditorRowKindNetworkTimeout,
+    ACEditorRowKindNetworkContains,
+    ACEditorRowKindNetworkFalse,
+    ACEditorRowKindJumpTarget,
+    ACEditorRowKindMacroPath,
+    ACEditorRowKindMacroArguments,
+    ACEditorRowKindMacroSpeed,
+    ACEditorRowKindSwipeDuration,
+    ACEditorRowKindSwipeStep,
+    ACEditorRowKindPinchDistance,
+    ACEditorRowKindRotateAngles,
+    ACEditorRowKindGestureDuration,
     ACEditorRowKindDelay,
     ACEditorRowKindInterval,
     ACEditorRowKindLongPress,
+    ACEditorRowKindRecognitionRetryMode,
+    ACEditorRowKindRecognitionRetryInterval,
     ACEditorRowKindSuccessBranch,
     ACEditorRowKindFailureBranch,
     ACEditorRowKindSingleStep,
@@ -147,6 +180,56 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 
 @end
 
+@interface ACEditorSegmentedCell : UITableViewCell
+@property (nonatomic, strong) UILabel *iconLabel;
+@property (nonatomic, strong) UILabel *titleLabel;
+@property (nonatomic, strong) UISegmentedControl *segmentedControl;
+@end
+
+@implementation ACEditorSegmentedCell
+
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
+    self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
+    if (self) {
+        self.selectionStyle = UITableViewCellSelectionStyleNone;
+        _iconLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+        _iconLabel.font = [UIFont systemFontOfSize:19.0 weight:UIFontWeightSemibold];
+        _iconLabel.translatesAutoresizingMaskIntoConstraints = NO;
+
+        _titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+        _titleLabel.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightSemibold];
+        _titleLabel.textColor = UIColor.labelColor;
+        _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+
+        _segmentedControl = [[UISegmentedControl alloc] initWithItems:@[]];
+        _segmentedControl.translatesAutoresizingMaskIntoConstraints = NO;
+
+        [self.contentView addSubview:_iconLabel];
+        [self.contentView addSubview:_titleLabel];
+        [self.contentView addSubview:_segmentedControl];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [_iconLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16.0],
+            [_iconLabel.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+            [_iconLabel.widthAnchor constraintEqualToConstant:26.0],
+
+            [_titleLabel.leadingAnchor constraintEqualToAnchor:_iconLabel.trailingAnchor constant:8.0],
+            [_titleLabel.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+            [_titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_segmentedControl.leadingAnchor constant:-10.0],
+
+            [_segmentedControl.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-14.0],
+            [_segmentedControl.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+            [_segmentedControl.widthAnchor constraintGreaterThanOrEqualToConstant:156.0],
+            [_segmentedControl.heightAnchor constraintEqualToConstant:32.0],
+
+            [self.contentView.heightAnchor constraintGreaterThanOrEqualToConstant:54.0],
+        ]];
+    }
+    return self;
+}
+
+@end
+
 @interface ACEditorButtonCell : UITableViewCell
 @property (nonatomic, strong) UIButton *button;
 @end
@@ -193,12 +276,19 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         self.selectionStyle = UITableViewCellSelectionStyleNone;
         NSArray<NSDictionary *> *items = @[
             @{@"title": @"👆 点击", @"mode": @(AnClickActionModeTap)},
+            @{@"title": @"👆 双击", @"mode": @(AnClickActionModeDoubleTap)},
             @{@"title": @"⏳ 长按", @"mode": @(AnClickActionModeLongPress)},
             @{@"title": @"↗ 滑动", @"mode": @(AnClickActionModeSwipe)},
-            @{@"title": @"🎨 识色", @"mode": @(AnClickActionModeColor)},
+            @{@"title": @"✌ 多指", @"mode": @(AnClickActionModeTwoFingerTap)},
+            @{@"title": @"🤏 缩小", @"mode": @(AnClickActionModePinchIn)},
+            @{@"title": @"↔ 放大", @"mode": @(AnClickActionModePinchOut)},
+            @{@"title": @"⟳ 旋转", @"mode": @(AnClickActionModeRotate)},
             @{@"title": @"🖼 识图", @"mode": @(AnClickActionModeImage)},
-            @{@"title": @"🌐 网络", @"mode": @(AnClickActionModeNetwork)},
+            @{@"title": @"🎬 宏", @"mode": @(AnClickActionModeMacro)},
             @{@"title": @"📝 OCR", @"mode": @(AnClickActionModeOCR)},
+            @{@"title": @"🎨 识色", @"mode": @(AnClickActionModeColor)},
+            @{@"title": @"🌐 网络", @"mode": @(AnClickActionModeNetwork)},
+            @{@"title": @"🔀 跳转", @"mode": @(AnClickActionModeJump)},
             @{@"title": @"⏱ 延时", @"mode": @(AnClickActionModeDelay)},
         ];
         NSMutableArray *buttons = [NSMutableArray array];
@@ -213,14 +303,16 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             [outer.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:14.0],
             [outer.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-14.0],
         ]];
-        for (NSUInteger row = 0; row < 2; row++) {
+        NSUInteger columns = 3;
+        NSUInteger rows = (items.count + columns - 1) / columns;
+        for (NSUInteger row = 0; row < rows; row++) {
             UIStackView *line = [[UIStackView alloc] initWithFrame:CGRectZero];
             line.axis = UILayoutConstraintAxisHorizontal;
             line.spacing = 8.0;
             line.distribution = UIStackViewDistributionFillEqually;
             [outer addArrangedSubview:line];
-            NSUInteger start = row * 4;
-            NSUInteger end = MIN(items.count, start + 4);
+            NSUInteger start = row * columns;
+            NSUInteger end = MIN(items.count, start + columns);
             for (NSUInteger i = start; i < end; i++) {
                 UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
                 [button setTitle:items[i][@"title"] forState:UIControlStateNormal];
@@ -233,8 +325,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
                 [line addArrangedSubview:button];
                 [buttons addObject:button];
             }
-            if (row == 1 && end - start < 4) {
-                for (NSUInteger i = end - start; i < 4; i++) {
+            if (end - start < columns) {
+                for (NSUInteger i = end - start; i < columns; i++) {
                     UIView *spacer = [[UIView alloc] initWithFrame:CGRectZero];
                     [line addArrangedSubview:spacer];
                 }
@@ -340,6 +432,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     [_tableView registerClass:ACEditorActionGridCell.class forCellReuseIdentifier:@"ActionGrid"];
     [_tableView registerClass:ACEditorInputCell.class forCellReuseIdentifier:@"Input"];
     [_tableView registerClass:ACEditorSliderCell.class forCellReuseIdentifier:@"Slider"];
+    [_tableView registerClass:ACEditorSegmentedCell.class forCellReuseIdentifier:@"Segmented"];
     [_tableView registerClass:ACEditorButtonCell.class forCellReuseIdentifier:@"Button"];
 
     [self addSubview:_cancelButton];
@@ -450,7 +543,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case 1:
             return [self parameterRows];
         case 2:
-            return @[];
+            return [self timingRows];
         case 3:
             return [self logicRows];
         case 4:
@@ -461,29 +554,170 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 }
 
 - (NSArray<NSNumber *> *)parameterRows {
-    switch (self.model.actionMode) {
-        case AnClickActionModeNone:
-            return @[];
-        case AnClickActionModeDelay:
-            return @[@(ACEditorRowKindDelay)];
-        case AnClickActionModeImage:
-            return @[@(ACEditorRowKindTemplate), @(ACEditorRowKindThreshold)];
-        case AnClickActionModeColor:
-            return @[@(ACEditorRowKindColor), @(ACEditorRowKindThreshold), @(ACEditorRowKindPointPick)];
-        case AnClickActionModeOCR:
-            return @[@(ACEditorRowKindOCRText), @(ACEditorRowKindCoordinate), @(ACEditorRowKindPointPick)];
-        case AnClickActionModeNetwork:
-            return @[@(ACEditorRowKindNetworkURL)];
-        case AnClickActionModeTap:
-        case AnClickActionModeDoubleTap:
-        case AnClickActionModeTwoFingerTap:
-        case AnClickActionModeSwipe:
-            return @[@(ACEditorRowKindCoordinate), @(ACEditorRowKindPointPick)];
-        case AnClickActionModeLongPress:
-            return @[@(ACEditorRowKindCoordinate), @(ACEditorRowKindLongPress), @(ACEditorRowKindPointPick)];
-        default:
-            return @[];
+    NSArray<NSNumber *> *candidates = @[
+        @(ACEditorRowKindCoordinate),
+        @(ACEditorRowKindSwipeStart),
+        @(ACEditorRowKindSwipeEnd),
+        @(ACEditorRowKindPointPick),
+        @(ACEditorRowKindTemplate),
+        @(ACEditorRowKindTemplatePath),
+        @(ACEditorRowKindTemplateROI),
+        @(ACEditorRowKindMatchClickOffset),
+        @(ACEditorRowKindColor),
+        @(ACEditorRowKindColorMatchMode),
+        @(ACEditorRowKindThreshold),
+        @(ACEditorRowKindOCRMode),
+        @(ACEditorRowKindOCRMatchMode),
+        @(ACEditorRowKindOCRText),
+        @(ACEditorRowKindOCRSimilarity),
+        @(ACEditorRowKindNetworkURL),
+        @(ACEditorRowKindNetworkMethod),
+        @(ACEditorRowKindNetworkHeaders),
+        @(ACEditorRowKindNetworkBody),
+        @(ACEditorRowKindNetworkContains),
+        @(ACEditorRowKindNetworkFalse),
+        @(ACEditorRowKindJumpTarget),
+        @(ACEditorRowKindMacroPath),
+        @(ACEditorRowKindMacroArguments),
+        @(ACEditorRowKindPinchDistance),
+        @(ACEditorRowKindRotateAngles),
+    ];
+    NSMutableArray<NSNumber *> *rows = [NSMutableArray array];
+    for (NSNumber *row in candidates) {
+        if ([self shouldShowRowForKind:(ACEditorRowKind)row.integerValue]) {
+            [rows addObject:row];
+        }
     }
+    return rows;
+}
+
+- (NSArray<NSNumber *> *)timingRows {
+    NSArray<NSNumber *> *candidates = @[
+        @(ACEditorRowKindDelay),
+        @(ACEditorRowKindRepeat),
+        @(ACEditorRowKindInterval),
+        @(ACEditorRowKindDoubleTapInterval),
+        @(ACEditorRowKindLongPress),
+        @(ACEditorRowKindSwipeDuration),
+        @(ACEditorRowKindSwipeStep),
+        @(ACEditorRowKindGestureDuration),
+        @(ACEditorRowKindMacroSpeed),
+        @(ACEditorRowKindJitter),
+        @(ACEditorRowKindPressure),
+        @(ACEditorRowKindNetworkRetryMode),
+        @(ACEditorRowKindNetworkRetryLimit),
+        @(ACEditorRowKindNetworkTimeout),
+        @(ACEditorRowKindRecognitionRetryMode),
+        @(ACEditorRowKindRecognitionRetryInterval),
+    ];
+    NSMutableArray<NSNumber *> *rows = [NSMutableArray array];
+    for (NSNumber *row in candidates) {
+        if ([self shouldShowRowForKind:(ACEditorRowKind)row.integerValue]) {
+            [rows addObject:row];
+        }
+    }
+    return rows;
+}
+
+- (BOOL)shouldShowRowForKind:(ACEditorRowKind)kind {
+    AnClickActionMode mode = self.model.actionMode;
+    if (mode == AnClickActionModeNone) {
+        return kind == ACEditorRowKindActionGrid;
+    }
+
+    BOOL pointMode = mode == AnClickActionModeTap ||
+        mode == AnClickActionModeDoubleTap ||
+        mode == AnClickActionModeLongPress ||
+        mode == AnClickActionModeTwoFingerTap ||
+        mode == AnClickActionModePinchIn ||
+        mode == AnClickActionModePinchOut ||
+        mode == AnClickActionModeRotate;
+    BOOL recognitionMode = mode == AnClickActionModeImage ||
+        mode == AnClickActionModeOCR ||
+        mode == AnClickActionModeColor;
+
+    switch (kind) {
+        case ACEditorRowKindActionGrid:
+            return YES;
+        case ACEditorRowKindCoordinate:
+            return pointMode || mode == AnClickActionModeColor;
+        case ACEditorRowKindSwipeStart:
+        case ACEditorRowKindSwipeEnd:
+            return mode == AnClickActionModeSwipe;
+        case ACEditorRowKindPointPick:
+            return pointMode || mode == AnClickActionModeSwipe || mode == AnClickActionModeColor;
+        case ACEditorRowKindJitter:
+            return mode == AnClickActionModeTap ||
+                mode == AnClickActionModeDoubleTap ||
+                mode == AnClickActionModeLongPress ||
+                mode == AnClickActionModeSwipe ||
+                mode == AnClickActionModeTwoFingerTap ||
+                mode == AnClickActionModePinchIn ||
+                mode == AnClickActionModePinchOut ||
+                mode == AnClickActionModeRotate ||
+                mode == AnClickActionModeMacro;
+        case ACEditorRowKindPressure:
+            return mode == AnClickActionModeTap;
+        case ACEditorRowKindRepeat:
+            return mode == AnClickActionModeTap || mode == AnClickActionModeTwoFingerTap;
+        case ACEditorRowKindDoubleTapInterval:
+            return mode == AnClickActionModeDoubleTap;
+        case ACEditorRowKindLongPress:
+            return mode == AnClickActionModeLongPress;
+        case ACEditorRowKindSwipeDuration:
+        case ACEditorRowKindSwipeStep:
+            return mode == AnClickActionModeSwipe;
+        case ACEditorRowKindPinchDistance:
+            return mode == AnClickActionModePinchIn || mode == AnClickActionModePinchOut;
+        case ACEditorRowKindRotateAngles:
+            return mode == AnClickActionModeRotate;
+        case ACEditorRowKindGestureDuration:
+            return mode == AnClickActionModePinchIn || mode == AnClickActionModePinchOut || mode == AnClickActionModeRotate;
+        case ACEditorRowKindTemplate:
+        case ACEditorRowKindTemplatePath:
+        case ACEditorRowKindTemplateROI:
+        case ACEditorRowKindMatchClickOffset:
+            return mode == AnClickActionModeImage;
+        case ACEditorRowKindThreshold:
+            return mode == AnClickActionModeImage || mode == AnClickActionModeColor;
+        case ACEditorRowKindColor:
+        case ACEditorRowKindColorMatchMode:
+            return mode == AnClickActionModeColor;
+        case ACEditorRowKindOCRMode:
+        case ACEditorRowKindOCRMatchMode:
+        case ACEditorRowKindOCRText:
+        case ACEditorRowKindOCRSimilarity:
+            return mode == AnClickActionModeOCR;
+        case ACEditorRowKindNetworkURL:
+        case ACEditorRowKindNetworkMethod:
+        case ACEditorRowKindNetworkHeaders:
+        case ACEditorRowKindNetworkBody:
+        case ACEditorRowKindNetworkRetryMode:
+        case ACEditorRowKindNetworkRetryLimit:
+        case ACEditorRowKindNetworkTimeout:
+        case ACEditorRowKindNetworkContains:
+        case ACEditorRowKindNetworkFalse:
+            return mode == AnClickActionModeNetwork;
+        case ACEditorRowKindJumpTarget:
+            return mode == AnClickActionModeJump;
+        case ACEditorRowKindMacroPath:
+        case ACEditorRowKindMacroArguments:
+        case ACEditorRowKindMacroSpeed:
+            return mode == AnClickActionModeMacro;
+        case ACEditorRowKindDelay:
+            return mode == AnClickActionModeDelay;
+        case ACEditorRowKindInterval:
+            return mode == AnClickActionModeTap || mode == AnClickActionModeTwoFingerTap;
+        case ACEditorRowKindRecognitionRetryMode:
+        case ACEditorRowKindRecognitionRetryInterval:
+        case ACEditorRowKindSuccessBranch:
+        case ACEditorRowKindFailureBranch:
+            return recognitionMode;
+        case ACEditorRowKindSingleStep:
+        case ACEditorRowKindDelete:
+            return mode != AnClickActionModeNone;
+    }
+    return NO;
 }
 
 - (NSArray<NSNumber *> *)logicRows {
@@ -512,19 +746,30 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         [cell configureWithSelectedMode:self.model.actionMode];
         return cell;
     }
-    if (row == ACEditorRowKindThreshold) {
+    if (row == ACEditorRowKindThreshold || row == ACEditorRowKindOCRSimilarity) {
         ACEditorSliderCell *cell = [tableView dequeueReusableCellWithIdentifier:@"Slider" forIndexPath:indexPath];
-        cell.iconLabel.text = @"⚖";
-        cell.titleLabel.text = self.model.actionMode == AnClickActionModeColor ? @"相似度容差" : @"相似度阈值";
+        cell.iconLabel.text = row == ACEditorRowKindOCRSimilarity ? @"🔎" : @"⚖";
+        cell.titleLabel.text = row == ACEditorRowKindOCRSimilarity
+            ? @"OCR 相似度"
+            : (self.model.actionMode == AnClickActionModeColor ? @"相似度容差" : @"相似度阈值");
         cell.slider.tag = row;
         cell.slider.minimumValue = 0.0;
-        cell.slider.maximumValue = self.model.actionMode == AnClickActionModeColor ? 255.0 : 1.0;
-        cell.slider.value = self.model.actionMode == AnClickActionModeColor ? (float)self.model.colorTolerance : (float)self.model.threshold;
-        cell.valueLabel.text = self.model.actionMode == AnClickActionModeColor
+        cell.slider.maximumValue = (row == ACEditorRowKindThreshold && self.model.actionMode == AnClickActionModeColor) ? 255.0 : 1.0;
+        cell.slider.value = row == ACEditorRowKindOCRSimilarity
+            ? (float)self.model.ocrSimilarity
+            : (self.model.actionMode == AnClickActionModeColor ? (float)self.model.colorTolerance : (float)self.model.threshold);
+        cell.valueLabel.text = row == ACEditorRowKindOCRSimilarity
+            ? [NSString stringWithFormat:@"%.0f%%", self.model.ocrSimilarity * 100.0]
+            : (self.model.actionMode == AnClickActionModeColor
             ? [NSString stringWithFormat:@"%.0f", self.model.colorTolerance]
-            : [NSString stringWithFormat:@"%.0f%%", self.model.threshold * 100.0];
+            : [NSString stringWithFormat:@"%.0f%%", self.model.threshold * 100.0]);
         [cell.slider removeTarget:nil action:NULL forControlEvents:UIControlEventValueChanged];
         [cell.slider addTarget:self action:@selector(handleSliderChanged:) forControlEvents:UIControlEventValueChanged];
+        return cell;
+    }
+    if ([self isSegmentedRow:row]) {
+        ACEditorSegmentedCell *cell = [tableView dequeueReusableCellWithIdentifier:@"Segmented" forIndexPath:indexPath];
+        [self configureSegmentedCell:cell row:row];
         return cell;
     }
     if (row == ACEditorRowKindPointPick ||
@@ -563,6 +808,70 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     return cell;
 }
 
+- (BOOL)isSegmentedRow:(ACEditorRowKind)row {
+    return row == ACEditorRowKindColorMatchMode ||
+        row == ACEditorRowKindOCRMode ||
+        row == ACEditorRowKindOCRMatchMode ||
+        row == ACEditorRowKindNetworkMethod ||
+        row == ACEditorRowKindNetworkRetryMode ||
+        row == ACEditorRowKindRecognitionRetryMode;
+}
+
+- (void)configureSegmentedCell:(ACEditorSegmentedCell *)cell row:(ACEditorRowKind)row {
+    cell.segmentedControl.tag = row;
+    [cell.segmentedControl removeAllSegments];
+    NSArray<NSString *> *items = @[];
+    NSInteger selectedIndex = 0;
+    switch (row) {
+        case ACEditorRowKindColorMatchMode:
+            cell.iconLabel.text = @"🎨";
+            cell.titleLabel.text = @"匹配模式";
+            items = @[@"相等", @"不等"];
+            selectedIndex = MIN(1, MAX(0, self.model.colorMatchMode));
+            break;
+        case ACEditorRowKindOCRMode:
+            cell.iconLabel.text = @"🧠";
+            cell.titleLabel.text = @"OCR 模式";
+            items = @[@"Apple", @"Tesseract"];
+            selectedIndex = self.model.ocrMode == AnClickOCRModeTesseract ? 1 : 0;
+            break;
+        case ACEditorRowKindOCRMatchMode:
+            cell.iconLabel.text = @"≋";
+            cell.titleLabel.text = @"匹配模式";
+            items = @[@"包含", @"正则", @"等于"];
+            selectedIndex = self.model.ocrMatchMode == AnClickOCRMatchModeRegex
+                ? 1
+                : (self.model.ocrMatchMode == AnClickOCRMatchModeEqual ? 2 : 0);
+            break;
+        case ACEditorRowKindNetworkMethod:
+            cell.iconLabel.text = @"⇄";
+            cell.titleLabel.text = @"请求方法";
+            items = @[@"GET", @"POST"];
+            selectedIndex = [[self.model.networkMethod uppercaseString] isEqualToString:@"POST"] || self.model.networkUsesPost ? 1 : 0;
+            break;
+        case ACEditorRowKindNetworkRetryMode:
+            cell.iconLabel.text = @"↻";
+            cell.titleLabel.text = @"重试模式";
+            items = @[@"次数", @"无限"];
+            selectedIndex = self.model.networkRetryForever ? 1 : 0;
+            break;
+        case ACEditorRowKindRecognitionRetryMode:
+            cell.iconLabel.text = @"🔁";
+            cell.titleLabel.text = @"识别重试";
+            items = @[@"按次数", @"直到命中"];
+            selectedIndex = self.model.recognitionRetryUntilFound ? 1 : 0;
+            break;
+        default:
+            break;
+    }
+    for (NSUInteger i = 0; i < items.count; i++) {
+        [cell.segmentedControl insertSegmentWithTitle:items[i] atIndex:i animated:NO];
+    }
+    cell.segmentedControl.selectedSegmentIndex = selectedIndex;
+    [cell.segmentedControl removeTarget:nil action:NULL forControlEvents:UIControlEventValueChanged];
+    [cell.segmentedControl addTarget:self action:@selector(handleSegmentChanged:) forControlEvents:UIControlEventValueChanged];
+}
+
 - (void)configureInputCell:(ACEditorInputCell *)cell row:(ACEditorRowKind)row {
     cell.textField.delegate = self;
     cell.textField.tag = row;
@@ -578,11 +887,70 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindCoordinate: {
             CGPoint point = self.model.point ? self.model.point.CGPointValue : CGPointZero;
             cell.iconLabel.text = @"⌖";
-            cell.titleLabel.text = @"目标坐标";
+            cell.titleLabel.text = self.model.actionMode == AnClickActionModeColor ? @"目标坐标" : @"触点坐标";
             cell.textField.text = self.model.point ? [NSString stringWithFormat:@"%.0f, %.0f", point.x, point.y] : @"未拾取";
-            cell.textField.enabled = NO;
+            cell.textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
             break;
         }
+        case ACEditorRowKindSwipeStart: {
+            CGPoint point = [self swipePointAtIndex:0];
+            cell.iconLabel.text = @"↗";
+            cell.titleLabel.text = @"起点坐标";
+            cell.textField.text = [self hasSwipePointAtIndex:0] ? [NSString stringWithFormat:@"%.0f, %.0f", point.x, point.y] : @"未拾取";
+            cell.textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+            break;
+        }
+        case ACEditorRowKindSwipeEnd: {
+            CGPoint point = [self swipePointAtIndex:1];
+            cell.iconLabel.text = @"⇥";
+            cell.titleLabel.text = @"终点坐标";
+            cell.textField.text = [self hasSwipePointAtIndex:1] ? [NSString stringWithFormat:@"%.0f, %.0f", point.x, point.y] : @"未拾取";
+            cell.textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+            break;
+        }
+        case ACEditorRowKindJitter:
+            cell.iconLabel.text = @"◎";
+            cell.titleLabel.text = @"抖动半径";
+            cell.textField.text = [NSString stringWithFormat:@"%.0f", self.model.jitterRadius];
+            cell.textField.keyboardType = UIKeyboardTypeDecimalPad;
+            cell.unitLabel.text = @"px";
+            break;
+        case ACEditorRowKindPressure:
+            cell.iconLabel.text = @"▣";
+            cell.titleLabel.text = @"点击压力";
+            cell.textField.text = [NSString stringWithFormat:@"%.2f", self.model.pressure];
+            cell.textField.keyboardType = UIKeyboardTypeDecimalPad;
+            break;
+        case ACEditorRowKindRepeat:
+            cell.iconLabel.text = @"×";
+            cell.titleLabel.text = @"重复次数";
+            cell.textField.text = [NSString stringWithFormat:@"%ld", (long)MAX(1, self.model.repeatCount)];
+            cell.textField.keyboardType = UIKeyboardTypeNumberPad;
+            break;
+        case ACEditorRowKindDoubleTapInterval:
+            cell.iconLabel.text = @"⏱";
+            cell.titleLabel.text = @"双击间隔";
+            cell.textField.text = [NSString stringWithFormat:@"%.0f", self.model.doubleTapInterval * 1000.0];
+            cell.textField.keyboardType = UIKeyboardTypeNumberPad;
+            cell.unitLabel.text = @"ms";
+            break;
+        case ACEditorRowKindTemplatePath:
+            cell.iconLabel.text = @"🖼";
+            cell.titleLabel.text = @"图片路径";
+            cell.textField.text = self.model.templatePath;
+            break;
+        case ACEditorRowKindTemplateROI:
+            cell.iconLabel.text = @"▢";
+            cell.titleLabel.text = @"匹配区域 ROI";
+            cell.textField.text = self.model.hasTemplateROI ? [self rectText:self.model.templateROI] : @"全屏";
+            cell.textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+            break;
+        case ACEditorRowKindMatchClickOffset:
+            cell.iconLabel.text = @"＋";
+            cell.titleLabel.text = @"成功点击偏移";
+            cell.textField.text = self.model.hasMatchClickOffset ? [self pointText:self.model.matchClickOffset] : @"0, 0";
+            cell.textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+            break;
         case ACEditorRowKindColor: {
             cell.iconLabel.text = @"🎨";
             cell.titleLabel.text = @"目标颜色";
@@ -606,6 +974,97 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             cell.textField.text = self.model.networkURL;
             cell.textField.keyboardType = UIKeyboardTypeURL;
             break;
+        case ACEditorRowKindNetworkHeaders:
+            cell.iconLabel.text = @"☰";
+            cell.titleLabel.text = @"请求头";
+            cell.textField.text = [self headersText:self.model.networkHeaders];
+            break;
+        case ACEditorRowKindNetworkBody:
+            cell.iconLabel.text = @"{}";
+            cell.titleLabel.text = @"请求体";
+            cell.textField.text = self.model.networkPostBody;
+            break;
+        case ACEditorRowKindNetworkRetryLimit:
+            cell.iconLabel.text = @"#";
+            cell.titleLabel.text = @"重试次数";
+            cell.textField.text = [NSString stringWithFormat:@"%ld", (long)MAX(1, self.model.networkRetryLimit)];
+            cell.textField.keyboardType = UIKeyboardTypeNumberPad;
+            break;
+        case ACEditorRowKindNetworkTimeout:
+            cell.iconLabel.text = @"⏲";
+            cell.titleLabel.text = @"超时时间";
+            cell.textField.text = [NSString stringWithFormat:@"%.0f", self.model.networkTimeout];
+            cell.textField.keyboardType = UIKeyboardTypeDecimalPad;
+            cell.unitLabel.text = @"s";
+            break;
+        case ACEditorRowKindNetworkContains:
+            cell.iconLabel.text = @"✓";
+            cell.iconLabel.textColor = UIColor.systemGreenColor;
+            cell.titleLabel.text = @"成功匹配内容";
+            cell.textField.text = self.model.networkContains;
+            break;
+        case ACEditorRowKindNetworkFalse:
+            cell.iconLabel.text = @"✕";
+            cell.iconLabel.textColor = UIColor.systemRedColor;
+            cell.titleLabel.text = @"失败匹配内容";
+            cell.textField.text = self.model.networkFalse;
+            break;
+        case ACEditorRowKindJumpTarget:
+            cell.iconLabel.text = @"🔀";
+            cell.titleLabel.text = @"跳转任务 ID";
+            cell.textField.text = self.model.jumpTaskIndex >= 0 ? [NSString stringWithFormat:@"%ld", (long)self.model.jumpTaskIndex + 1] : @"";
+            cell.textField.keyboardType = UIKeyboardTypeNumberPad;
+            break;
+        case ACEditorRowKindMacroPath:
+            cell.iconLabel.text = @"🎬";
+            cell.titleLabel.text = @"宏路径";
+            cell.textField.text = self.model.macroPath;
+            break;
+        case ACEditorRowKindMacroArguments:
+            cell.iconLabel.text = @"$";
+            cell.titleLabel.text = @"子脚本参数";
+            cell.textField.text = self.model.macroArguments;
+            break;
+        case ACEditorRowKindMacroSpeed:
+            cell.iconLabel.text = @"⏩";
+            cell.titleLabel.text = @"回放速度";
+            cell.textField.text = [NSString stringWithFormat:@"%.2f", self.model.macroSpeed];
+            cell.textField.keyboardType = UIKeyboardTypeDecimalPad;
+            cell.unitLabel.text = @"x";
+            break;
+        case ACEditorRowKindSwipeDuration:
+            cell.iconLabel.text = @"⏱";
+            cell.titleLabel.text = @"滑动时长";
+            cell.textField.text = [NSString stringWithFormat:@"%.0f", self.model.swipeDuration * 1000.0];
+            cell.textField.keyboardType = UIKeyboardTypeNumberPad;
+            cell.unitLabel.text = @"ms";
+            break;
+        case ACEditorRowKindSwipeStep:
+            cell.iconLabel.text = @"⋯";
+            cell.titleLabel.text = @"轨迹步长";
+            cell.textField.text = [NSString stringWithFormat:@"%.0f", self.model.swipeStep];
+            cell.textField.keyboardType = UIKeyboardTypeDecimalPad;
+            cell.unitLabel.text = @"px";
+            break;
+        case ACEditorRowKindPinchDistance:
+            cell.iconLabel.text = @"↔";
+            cell.titleLabel.text = @"距离变化";
+            cell.textField.text = [NSString stringWithFormat:@"%.0f, %.0f", self.model.gestureFromDistance, self.model.gestureToDistance];
+            cell.textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+            break;
+        case ACEditorRowKindRotateAngles:
+            cell.iconLabel.text = @"⟳";
+            cell.titleLabel.text = @"旋转角度";
+            cell.textField.text = [NSString stringWithFormat:@"%.0f, %.0f", self.model.rotationStartAngle, self.model.rotationEndAngle];
+            cell.textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+            break;
+        case ACEditorRowKindGestureDuration:
+            cell.iconLabel.text = @"⏱";
+            cell.titleLabel.text = @"手势时长";
+            cell.textField.text = [NSString stringWithFormat:@"%.0f", self.model.gestureDuration * 1000.0];
+            cell.textField.keyboardType = UIKeyboardTypeNumberPad;
+            cell.unitLabel.text = @"ms";
+            break;
         case ACEditorRowKindDelay:
             cell.iconLabel.text = @"⏱";
             cell.titleLabel.text = @"延时时长";
@@ -617,6 +1076,13 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             cell.iconLabel.text = @"⏱";
             cell.titleLabel.text = @"后置延时";
             cell.textField.text = [NSString stringWithFormat:@"%.0f", self.model.interval * 1000.0];
+            cell.textField.keyboardType = UIKeyboardTypeNumberPad;
+            cell.unitLabel.text = @"ms";
+            break;
+        case ACEditorRowKindRecognitionRetryInterval:
+            cell.iconLabel.text = @"🔁";
+            cell.titleLabel.text = @"识别间隔";
+            cell.textField.text = [NSString stringWithFormat:@"%.0f", self.model.recognitionRetryInterval * 1000.0];
             cell.textField.keyboardType = UIKeyboardTypeNumberPad;
             cell.unitLabel.text = @"ms";
             break;
@@ -652,6 +1118,36 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 - (void)handleTextFieldChanged:(UITextField *)textField {
     NSString *text = textField.text ?: @"";
     switch ((ACEditorRowKind)textField.tag) {
+        case ACEditorRowKindCoordinate:
+            [self updateModelPointFromText:text];
+            break;
+        case ACEditorRowKindSwipeStart:
+            [self updateSwipePointAtIndex:0 text:text];
+            break;
+        case ACEditorRowKindSwipeEnd:
+            [self updateSwipePointAtIndex:1 text:text];
+            break;
+        case ACEditorRowKindJitter:
+            self.model.jitterRadius = MIN(200.0, MAX(0.0, text.doubleValue));
+            break;
+        case ACEditorRowKindPressure:
+            self.model.pressure = MIN(1.0, MAX(0.0, text.doubleValue));
+            break;
+        case ACEditorRowKindRepeat:
+            self.model.repeatCount = MAX(1, text.integerValue);
+            break;
+        case ACEditorRowKindDoubleTapInterval:
+            self.model.doubleTapInterval = MIN(2.0, MAX(0.02, text.doubleValue / 1000.0));
+            break;
+        case ACEditorRowKindTemplatePath:
+            self.model.templatePath = text;
+            break;
+        case ACEditorRowKindTemplateROI:
+            [self updateTemplateROIFromText:text];
+            break;
+        case ACEditorRowKindMatchClickOffset:
+            [self updateMatchClickOffsetFromText:text];
+            break;
         case ACEditorRowKindColor:
             [self updateModelColorFromHex:text];
             break;
@@ -661,6 +1157,51 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindNetworkURL:
             self.model.networkURL = text;
             break;
+        case ACEditorRowKindNetworkHeaders:
+            self.model.networkHeaders = [self headersFromText:text];
+            break;
+        case ACEditorRowKindNetworkBody:
+            self.model.networkPostBody = text;
+            break;
+        case ACEditorRowKindNetworkRetryLimit:
+            self.model.networkRetryLimit = MAX(1, text.integerValue);
+            break;
+        case ACEditorRowKindNetworkTimeout:
+            self.model.networkTimeout = MIN(60.0, MAX(1.0, text.doubleValue));
+            break;
+        case ACEditorRowKindNetworkContains:
+            self.model.networkContains = text;
+            break;
+        case ACEditorRowKindNetworkFalse:
+            self.model.networkFalse = text;
+            break;
+        case ACEditorRowKindJumpTarget:
+            self.model.jumpTaskIndex = text.length > 0 ? MAX(0, text.integerValue - 1) : -1;
+            break;
+        case ACEditorRowKindMacroPath:
+            self.model.macroPath = text;
+            break;
+        case ACEditorRowKindMacroArguments:
+            self.model.macroArguments = text;
+            break;
+        case ACEditorRowKindMacroSpeed:
+            self.model.macroSpeed = MIN(10.0, MAX(0.1, text.doubleValue));
+            break;
+        case ACEditorRowKindSwipeDuration:
+            self.model.swipeDuration = MIN(10.0, MAX(0.05, text.doubleValue / 1000.0));
+            break;
+        case ACEditorRowKindSwipeStep:
+            self.model.swipeStep = MIN(200.0, MAX(1.0, text.doubleValue));
+            break;
+        case ACEditorRowKindPinchDistance:
+            [self updatePinchDistancesFromText:text];
+            break;
+        case ACEditorRowKindRotateAngles:
+            [self updateRotateAnglesFromText:text];
+            break;
+        case ACEditorRowKindGestureDuration:
+            self.model.gestureDuration = MIN(10.0, MAX(0.05, text.doubleValue / 1000.0));
+            break;
         case ACEditorRowKindDelay:
             self.model.delay = MAX(0.0, text.doubleValue) / 1000.0;
             break;
@@ -668,7 +1209,10 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             self.model.interval = MAX(0.0, text.doubleValue) / 1000.0;
             break;
         case ACEditorRowKindLongPress:
-            [self setLongPressMilliseconds:MAX(0, text.integerValue)];
+            self.model.longPressDuration = MAX(0, text.integerValue) / 1000.0;
+            break;
+        case ACEditorRowKindRecognitionRetryInterval:
+            self.model.recognitionRetryInterval = MIN(30.0, MAX(0.2, text.doubleValue / 1000.0));
             break;
         case ACEditorRowKindSuccessBranch:
             [self setBranchText:text success:YES];
@@ -752,7 +1296,10 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 }
 
 - (void)handleSliderChanged:(UISlider *)slider {
-    if (self.model.actionMode == AnClickActionModeColor) {
+    ACEditorRowKind row = (ACEditorRowKind)slider.tag;
+    if (row == ACEditorRowKindOCRSimilarity) {
+        self.model.ocrSimilarity = slider.value;
+    } else if (self.model.actionMode == AnClickActionModeColor) {
         self.model.colorTolerance = slider.value;
     } else {
         self.model.threshold = slider.value;
@@ -762,9 +1309,41 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         view = view.superview;
     }
     ACEditorSliderCell *cell = [view isKindOfClass:ACEditorSliderCell.class] ? (ACEditorSliderCell *)view : nil;
-    cell.valueLabel.text = self.model.actionMode == AnClickActionModeColor
+    cell.valueLabel.text = row == ACEditorRowKindOCRSimilarity
+        ? [NSString stringWithFormat:@"%.0f%%", self.model.ocrSimilarity * 100.0]
+        : (self.model.actionMode == AnClickActionModeColor
         ? [NSString stringWithFormat:@"%.0f", self.model.colorTolerance]
-        : [NSString stringWithFormat:@"%.0f%%", self.model.threshold * 100.0];
+        : [NSString stringWithFormat:@"%.0f%%", self.model.threshold * 100.0]);
+    [self notifyModelChanged];
+}
+
+- (void)handleSegmentChanged:(UISegmentedControl *)segmentedControl {
+    NSInteger selected = segmentedControl.selectedSegmentIndex;
+    switch ((ACEditorRowKind)segmentedControl.tag) {
+        case ACEditorRowKindColorMatchMode:
+            self.model.colorMatchMode = selected == 1 ? 1 : 0;
+            break;
+        case ACEditorRowKindOCRMode:
+            self.model.ocrMode = selected == 1 ? AnClickOCRModeTesseract : AnClickOCRModeAppleVision;
+            break;
+        case ACEditorRowKindOCRMatchMode:
+            self.model.ocrMatchMode = selected == 1
+                ? AnClickOCRMatchModeRegex
+                : (selected == 2 ? AnClickOCRMatchModeEqual : AnClickOCRMatchModeContains);
+            break;
+        case ACEditorRowKindNetworkMethod:
+            self.model.networkMethod = selected == 1 ? @"POST" : @"GET";
+            self.model.networkUsesPost = selected == 1;
+            break;
+        case ACEditorRowKindNetworkRetryMode:
+            self.model.networkRetryForever = selected == 1;
+            break;
+        case ACEditorRowKindRecognitionRetryMode:
+            self.model.recognitionRetryUntilFound = selected == 1;
+            break;
+        default:
+            break;
+    }
     [self notifyModelChanged];
 }
 
@@ -830,42 +1409,173 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     self.model.colorBlue = value & 0xFF;
 }
 
-- (NSInteger)longPressMilliseconds {
-    id value = self.model.extraFields[@"pressDurationMs"];
-    if ([value respondsToSelector:@selector(integerValue)]) {
-        return MAX(0, [value integerValue]);
+- (NSString *)pointText:(CGPoint)point {
+    return [NSString stringWithFormat:@"%.0f, %.0f", point.x, point.y];
+}
+
+- (NSString *)rectText:(CGRect)rect {
+    return [NSString stringWithFormat:@"%.0f, %.0f, %.0f, %.0f",
+            rect.origin.x,
+            rect.origin.y,
+            rect.size.width,
+            rect.size.height];
+}
+
+- (NSArray<NSString *> *)numberPartsFromText:(NSString *)text {
+    NSString *normalized = [[text ?: @"" stringByReplacingOccurrencesOfString:@"，" withString:@","] stringByReplacingOccurrencesOfString:@" " withString:@""];
+    if (normalized.length == 0) {
+        return @[];
     }
-    return 0;
+    return [normalized componentsSeparatedByString:@","];
+}
+
+- (BOOL)pointFromText:(NSString *)text point:(CGPoint *)point {
+    NSArray<NSString *> *parts = [self numberPartsFromText:text];
+    if (parts.count < 2) {
+        return NO;
+    }
+    *point = CGPointMake(parts[0].doubleValue, parts[1].doubleValue);
+    return YES;
+}
+
+- (BOOL)rectFromText:(NSString *)text rect:(CGRect *)rect {
+    NSArray<NSString *> *parts = [self numberPartsFromText:text];
+    if (parts.count < 4) {
+        return NO;
+    }
+    *rect = CGRectMake(parts[0].doubleValue, parts[1].doubleValue, MAX(0.0, parts[2].doubleValue), MAX(0.0, parts[3].doubleValue));
+    return YES;
+}
+
+- (void)updateModelPointFromText:(NSString *)text {
+    CGPoint point = CGPointZero;
+    if ([self pointFromText:text point:&point]) {
+        self.model.point = [NSValue valueWithCGPoint:point];
+    }
+}
+
+- (BOOL)hasSwipePointAtIndex:(NSUInteger)index {
+    return self.model.path.count > index && [self.model.path[index] isKindOfClass:NSValue.class];
+}
+
+- (CGPoint)swipePointAtIndex:(NSUInteger)index {
+    return [self hasSwipePointAtIndex:index] ? [self.model.path[index] CGPointValue] : CGPointZero;
+}
+
+- (void)updateSwipePointAtIndex:(NSUInteger)index text:(NSString *)text {
+    CGPoint point = CGPointZero;
+    if (![self pointFromText:text point:&point]) {
+        return;
+    }
+    NSMutableArray *path = [self.model.path mutableCopy] ?: [NSMutableArray array];
+    while (path.count <= index) {
+        [path addObject:[NSValue valueWithCGPoint:CGPointZero]];
+    }
+    path[index] = [NSValue valueWithCGPoint:point];
+    self.model.path = path;
+}
+
+- (void)updateTemplateROIFromText:(NSString *)text {
+    CGRect rect = CGRectZero;
+    if ([self rectFromText:text rect:&rect] && rect.size.width > 0.0 && rect.size.height > 0.0) {
+        self.model.templateROI = rect;
+        self.model.hasTemplateROI = YES;
+    } else if (text.length == 0 || [text isEqualToString:@"全屏"]) {
+        self.model.hasTemplateROI = NO;
+        self.model.templateROI = CGRectZero;
+    }
+}
+
+- (void)updateMatchClickOffsetFromText:(NSString *)text {
+    CGPoint point = CGPointZero;
+    if ([self pointFromText:text point:&point]) {
+        self.model.matchClickOffset = point;
+        self.model.hasMatchClickOffset = YES;
+    } else if (text.length == 0) {
+        self.model.hasMatchClickOffset = NO;
+        self.model.matchClickOffset = CGPointZero;
+    }
+}
+
+- (NSString *)headersText:(NSDictionary<NSString *, NSString *> *)headers {
+    if (headers.count == 0) {
+        return @"";
+    }
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    for (NSString *key in headers) {
+        id value = headers[key];
+        [parts addObject:[NSString stringWithFormat:@"%@: %@", key, value ?: @""]];
+    }
+    return [parts componentsJoinedByString:@"; "];
+}
+
+- (NSDictionary<NSString *, NSString *> *)headersFromText:(NSString *)text {
+    NSMutableDictionary<NSString *, NSString *> *headers = [NSMutableDictionary dictionary];
+    NSArray<NSString *> *pairs = [text componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@";\n"]];
+    for (NSString *pair in pairs) {
+        NSRange separator = [pair rangeOfString:@":"];
+        if (separator.location == NSNotFound) {
+            separator = [pair rangeOfString:@"="];
+        }
+        if (separator.location == NSNotFound) {
+            continue;
+        }
+        NSString *key = [[pair substringToIndex:separator.location] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        NSString *value = [[pair substringFromIndex:NSMaxRange(separator)] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (key.length > 0) {
+            headers[key] = value ?: @"";
+        }
+    }
+    return headers;
+}
+
+- (void)updatePinchDistancesFromText:(NSString *)text {
+    NSArray<NSString *> *parts = [self numberPartsFromText:text];
+    if (parts.count < 2) {
+        return;
+    }
+    self.model.gestureFromDistance = MIN(1000.0, MAX(1.0, parts[0].doubleValue));
+    self.model.gestureToDistance = MIN(1000.0, MAX(1.0, parts[1].doubleValue));
+}
+
+- (void)updateRotateAnglesFromText:(NSString *)text {
+    NSArray<NSString *> *parts = [self numberPartsFromText:text];
+    if (parts.count < 2) {
+        return;
+    }
+    self.model.rotationStartAngle = MIN(360.0, MAX(-360.0, parts[0].doubleValue));
+    self.model.rotationEndAngle = MIN(360.0, MAX(-360.0, parts[1].doubleValue));
+}
+
+- (NSInteger)longPressMilliseconds {
+    return MAX(0, (NSInteger)llround(self.model.longPressDuration * 1000.0));
 }
 
 - (void)setLongPressMilliseconds:(NSInteger)milliseconds {
-    NSMutableDictionary *extra = [self.model.extraFields mutableCopy] ?: [NSMutableDictionary dictionary];
-    if (milliseconds > 0) {
-        extra[@"pressDurationMs"] = @(milliseconds);
-    } else {
-        [extra removeObjectForKey:@"pressDurationMs"];
-    }
-    self.model.extraFields = extra;
+    self.model.longPressDuration = MAX(0, milliseconds) / 1000.0;
 }
 
 - (NSString *)branchTextForSuccess:(BOOL)success {
-    id value = self.model.extraFields[success ? @"successBranchIndex" : @"failureBranchIndex"];
-    if ([value respondsToSelector:@selector(integerValue)] && [value integerValue] >= 0) {
-        return [NSString stringWithFormat:@"%ld", (long)[value integerValue] + 1];
-    }
-    return @"";
+    NSInteger index = success ? self.model.successBranchIndex : self.model.failureBranchIndex;
+    return index >= 0 ? [NSString stringWithFormat:@"%ld", (long)index + 1] : @"";
 }
 
 - (void)setBranchText:(NSString *)text success:(BOOL)success {
-    NSMutableDictionary *extra = [self.model.extraFields mutableCopy] ?: [NSMutableDictionary dictionary];
-    NSString *key = success ? @"successBranchIndex" : @"failureBranchIndex";
     NSInteger number = text.integerValue;
+    NSInteger index = (text.length > 0 && number > 0) ? number - 1 : -1;
     if (text.length > 0 && number > 0) {
-        extra[key] = @(number - 1);
+        if (success) {
+            self.model.successBranchIndex = index;
+        } else {
+            self.model.failureBranchIndex = index;
+        }
     } else {
-        [extra removeObjectForKey:key];
+        if (success) {
+            self.model.successBranchIndex = -1;
+        } else {
+            self.model.failureBranchIndex = -1;
+        }
     }
-    self.model.extraFields = extra;
 }
 
 @end
