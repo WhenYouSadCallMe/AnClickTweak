@@ -17,6 +17,7 @@ UIKitBridge_FILES = \
 	src/AnClickFakeTouch.m \
 	src/AnClickRecorder.m \
 	src/AnClickTaskModel.m \
+	src/AnClickTaskEditorView.m \
 	src/AnClickUI.m \
 	vendor/HammerTouch.m
 
