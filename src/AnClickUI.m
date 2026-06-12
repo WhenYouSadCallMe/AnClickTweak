@@ -353,6 +353,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UITableView *_taskListView;
     UIScrollView *_editorContentScrollView;
     AnClickTaskEditorView *_taskEditorView;
+    AnClickTaskModel *_editingTaskModel;
     NSMutableArray<UIView *> *_editorSectionViews;
     UILabel *_statusLabel;
     UILabel *_toastLabel;
@@ -2096,14 +2097,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _statusLabel.textAlignment = NSTextAlignmentCenter;
     [_panelView addSubview:_statusLabel];
 
-    _editorContentScrollView = [[UIScrollView alloc] initWithFrame:CGRectZero];
-    _editorContentScrollView.backgroundColor = UIColor.clearColor;
-    _editorContentScrollView.alwaysBounceVertical = YES;
-    _editorContentScrollView.showsVerticalScrollIndicator = YES;
-    _editorContentScrollView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
-    _editorContentScrollView.hidden = YES;
-    [_panelView addSubview:_editorContentScrollView];
-
     _taskEditorView = [[AnClickTaskEditorView alloc] initWithFrame:_panelView.bounds];
     _taskEditorView.delegate = self;
     _taskEditorView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -2650,9 +2643,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_globalSettingsScrollView && [field isDescendantOfView:_globalSettingsScrollView]) {
         return _globalSettingsScrollView;
     }
-    if (_editorContentScrollView && [field isDescendantOfView:_editorContentScrollView]) {
-        return _editorContentScrollView;
-    }
     return nil;
 }
 
@@ -2698,9 +2688,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)resetKeyboardAvoidanceInsetsExceptScrollView:(UIScrollView *)activeScrollView {
     NSMutableArray<UIScrollView *> *scrollViews = [NSMutableArray array];
-    if (_editorContentScrollView) {
-        [scrollViews addObject:_editorContentScrollView];
-    }
     if (_globalSettingsScrollView) {
         [scrollViews addObject:_globalSettingsScrollView];
     }
@@ -4285,7 +4272,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self hideGlobalSettings];
     }
     if (visible) {
-        [self hideLegacyEditorControlsForGroupedEditor];
         [self refreshTaskEditorViewFromCurrentState];
         _taskEditorView.hidden = NO;
         [_panelView bringSubviewToFront:_taskEditorView];
@@ -4320,6 +4306,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _taskEditorView.frame = _panelView.bounds;
     NSString *branchTitle = [self branchRecognitionContextTitle];
     AnClickTaskModel *model = [self currentTaskEditorModelFromState];
+    _editingTaskModel = [model copy];
     [_taskEditorView configureWithModel:model
                               taskIndex:_selectedTaskIndex
                             branchTitle:branchTitle
@@ -4828,6 +4815,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     [self hideFunctionMenu];
     [self hideGlobalSettings];
+    _editingTaskModel = nil;
     [self setTaskEditorVisible:NO];
     [self refreshTaskList];
     _statusLabel.text = _taskItems.count == 0
@@ -6214,10 +6202,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)selectActionModeValue:(AnClickActionMode)nextMode {
-    [self syncActionDescriptionFromField];
-    [self syncActionTimingFromFields];
-    [self syncOCRTargetFromField];
-    [self syncNetworkFieldsFromEditor];
     AnClickActionMode previousMode = _actionMode;
     CGPoint reusablePoint = CGPointZero;
     BOOL hasReusablePoint = [self isReusablePointActionMode:previousMode] && [self hasManualPointForMode:previousMode];
@@ -6265,7 +6249,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (AnClickTaskModel *)currentTaskEditorModelFromState {
-    AnClickTaskModel *model = [[AnClickTaskModel alloc] init];
+    AnClickTaskModel *model = _editingTaskModel ? [_editingTaskModel copy] : [[AnClickTaskModel alloc] init];
     model.actionMode = _actionMode;
     model.delay = _actionMode == AnClickActionModeDelay ? MAX(0.0, _actionDelay) : 0.0;
     model.repeatCount = MAX(1, _actionRepeatCount);
@@ -6296,6 +6280,25 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         model.point = [NSValue valueWithCGPoint:_manualActionPoints[(NSUInteger)_actionMode]];
         model.pointScreenSize = [self currentScreenCoordinateSizeValue];
     }
+    if (_actionMode == AnClickActionModeSwipe) {
+        model.path = [self manualSwipePath] ?: @[];
+        NSMutableDictionary *extra = [model.extraFields mutableCopy] ?: [NSMutableDictionary dictionary];
+        extra[@"pathScreenSize"] = [self currentScreenCoordinateSizeValue];
+        model.extraFields = extra;
+    }
+    if (_actionMode == AnClickActionModeTwoFingerTap) {
+        model.multiPoints = _multiTapPoints ?: @[];
+        NSMutableDictionary *extra = [model.extraFields mutableCopy] ?: [NSMutableDictionary dictionary];
+        extra[@"multiPointScreenSize"] = [self currentScreenCoordinateSizeValue];
+        model.extraFields = extra;
+    }
+    if (_actionMode == AnClickActionModeMacro) {
+        model.events = _recordedMacroEvents ?: @[];
+        NSMutableDictionary *extra = [model.extraFields mutableCopy] ?: [NSMutableDictionary dictionary];
+        extra[@"eventsScreenSize"] = [NSValue valueWithCGSize:_hasRecordedMacroScreenSize ? _recordedMacroScreenSize : [self currentScreenCoordinateSize]];
+        extra[@"macroSpeed"] = @([self normalizedMacroPlaybackSpeed:_macroPlaybackSpeed]);
+        model.extraFields = extra;
+    }
 
     NSArray<NSDictionary *> *colorSamples = [self effectiveTargetColorSamples];
     NSDictionary *anchor = colorSamples.firstObject;
@@ -6304,13 +6307,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         model.colorGreen = MIN(255, MAX(0, [anchor[@"green"] integerValue]));
         model.colorBlue = MIN(255, MAX(0, [anchor[@"blue"] integerValue]));
         model.colorPoints = colorSamples;
+        NSMutableDictionary *extra = [model.extraFields mutableCopy] ?: [NSMutableDictionary dictionary];
+        extra[@"colorPointScreenSize"] = [self currentScreenCoordinateSizeValue];
+        model.extraFields = extra;
     } else {
         model.colorRed = _targetColorRed;
         model.colorGreen = _targetColorGreen;
         model.colorBlue = _targetColorBlue;
     }
 
-    NSMutableDictionary *extra = [NSMutableDictionary dictionary];
+    NSMutableDictionary *extra = [model.extraFields mutableCopy] ?: [NSMutableDictionary dictionary];
     extra[@"pressDurationMs"] = @((NSInteger)llround([self normalizedLongPressDuration:_longPressDuration] * 1000.0));
     if (_recognitionSuccessBranchIndex >= 0) {
         extra[@"successBranchIndex"] = @(_recognitionSuccessBranchIndex);
@@ -6340,7 +6346,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _actionRandomDelayEnabled = NO;
     _actionJitterRadius = MIN(200.0, MAX(0.0, model.jitterRadius));
     _actionDescription = [self trimmedActionDescription:model.taskDescription];
+    _currentTemplatePath = model.templatePath.length > 0 ? model.templatePath : nil;
+    if (model.actionMode == AnClickActionModeOCR) {
+        _ocrUsesMatchPoint = model.useMatchPoint;
+    } else {
+        _imageUsesMatchPoint = model.useMatchPoint;
+    }
+    _imageActionMode = [self normalizedImageActionMode:model.successActionMode];
+    _failureActionMode = [self normalizedFailureActionMode:model.failureActionMode];
     _matchThreshold = MIN(1.0, MAX(0.0, model.threshold));
+    _ocrMode = model.ocrMode;
+    _ocrMatchMode = model.ocrMatchMode;
     _ocrTargetText = [self trimmedActionDescription:model.ocrText];
     _networkURL = [self trimmedActionDescription:model.networkURL];
     _networkContainsText = [self trimmedActionDescription:model.networkContains];
@@ -6356,6 +6372,27 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _manualActionPoints[(NSUInteger)model.actionMode] = model.point.CGPointValue;
         _hasManualActionPoint[(NSUInteger)model.actionMode] = YES;
         [self rememberManualCoordinateScreenSize];
+    }
+    if (model.actionMode == AnClickActionModeSwipe && model.path.count >= 2) {
+        _recordedSwipePoints = [model.path mutableCopy];
+        _manualSwipeAnchor = [model.path.firstObject CGPointValue];
+        _manualSwipeEndPoint = [model.path.lastObject CGPointValue];
+        _hasManualSwipeAnchor = YES;
+        _hasManualSwipeEndPoint = YES;
+        [self rememberManualCoordinateScreenSize];
+    }
+    if (model.actionMode == AnClickActionModeTwoFingerTap && model.multiPoints.count > 0) {
+        _multiTapPoints = [model.multiPoints mutableCopy];
+        [self rememberManualCoordinateScreenSize];
+    }
+    if (model.actionMode == AnClickActionModeMacro) {
+        _recordedMacroEvents = model.events.count > 0 ? [model.events copy] : nil;
+        _recordedMacroScreenSize = [self screenCoordinateSizeFromObject:model.extraFields[@"eventsScreenSize"]];
+        _hasRecordedMacroScreenSize = [self screenCoordinateSizeIsValid:_recordedMacroScreenSize];
+        id speedValue = model.extraFields[@"macroSpeed"];
+        if ([speedValue respondsToSelector:@selector(doubleValue)]) {
+            _macroPlaybackSpeed = [self normalizedMacroPlaybackSpeed:[speedValue doubleValue]];
+        }
     }
 
     _targetColorRed = MIN(255, MAX(0, model.colorRed));
@@ -6385,19 +6422,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _failureActionMode = AnClickActionModeJump;
     }
 
-    _descriptionField.text = _actionDescription ?: @"";
-    _delayField.text = [self delayFieldText];
-    _repeatField.text = [self repeatFieldText];
-    _intervalField.text = [self actionIntervalFieldText];
-    _longPressDurationField.text = [self longPressDurationFieldText];
-    _thresholdField.text = [self thresholdFieldText];
-    _ocrTargetField.text = _ocrTargetText ?: @"";
-    _networkURLField.text = _networkURL ?: @"";
-    _networkContainsField.text = _networkContainsText ?: @"";
-    _networkFalseField.text = _networkFalseText ?: @"";
-    _networkPostBodyField.text = _networkPostBody ?: @"";
-    _successBranchField.text = [self recognitionBranchFieldTextForIndex:_recognitionSuccessBranchIndex];
-    _failureBranchField.text = [self recognitionBranchFieldTextForIndex:_recognitionFailureBranchIndex];
     [self updateStatusForCurrentConfig];
 }
 
@@ -6637,11 +6661,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)dismissConfigKeyboardAndSync {
-    [self syncActionDescriptionFromField];
-    [self syncActionTimingFromFields];
-    [self syncImageThresholdFromField];
-    [self syncOCRTargetFromField];
-    [self syncNetworkFieldsFromEditor];
     [self syncGlobalSettingsFromFields];
     [_panelView endEditing:YES];
 }
@@ -6679,39 +6698,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)handlePanelTapToDismissKeyboard:(UITapGestureRecognizer *)recognizer {
-    if (recognizer.state != UIGestureRecognizerStateEnded) {
-        return;
+    if (recognizer.state == UIGestureRecognizerStateEnded) {
+        [self dismissKeyboard];
     }
-
-    NSMutableArray<UITextField *> *fields = [NSMutableArray arrayWithObjects:_descriptionField, _delayField, _repeatField, _intervalField, _macroSpeedField, _longPressDurationField, _jitterField, _thresholdField, _ocrTargetField, _successBranchField, _failureBranchField, _successActionTaskField, _failureActionTaskField, _recognitionIntervalField, _networkURLField, _networkContainsField, _networkFalseField, _networkPostBodyField, nil];
-    [fields addObjectsFromArray:_networkPostKeyFields ?: @[]];
-    [fields addObjectsFromArray:_networkPostValueFields ?: @[]];
-    if (_globalDelayField) {
-        [fields addObject:_globalDelayField];
-    }
-    if (_globalRepeatField) {
-        [fields addObject:_globalRepeatField];
-    }
-    if (_globalNetworkURLField) {
-        [fields addObject:_globalNetworkURLField];
-    }
-    if (_globalNetworkContainsField) {
-        [fields addObject:_globalNetworkContainsField];
-    }
-    if (_globalNetworkFalseField) {
-        [fields addObject:_globalNetworkFalseField];
-    }
-    if (_configNameField) {
-        [fields addObject:_configNameField];
-    }
-    for (UITextField *field in fields) {
-        UIView *fieldContainer = field.superview ? field.superview : _panelView;
-        CGPoint fieldPoint = [recognizer locationInView:fieldContainer];
-        if (!field.hidden && CGRectContainsPoint(field.frame, fieldPoint)) {
-            return;
-        }
-    }
-    [self dismissKeyboard];
 }
 
 - (void)handlePanelPan:(UIPanGestureRecognizer *)recognizer {
@@ -8702,7 +8691,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
     if (_taskEditorView && !_taskEditorView.hidden) {
-        [self hideLegacyEditorControlsForGroupedEditor];
+        [self refreshTaskEditorViewFromCurrentState];
+        return;
+    }
+    if (_taskEditorView) {
+        _taskEditorView.hidden = NO;
+        [_panelView bringSubviewToFront:_taskEditorView];
         [self refreshTaskEditorViewFromCurrentState];
         return;
     }
@@ -10947,11 +10941,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    NSMutableDictionary *task = [self taskDictionaryFromCurrentConfigRequireComplete:NO];
+    AnClickTaskModel *model = _editingTaskModel ?: [self currentTaskEditorModelFromState];
+    NSMutableDictionary *task = [[model dictionaryRepresentation] mutableCopy];
     if (!task) {
         return;
     }
     _taskItems[(NSUInteger)_selectedTaskIndex] = task;
+    _editingTaskModel = [[AnClickTaskModel alloc] initWithDictionary:task];
     [self persistCurrentTaskList];
     [self refreshCollapsedButtonTitle];
 }
@@ -12513,11 +12509,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)addTaskFromCurrentConfig {
-    NSMutableDictionary *task = [NSMutableDictionary dictionary];
+    AnClickTaskModel *model = [[AnClickTaskModel alloc] init];
+    NSMutableDictionary *task = [model dictionaryRepresentation];
     task[AnClickTaskExpandedKey] = @NO;
     [_taskItems addObject:task];
     _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
     _revealedDeleteTaskIndex = -1;
+    _editingTaskModel = model;
     [self resetCurrentActionConfiguration];
     [self persistCurrentTaskList];
     _statusLabel.text = [NSString stringWithFormat:@"新增任务%lu 请选择动作", (unsigned long)_taskItems.count];
@@ -12576,8 +12574,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)saveSelectedTaskFromCurrentConfig {
-    NSMutableDictionary *task = [self taskDictionaryFromCurrentConfigRequireComplete:YES];
-    if (!task) {
+    AnClickTaskModel *model = _editingTaskModel ?: [self currentTaskEditorModelFromState];
+    NSMutableDictionary *task = [[model dictionaryRepresentation] mutableCopy];
+    if (!task || ![self taskIsComplete:task]) {
+        [self showToast:_statusLabel.text ?: @"先补全任务"];
         return;
     }
     if (_editingBranchRecognitionConfig) {
@@ -12602,6 +12602,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _editingBranchRecognitionSuccess = NO;
         _editingBranchOwnerTaskIndex = -1;
         _editingBranchActionMode = AnClickActionModeNone;
+        _editingTaskModel = [[AnClickTaskModel alloc] initWithDictionary:ownerTask];
         _selectedTaskIndex = ownerIndex;
         [self persistCurrentTaskList];
         [self refreshTaskList];
@@ -12622,6 +12623,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } else {
         _taskItems[(NSUInteger)_selectedTaskIndex] = task;
     }
+    _editingTaskModel = [[AnClickTaskModel alloc] initWithDictionary:task];
     [self refreshTaskList];
     _revealedDeleteTaskIndex = -1;
     [self showTaskHome];
@@ -12630,20 +12632,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)taskEditorViewDidCancel:(__unused AnClickTaskEditorView *)editorView {
+    _editingTaskModel = nil;
     [self showTaskHome];
 }
 
 - (void)taskEditorViewDidClose:(__unused AnClickTaskEditorView *)editorView {
+    _editingTaskModel = nil;
     [self collapsePanel];
 }
 
 - (void)taskEditorViewDidSave:(AnClickTaskEditorView *)editorView {
-    [self applyTaskEditorModelToCurrentState:editorView.model];
-    if (![self taskDictionaryFromCurrentConfigRequireComplete:YES]) {
-        [self refreshTaskEditorViewFromCurrentState];
-        [self showToast:_statusLabel.text ?: @"先补全任务"];
-        return;
-    }
+    _editingTaskModel = [editorView.model copy];
+    [self applyTaskEditorModelToCurrentState:_editingTaskModel];
     [self saveSelectedTaskFromCurrentConfig];
 }
 
@@ -12656,25 +12656,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)taskEditorViewDidRequestPointPick:(AnClickTaskEditorView *)editorView {
+    _editingTaskModel = [editorView.model copy];
     [self applyTaskEditorModelToCurrentState:editorView.model];
     [self beginPointPicking];
 }
 
 - (void)taskEditorViewDidRequestColorPick:(AnClickTaskEditorView *)editorView {
+    _editingTaskModel = [editorView.model copy];
     [self applyTaskEditorModelToCurrentState:editorView.model];
     [self beginColorPicking];
 }
 
 - (void)taskEditorViewDidRequestTemplateCapture:(AnClickTaskEditorView *)editorView {
+    _editingTaskModel = [editorView.model copy];
     [self applyTaskEditorModelToCurrentState:editorView.model];
     [self beginTemplateCapture];
 }
 
 - (void)taskEditorViewDidRequestSingleStepTest:(AnClickTaskEditorView *)editorView {
-    [self applyTaskEditorModelToCurrentState:editorView.model];
-    NSMutableDictionary *task = [self taskDictionaryFromCurrentConfigRequireComplete:YES];
-    if (!task) {
-        [self refreshTaskEditorViewFromCurrentState];
+    _editingTaskModel = [editorView.model copy];
+    [self applyTaskEditorModelToCurrentState:_editingTaskModel];
+    NSMutableDictionary *task = [_editingTaskModel dictionaryRepresentation].mutableCopy;
+    if (!task || ![self taskIsComplete:task]) {
         [self showToast:_statusLabel.text ?: @"先补全任务"];
         return;
     }
@@ -12699,6 +12702,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)taskEditorView:(__unused AnClickTaskEditorView *)editorView didUpdateModel:(AnClickTaskModel *)model {
+    _editingTaskModel = [model copy];
     [self applyTaskEditorModelToCurrentState:model];
 }
 
@@ -12720,185 +12724,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)loadTaskConfigurationFromTask:(NSDictionary *)task statusText:(NSString *)statusText {
-    AnClickActionMode mode = [self modeForTask:task];
-    [self resetEditorActionState];
-    _actionMode = mode;
-    _actionDelay = MAX(0.0, [task[@"delay"] doubleValue]);
-    _actionRepeatCount = MAX(1, [task[@"repeat"] integerValue]);
-    id intervalValue = task[@"interval"];
-    _actionInterval = [intervalValue respondsToSelector:@selector(doubleValue)]
-        ? MIN(30.0, MAX(0.0, [intervalValue doubleValue]))
-        : AnClickDefaultTapPressDuration;
-    _actionRandomDelayEnabled = [task[@"randomDelay"] respondsToSelector:@selector(boolValue)] ? [task[@"randomDelay"] boolValue] : NO;
-    id jitterValue = task[@"jitterRadius"];
-    _actionJitterRadius = [jitterValue respondsToSelector:@selector(doubleValue)]
-        ? MIN(200.0, MAX(0.0, [jitterValue doubleValue]))
-        : 0.0;
-    _actionDescription = [self trimmedActionDescription:task[@"desc"]];
-
-    if (mode == AnClickActionModeNone) {
-        _statusLabel.text = @"请选择动作";
-    } else if (mode == AnClickActionModeImage) {
-        [self loadRecognitionRetryConfigFromTask:task];
-        _currentTemplatePath = task[@"templatePath"];
-        NSNumber *useMatchPointNumber = task[@"useMatchPoint"];
-        _imageUsesMatchPoint = useMatchPointNumber ? useMatchPointNumber.boolValue : YES;
-        _imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
-        _failureActionMode = [self failureActionModeForTask:task];
-        if (_imageActionMode == AnClickActionModeNetwork || _failureActionMode == AnClickActionModeNetwork) {
-            [self loadNetworkRequestConfigFromTask:task];
-        }
-        NSNumber *thresholdNumber = task[@"threshold"];
-        _matchThreshold = thresholdNumber ? MIN(1.0, MAX(0.0, thresholdNumber.doubleValue)) : 0.80;
-        NSValue *pointValue = task[@"point"];
-        if (pointValue) {
-            _manualActionPoints[(NSUInteger)AnClickActionModeImage] = [self resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
-            _hasManualActionPoint[(NSUInteger)AnClickActionModeImage] = YES;
-            [self rememberManualCoordinateScreenSize];
-        }
-        NSValue *successPointValue = task[@"successPoint"];
-        if (successPointValue) {
-            _successActionPoint = [self resolvedPoint:successPointValue.CGPointValue forTask:task screenSizeKey:@"successPointScreenSize"];
-            _hasSuccessActionPoint = YES;
-            [self rememberManualCoordinateScreenSize];
-        }
-        NSValue *failurePointValue = task[@"failurePoint"];
-        if (failurePointValue) {
-            _failureActionPoint = [self resolvedPoint:failurePointValue.CGPointValue forTask:task screenSizeKey:@"failurePointScreenSize"];
-            _hasFailureActionPoint = YES;
-            [self rememberManualCoordinateScreenSize];
-        } else if ([self failureActionModeNeedsPoint:_failureActionMode] && pointValue) {
-            _failureActionPoint = [self resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
-            _hasFailureActionPoint = YES;
-            [self rememberManualCoordinateScreenSize];
-        }
-    } else if (mode == AnClickActionModeTwoFingerTap) {
-        NSArray<NSValue *> *points = [self resolvedMultiTapPointsForTask:task];
-        if (points.count > 0) {
-            _multiTapPoints = [points mutableCopy];
-            [self rememberManualCoordinateScreenSize];
-        }
-    } else if (mode == AnClickActionModeSwipe) {
-        NSArray<NSValue *> *path = [self resolvedPathForTask:task];
-        if (path.count >= 2) {
-            _recordedSwipePoints = [path mutableCopy];
-            _manualSwipeAnchor = path.firstObject.CGPointValue;
-            _manualSwipeEndPoint = path.lastObject.CGPointValue;
-            _hasManualSwipeAnchor = YES;
-            _hasManualSwipeEndPoint = YES;
-            [self rememberManualCoordinateScreenSize];
-        }
-    } else if (mode == AnClickActionModeMacro) {
-        NSArray<NSDictionary *> *events = task[@"events"];
-        _recordedMacroEvents = [events isKindOfClass:NSArray.class] ? [events copy] : nil;
-        _recordedMacroScreenSize = [self screenCoordinateSizeFromObject:task[@"eventsScreenSize"]];
-        _hasRecordedMacroScreenSize = [self screenCoordinateSizeIsValid:_recordedMacroScreenSize];
-        _macroPlaybackSpeed = [self macroPlaybackSpeedForTask:task];
-    } else if (mode == AnClickActionModeOCR) {
-        [self loadRecognitionRetryConfigFromTask:task];
-        _ocrTargetText = [self trimmedActionDescription:task[@"ocrText"]];
-        _ocrMode = [self ocrModeForTask:task];
-        _ocrMatchMode = [self ocrMatchModeForTask:task];
-        NSNumber *useMatchPointNumber = task[@"useMatchPoint"];
-        _ocrUsesMatchPoint = useMatchPointNumber ? useMatchPointNumber.boolValue : YES;
-        _imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
-        _failureActionMode = [self failureActionModeForTask:task];
-        if (_imageActionMode == AnClickActionModeNetwork || _failureActionMode == AnClickActionModeNetwork) {
-            [self loadNetworkRequestConfigFromTask:task];
-        }
-        NSValue *pointValue = task[@"point"];
-        if (pointValue) {
-            _manualActionPoints[(NSUInteger)AnClickActionModeOCR] = [self resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
-            _hasManualActionPoint[(NSUInteger)AnClickActionModeOCR] = YES;
-            [self rememberManualCoordinateScreenSize];
-        }
-        NSValue *successPointValue = task[@"successPoint"];
-        if (successPointValue) {
-            _successActionPoint = [self resolvedPoint:successPointValue.CGPointValue forTask:task screenSizeKey:@"successPointScreenSize"];
-            _hasSuccessActionPoint = YES;
-            [self rememberManualCoordinateScreenSize];
-        }
-        NSValue *failurePointValue = task[@"failurePoint"];
-        if (failurePointValue) {
-            _failureActionPoint = [self resolvedPoint:failurePointValue.CGPointValue forTask:task screenSizeKey:@"failurePointScreenSize"];
-            _hasFailureActionPoint = YES;
-            [self rememberManualCoordinateScreenSize];
-        } else if ([self failureActionModeNeedsPoint:_failureActionMode] && pointValue) {
-            _failureActionPoint = [self resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
-            _hasFailureActionPoint = YES;
-            [self rememberManualCoordinateScreenSize];
-        }
-    } else if (mode == AnClickActionModeColor) {
-        [self loadRecognitionRetryConfigFromTask:task];
-        NSArray<NSDictionary *> *savedColorPoints = [self mutableColorSamplesArrayFromObject:task[@"colorPoints"]];
-        if (savedColorPoints.count > 0) {
-            CGSize sourceSize = [self screenCoordinateSizeFromObject:task[@"colorPointScreenSize"]];
-            if (![self screenCoordinateSizeIsValid:sourceSize]) {
-                NSDictionary *anchor = savedColorPoints.firstObject;
-                if ([anchor[@"x"] respondsToSelector:@selector(doubleValue)] &&
-                    [anchor[@"y"] respondsToSelector:@selector(doubleValue)]) {
-                    CGPoint anchorPoint = CGPointMake([anchor[@"x"] doubleValue], [anchor[@"y"] doubleValue]);
-                    sourceSize = [self inferredRotatedSourceSizeForPoint:anchorPoint targetSize:[self currentScreenCoordinateSize]];
-                }
-            }
-            savedColorPoints = [self colorSamples:savedColorPoints mappedFromScreenSize:sourceSize toScreenSize:[self currentScreenCoordinateSize]];
-            [self applyTargetColorSamples:savedColorPoints];
-            [self rememberManualCoordinateScreenSize];
-        } else if ([task[@"colorRed"] respondsToSelector:@selector(integerValue)] &&
-                   [task[@"colorGreen"] respondsToSelector:@selector(integerValue)] &&
-                   [task[@"colorBlue"] respondsToSelector:@selector(integerValue)]) {
-            [self applyTargetColorSamples:@[@{
-                @"dx": @(0.0),
-                @"dy": @(0.0),
-                @"red": @([task[@"colorRed"] integerValue]),
-                @"green": @([task[@"colorGreen"] integerValue]),
-                @"blue": @([task[@"colorBlue"] integerValue]),
-            }]];
-        }
-        NSNumber *toleranceNumber = task[@"colorTolerance"];
-        _colorTolerance = toleranceNumber ? MIN(255.0, MAX(0.0, toleranceNumber.doubleValue)) : 18.0;
-        _imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
-        _failureActionMode = [self failureActionModeForTask:task];
-        if (_imageActionMode == AnClickActionModeNetwork || _failureActionMode == AnClickActionModeNetwork) {
-            [self loadNetworkRequestConfigFromTask:task];
-        }
-        NSValue *successPointValue = task[@"successPoint"];
-        if (successPointValue) {
-            _successActionPoint = [self resolvedPoint:successPointValue.CGPointValue forTask:task screenSizeKey:@"successPointScreenSize"];
-            _hasSuccessActionPoint = YES;
-            [self rememberManualCoordinateScreenSize];
-        }
-        NSValue *failurePointValue = task[@"failurePoint"];
-        if (failurePointValue) {
-            _failureActionPoint = [self resolvedPoint:failurePointValue.CGPointValue forTask:task screenSizeKey:@"failurePointScreenSize"];
-            _hasFailureActionPoint = YES;
-            [self rememberManualCoordinateScreenSize];
-        }
-    } else if (mode == AnClickActionModeNetwork) {
-        [self loadNetworkRequestConfigFromTask:task];
-        _networkContainsText = [self trimmedActionDescription:task[@"networkContains"]];
-        _networkFalseText = [self trimmedActionDescription:task[@"networkFalse"]];
-        _networkRequestOnly = [task[@"networkRequestOnly"] boolValue];
-        _networkRetryForever = [self networkRetryForeverForTask:task];
-        _actionRepeatCount = [self networkRetryLimitForTask:task];
-        _networkTimeout = [task[@"networkTimeout"] respondsToSelector:@selector(doubleValue)]
-            ? MIN(60.0, MAX(1.0, [task[@"networkTimeout"] doubleValue]))
-            : 8.0;
-    } else if ([self isSelectableActionMode:mode] && mode != AnClickActionModeSwipe && mode != AnClickActionModeImage && mode != AnClickActionModeTwoFingerTap) {
-        if (mode == AnClickActionModeLongPress) {
-            _longPressDuration = [self longPressDurationForTask:task];
-        }
-        NSValue *pointValue = task[@"point"];
-        if (pointValue) {
-            _manualActionPoints[(NSUInteger)mode] = [self resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
-            _hasManualActionPoint[(NSUInteger)mode] = YES;
-            [self rememberManualCoordinateScreenSize];
-        }
-    }
-
+    AnClickTaskModel *model = [[AnClickTaskModel alloc] initWithDictionary:task];
+    _editingTaskModel = [model copy];
+    [self applyTaskEditorModelToCurrentState:model];
     [self refreshModeButtons];
     [self refreshTaskList];
     [self setTaskEditorVisible:YES];
+    [self refreshTaskEditorViewFromCurrentState];
     [self updateStatusForCurrentConfig];
     if (statusText.length > 0) {
         _statusLabel.text = [NSString stringWithFormat:@"%@  %@", statusText, _statusLabel.text ?: @""];
@@ -13540,7 +13372,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    NSMutableDictionary *ownerTask = [self taskDictionaryFromCurrentConfigRequireComplete:NO];
+    AnClickTaskModel *editorModel = _editingTaskModel ?: [self currentTaskEditorModelFromState];
+    NSMutableDictionary *ownerTask = editorModel ? [[editorModel dictionaryRepresentation] mutableCopy] : nil;
     if (ownerTask) {
         NSDictionary *existingConfig = [self currentStoredBranchActionConfigForSuccess:success mode:mode];
         if (!existingConfig && [self modeIsRecognitionTask:mode]) {
@@ -13571,6 +13404,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _editingBranchOwnerTaskIndex = ownerIndex;
     _editingBranchActionMode = mode;
     _selectedTaskIndex = -1;
+    _editingTaskModel = [[AnClickTaskModel alloc] initWithDictionary:branchTask];
     [self loadTaskConfigurationFromTask:branchTask
                              statusText:[NSString stringWithFormat:@"设置%@后%@",
                                          success ? @"成功" : @"失败",
@@ -15705,6 +15539,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (mode == AnClickActionModeNone) {
         _statusLabel.text = @"任务未选择动作";
         return NO;
+    }
+    if (mode == AnClickActionModeDelay) {
+        NSTimeInterval delay = [task[@"delay"] respondsToSelector:@selector(doubleValue)] ? [task[@"delay"] doubleValue] : 0.0;
+        if (delay <= 0.001) {
+            _statusLabel.text = @"任务延时未设置";
+            return NO;
+        }
+        return YES;
     }
     if (mode == AnClickActionModeSwipe) {
         NSArray<NSValue *> *path = task[@"path"];
@@ -17879,8 +17721,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    NSMutableDictionary *task = [self taskDictionaryFromCurrentConfigRequireComplete:YES];
-    if (!task) {
+    AnClickTaskModel *model = _editingTaskModel ?: [self currentTaskEditorModelFromState];
+    NSMutableDictionary *task = [[model dictionaryRepresentation] mutableCopy];
+    if (!task || ![self taskIsComplete:task]) {
         return;
     }
     [self preparePanelForExternalTapWithHostWindow:hostWindow];
@@ -18032,8 +17875,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     if (_actionMode == AnClickActionModeNetwork) {
-        NSMutableDictionary *task = [self taskDictionaryFromCurrentConfigRequireComplete:YES];
-        if (!task) {
+        AnClickTaskModel *model = _editingTaskModel ?: [self currentTaskEditorModelFromState];
+        NSMutableDictionary *task = [[model dictionaryRepresentation] mutableCopy];
+        if (!task || ![self taskIsComplete:task]) {
             return;
         }
         _statusLabel.text = @"测试网络";
