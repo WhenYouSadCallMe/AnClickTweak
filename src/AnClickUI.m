@@ -103,6 +103,9 @@ static NSString * const AnClickTaskListCellIdentifier = @"AnClickTaskListCell";
 static const NSInteger AnClickTaskListEditButtonTagBase = 51000;
 static const NSInteger AnClickTaskListRunButtonTagBase = 52000;
 static const NSInteger AnClickTaskListCollapseButtonTagBase = 53000;
+static const NSInteger AnClickHomeRunLabelTag = 54001;
+static const NSInteger AnClickHomeStopLabelTag = 54002;
+static const NSInteger AnClickHomeRecordLabelTag = 54003;
 static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.10;
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
 static void (*AnClickOriginalSpringBoardHandlePhysicalButtonEvent)(id self, SEL _cmd, id event);
@@ -4288,6 +4291,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _runTasksButton.hidden = visible;
     _homeCloseButton.hidden = visible;
     _globalSettingsButton.hidden = visible;
+    [_panelView viewWithTag:AnClickHomeRunLabelTag].hidden = visible;
+    [_panelView viewWithTag:AnClickHomeStopLabelTag].hidden = visible;
+    [_panelView viewWithTag:AnClickHomeRecordLabelTag].hidden = visible;
     _collapseButton.hidden = NO;
     _taskListView.hidden = visible;
     if (visible) {
@@ -4527,6 +4533,47 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 }
 
+- (UILabel *)homeToolbarLabelWithTag:(NSInteger)tag text:(NSString *)text {
+    UILabel *label = (UILabel *)[_panelView viewWithTag:tag];
+    if (![label isKindOfClass:UILabel.class]) {
+        label = [[UILabel alloc] initWithFrame:CGRectZero];
+        label.tag = tag;
+        label.textAlignment = NSTextAlignmentCenter;
+        label.font = [UIFont systemFontOfSize:10 weight:UIFontWeightMedium];
+        label.textColor = [self themePrimaryTextColor];
+        label.adjustsFontSizeToFitWidth = YES;
+        label.minimumScaleFactor = 0.7;
+        [_panelView addSubview:label];
+    }
+    label.text = text;
+    label.hidden = NO;
+    return label;
+}
+
+- (void)styleHomeTopIconButton:(UIButton *)button blueCircle:(BOOL)blueCircle {
+    CGFloat side = CGRectGetWidth(button.bounds);
+    button.layer.cornerRadius = side * 0.5;
+    button.layer.borderWidth = 0.0;
+    button.layer.shadowColor = UIColor.blackColor.CGColor;
+    button.layer.shadowOffset = CGSizeMake(0.0, 1.0);
+    button.layer.shadowRadius = blueCircle ? 3.0 : 0.0;
+    button.layer.shadowOpacity = blueCircle ? 0.12 : 0.0;
+    button.backgroundColor = blueCircle ? [self themeHighlightColor] : UIColor.clearColor;
+    UIColor *color = blueCircle ? UIColor.whiteColor : [self themeHighlightColor];
+    [button setTitleColor:color forState:UIControlStateNormal];
+    button.tintColor = color;
+    [self updateButtonShadowPath:button];
+}
+
+- (void)stopTaskRunFromHomeButton {
+    if (_taskRunActive || _taskRunPausedForForeground) {
+        [self stopTaskRunWithStatus:@"已停止"];
+        return;
+    }
+    _statusLabel.text = @"当前未运行";
+    [self showToast:_statusLabel.text];
+}
+
 - (void)layoutTaskHomeControls {
     if (!_panelView) {
         return;
@@ -4534,76 +4581,60 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     CGFloat width = _panelView.bounds.size.width;
     CGFloat height = _panelView.bounds.size.height;
-    CGFloat buttonSize = 46.0;
-    CGFloat totalWidth = buttonSize * 4.0 + 26.0 * 3.0;
-    CGFloat startX = MAX(12.0, (width - totalWidth) * 0.5);
-    CGFloat buttonY = height - buttonSize - 14.0;
+    CGFloat topY = 9.0;
+    CGFloat smallSide = 28.0;
+    CGFloat actionSide = 25.0;
+    CGFloat actionLabelWidth = 34.0;
+    CGFloat actionGap = 8.0;
+    CGFloat recordX = width - 12.0 - actionLabelWidth;
+    CGFloat stopX = recordX - actionGap - actionLabelWidth;
+    CGFloat runX = stopX - actionGap - actionLabelWidth;
     [_panelView viewWithTag:8811].hidden = YES;
 
-    [self setCenteredIconForButton:_addTaskButton systemName:@"plus" fallbackTitle:@"+" fontSize:27];
-    [self setCenteredIconForButton:_deleteTaskButton systemName:@"minus" fallbackTitle:@"-" fontSize:27];
-    [self setCenteredIconForButton:_collapseButton systemName:@"square.and.arrow.down.fill" fallbackTitle:@"存" fontSize:22];
-    [self setCenteredIconForButton:_runTasksButton systemName:_taskRunActive ? @"stop.fill" : @"play.fill" fallbackTitle:_taskRunActive ? @"■" : @"▶" fontSize:24];
-    NSArray<UIButton *> *toolbarButtons = @[_addTaskButton, _deleteTaskButton, _collapseButton, _runTasksButton];
-    NSArray<UIColor *> *iconColors = @[
-        [self themeSuccessColor],
-        [self themeDangerColor],
-        [self themeHighlightColor],
-        UIColor.whiteColor,
-    ];
-    for (NSUInteger i = 0; i < toolbarButtons.count; i++) {
-        UIButton *button = toolbarButtons[i];
-        BOOL primaryRunButton = button == _runTasksButton;
-        button.frame = CGRectMake(startX + (buttonSize + 26.0) * i, buttonY, buttonSize, buttonSize);
-        button.layer.cornerRadius = buttonSize * 0.5;
-        button.layer.borderWidth = 1.0;
-        button.layer.borderColor = (primaryRunButton
-            ? UIColor.clearColor
-            : [[self themeSeparatorColor] colorWithAlphaComponent:0.82]).CGColor;
-        button.layer.shadowColor = UIColor.blackColor.CGColor;
-        button.layer.shadowOffset = CGSizeMake(0, primaryRunButton ? 3 : 2);
-        button.layer.shadowRadius = primaryRunButton ? 7.0 : 4.0;
-        button.layer.shadowOpacity = primaryRunButton ? 0.16 : 0.07;
-        button.backgroundColor = primaryRunButton
-            ? (_taskRunActive ? [self themeDangerColor] : [self themeSuccessColor])
-            : [self themeControlFillColor];
-        UIColor *iconColor = primaryRunButton ? UIColor.whiteColor : iconColors[i];
-        [button setTitleColor:iconColor forState:UIControlStateNormal];
-        button.tintColor = iconColor;
-        [self updateButtonShadowPath:button];
-    }
+    [_collapseButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
+    [_collapseButton addTarget:self action:@selector(stopTaskRunFromHomeButton) forControlEvents:UIControlEventTouchUpInside];
+    [_homeCloseButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
+    [_homeCloseButton addTarget:self action:@selector(toggleMacroRecording) forControlEvents:UIControlEventTouchUpInside];
 
-    CGFloat closeSize = 32.0;
-    [self setCenteredIconForButton:_homeCloseButton systemName:@"xmark" fallbackTitle:@"×" fontSize:17];
-    _homeCloseButton.frame = CGRectMake(width - closeSize - 10.0, 6.0, closeSize, closeSize);
-    _homeCloseButton.layer.cornerRadius = closeSize * 0.5;
-    _homeCloseButton.layer.borderWidth = 0;
-    _homeCloseButton.layer.shadowOpacity = 0;
-    _homeCloseButton.backgroundColor = UIColor.clearColor;
-    [_homeCloseButton setTitleColor:[self themeHighlightColor] forState:UIControlStateNormal];
-    _homeCloseButton.tintColor = [self themeHighlightColor];
-    [self updateButtonShadowPath:_homeCloseButton];
+    [self setCenteredIconForButton:_addTaskButton systemName:@"plus" fallbackTitle:@"+" fontSize:23];
+    _addTaskButton.frame = CGRectMake(12.0, topY, smallSide, smallSide);
+    [self styleHomeTopIconButton:_addTaskButton blueCircle:NO];
 
-    [self setCenteredIconForButton:_globalSettingsButton systemName:@"gearshape.fill" fallbackTitle:@"⚙" fontSize:17];
-    _globalSettingsButton.frame = CGRectMake(10.0, 6.0, closeSize, closeSize);
-    _globalSettingsButton.layer.cornerRadius = closeSize * 0.5;
-    _globalSettingsButton.layer.borderWidth = 0;
-    _globalSettingsButton.layer.shadowOpacity = 0;
-    _globalSettingsButton.backgroundColor = [self themeControlFillColor];
-    _globalSettingsButton.tintColor = [self themeHighlightColor];
-    [_globalSettingsButton setTitleColor:[self themeHighlightColor] forState:UIControlStateNormal];
-    [self updateButtonShadowPath:_globalSettingsButton];
+    [self setCenteredIconForButton:_deleteTaskButton systemName:@"trash" fallbackTitle:@"删" fontSize:20];
+    _deleteTaskButton.frame = CGRectMake(48.0, topY, smallSide, smallSide);
+    [self styleHomeTopIconButton:_deleteTaskButton blueCircle:NO];
+
+    [self setCenteredIconForButton:_runTasksButton systemName:@"play.fill" fallbackTitle:@"▶" fontSize:13];
+    _runTasksButton.frame = CGRectMake(runX + (actionLabelWidth - actionSide) * 0.5, topY + 1.0, actionSide, actionSide);
+    [self styleHomeTopIconButton:_runTasksButton blueCircle:YES];
+    UILabel *runLabel = [self homeToolbarLabelWithTag:AnClickHomeRunLabelTag text:@"运行"];
+    runLabel.frame = CGRectMake(runX, topY + actionSide + 3.0, actionLabelWidth, 13.0);
+
+    [self setCenteredIconForButton:_collapseButton systemName:@"stop.fill" fallbackTitle:@"■" fontSize:11];
+    _collapseButton.frame = CGRectMake(stopX + (actionLabelWidth - actionSide) * 0.5, topY + 1.0, actionSide, actionSide);
+    [self styleHomeTopIconButton:_collapseButton blueCircle:YES];
+    UILabel *stopLabel = [self homeToolbarLabelWithTag:AnClickHomeStopLabelTag text:@"停止"];
+    stopLabel.frame = CGRectMake(stopX, topY + actionSide + 3.0, actionLabelWidth, 13.0);
+
+    BOOL recording = [AnClickRecorder shared].isRecording;
+    [self setCenteredIconForButton:_homeCloseButton systemName:recording ? @"stop.circle.fill" : @"pause.fill" fallbackTitle:recording ? @"■" : @"Ⅱ" fontSize:12];
+    _homeCloseButton.frame = CGRectMake(recordX + (actionLabelWidth - actionSide) * 0.5, topY + 1.0, actionSide, actionSide);
+    [self styleHomeTopIconButton:_homeCloseButton blueCircle:YES];
+    UILabel *recordLabel = [self homeToolbarLabelWithTag:AnClickHomeRecordLabelTag text:@"录制"];
+    recordLabel.frame = CGRectMake(recordX, topY + actionSide + 3.0, actionLabelWidth, 13.0);
+
+    _globalSettingsButton.hidden = YES;
 
     _toolTitleLabel.hidden = NO;
-    _toolTitleLabel.text = [self toolDisplayName];
-    _toolTitleLabel.frame = CGRectMake(50, 7, width - closeSize - 84.0, 20);
+    _toolTitleLabel.text = @"任务列表";
+    _toolTitleLabel.frame = CGRectMake(14.0, 46.0, width - 28.0, 31.0);
     _toolTitleLabel.textColor = [self themePrimaryTextColor];
-    _toolTitleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightBold];
+    _toolTitleLabel.font = [UIFont systemFontOfSize:28 weight:UIFontWeightHeavy];
 
-    _statusLabel.frame = CGRectMake(50, 28, width - closeSize - 84.0, 18);
+    _statusLabel.frame = CGRectMake(16.0, 76.0, width - 32.0, 14.0);
     _statusLabel.textColor = [self themeSecondaryTextColor];
-    _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
-    _taskListView.frame = CGRectMake(10, 56, width - 20, MAX(80.0, buttonY - 64.0));
+    _statusLabel.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightMedium];
+    _taskListView.frame = CGRectMake(10.0, 92.0, width - 20.0, MAX(80.0, height - 102.0));
     if (_globalSettingsView) {
         _globalSettingsView.frame = _panelView.bounds;
         [_panelView bringSubviewToFront:_globalSettingsView];
@@ -4611,8 +4642,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _functionMenuView.frame = _panelView.bounds;
         [_panelView bringSubviewToFront:_functionMenuView];
     } else {
-        [_panelView bringSubviewToFront:_globalSettingsButton];
+        [_panelView bringSubviewToFront:_addTaskButton];
+        [_panelView bringSubviewToFront:_deleteTaskButton];
+        [_panelView bringSubviewToFront:_runTasksButton];
+        [_panelView bringSubviewToFront:_collapseButton];
         [_panelView bringSubviewToFront:_homeCloseButton];
+        [_panelView bringSubviewToFront:runLabel];
+        [_panelView bringSubviewToFront:stopLabel];
+        [_panelView bringSubviewToFront:recordLabel];
     }
 }
 
@@ -4661,6 +4698,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self updateButtonShadowPath:_editorBackButton];
 
     [self setCenteredIconForButton:_collapseButton systemName:@"xmark" fallbackTitle:@"×" fontSize:22];
+    [_collapseButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
+    [_collapseButton addTarget:self action:@selector(handleMoreOrCloseButton) forControlEvents:UIControlEventTouchUpInside];
     _collapseButton.frame = CGRectMake(width - chromeButtonWidth - 12.0, chromeButtonY, chromeButtonWidth, chromeButtonHeight);
     _collapseButton.layer.cornerRadius = chromeButtonHeight * 0.5;
     _collapseButton.layer.borderWidth = 0;
