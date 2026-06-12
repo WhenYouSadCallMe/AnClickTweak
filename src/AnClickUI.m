@@ -5362,6 +5362,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return AnClickActionModeNone;
 }
 
+- (BOOL)branchRecognitionButtonOwnsSuccessBranch:(UIButton *)button {
+    NSInteger tag = button.tag;
+    NSInteger successBases[] = {
+        AnClickBranchSuccessSuccessActionTagBase,
+        AnClickBranchSuccessFailureActionTagBase,
+    };
+    NSUInteger count = sizeof(successBases) / sizeof(NSInteger);
+    for (NSUInteger i = 0; i < count; i++) {
+        NSInteger base = successBases[i];
+        NSInteger value = tag - base;
+        if (value >= AnClickActionModeNone && value < AnClickActionModeCount) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
 - (NSString *)trimmedActionDescription:(NSString *)text {
     NSString *trimmed = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     return trimmed.length > 0 ? trimmed : nil;
@@ -6007,7 +6024,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)selectBranchRecognitionSuccessActionMode:(UIButton *)sender {
-    BOOL ownerSuccess = [_successBranchSuccessActionButtons containsObject:sender];
+    BOOL ownerSuccess = [self branchRecognitionButtonOwnsSuccessBranch:sender];
     AnClickActionMode ownerMode = ownerSuccess
         ? [self normalizedImageActionMode:_imageActionMode]
         : [self normalizedFailureActionMode:_failureActionMode];
@@ -6030,7 +6047,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)selectBranchRecognitionFailureActionMode:(UIButton *)sender {
-    BOOL ownerSuccess = [_successBranchFailureActionButtons containsObject:sender];
+    BOOL ownerSuccess = [self branchRecognitionButtonOwnsSuccessBranch:sender];
     AnClickActionMode ownerMode = ownerSuccess
         ? [self normalizedImageActionMode:_imageActionMode]
         : [self normalizedFailureActionMode:_failureActionMode];
