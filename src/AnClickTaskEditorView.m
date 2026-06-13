@@ -13,9 +13,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindRepeat,
     ACEditorRowKindDoubleTapInterval,
     ACEditorRowKindTemplate,
-    ACEditorRowKindTemplatePath,
-    ACEditorRowKindTemplateROI,
-    ACEditorRowKindMatchClickOffset,
     ACEditorRowKindColor,
     ACEditorRowKindColorMatchMode,
     ACEditorRowKindThreshold,
@@ -735,9 +732,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @(ACEditorRowKindPointPick),
         @(ACEditorRowKindColorPick),
         @(ACEditorRowKindTemplate),
-        @(ACEditorRowKindTemplatePath),
-        @(ACEditorRowKindTemplateROI),
-        @(ACEditorRowKindMatchClickOffset),
         @(ACEditorRowKindColor),
         @(ACEditorRowKindColorMatchMode),
         @(ACEditorRowKindThreshold),
@@ -822,7 +816,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @(AnClickActionModeLongPress),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeTwoFingerTap),
-        @(AnClickActionModeDelay),
         @(AnClickActionModeMacro),
         @(AnClickActionModeNetwork),
     ]];
@@ -896,6 +889,29 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     return config.count > 0;
 }
 
+- (NSDictionary *)draftBranchConfigForMode:(AnClickActionMode)mode {
+    if (mode == AnClickActionModeNone || mode == AnClickActionModeJump) {
+        return @{};
+    }
+    NSMutableDictionary *config = [@{
+        @"mode": @(mode),
+        @"repeat": @1,
+        @"interval": @0.03,
+        @"imageActionMode": @(AnClickActionModeTap),
+        @"failureActionMode": @(AnClickActionModeNone),
+        @"useMatchPoint": @YES,
+    } mutableCopy];
+    if (mode == AnClickActionModeImage) {
+        config[@"threshold"] = @0.80;
+    } else if (mode == AnClickActionModeColor) {
+        config[@"colorTolerance"] = @18.0;
+    } else if (mode == AnClickActionModeOCR) {
+        config[@"ocrMatchMode"] = @(AnClickOCRMatchModeContains);
+        config[@"ocrSimilarity"] = @0.80;
+    }
+    return config;
+}
+
 - (void)setBranchActionMode:(AnClickActionMode)mode success:(BOOL)success {
     if (![self branchActionMode:mode isAllowedForSuccess:success]) {
         mode = success ? AnClickActionModeTap : AnClickActionModeNone;
@@ -907,8 +923,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             self.model.successBranchIndex = -1;
         }
         if (previous != mode) {
-            self.model.successActionConfig = @{};
-            self.model.successRecognitionActionConfig = @{};
+            NSDictionary *config = [self draftBranchConfigForMode:mode];
+            self.model.successActionConfig = config;
+            self.model.successRecognitionActionConfig = (mode == AnClickActionModeImage ||
+                mode == AnClickActionModeOCR ||
+                mode == AnClickActionModeColor) ? config : @{};
         }
     } else {
         self.model.failureActionMode = mode;
@@ -916,8 +935,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             self.model.failureBranchIndex = -1;
         }
         if (previous != mode) {
-            self.model.failureActionConfig = @{};
-            self.model.failureRecognitionActionConfig = @{};
+            NSDictionary *config = [self draftBranchConfigForMode:mode];
+            self.model.failureActionConfig = config;
+            self.model.failureRecognitionActionConfig = (mode == AnClickActionModeImage ||
+                mode == AnClickActionModeOCR ||
+                mode == AnClickActionModeColor) ? config : @{};
         }
     }
     [self notifyModelChanged];
@@ -971,9 +993,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindSwipeStep:
             return mode == AnClickActionModeSwipe;
         case ACEditorRowKindTemplate:
-        case ACEditorRowKindTemplatePath:
-        case ACEditorRowKindTemplateROI:
-        case ACEditorRowKindMatchClickOffset:
             return mode == AnClickActionModeImage;
         case ACEditorRowKindThreshold:
             return mode == AnClickActionModeImage || mode == AnClickActionModeColor;
@@ -1081,11 +1100,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     }
     if (mode != AnClickActionModeImage) {
         self.model.templatePath = @"";
-        self.model.hasTemplateROI = NO;
-        self.model.templateROI = CGRectZero;
-        self.model.hasMatchClickOffset = NO;
-        self.model.matchClickOffset = CGPointZero;
     }
+    self.model.hasTemplateROI = NO;
+    self.model.templateROI = CGRectZero;
+    self.model.hasMatchClickOffset = NO;
+    self.model.matchClickOffset = CGPointZero;
     if (mode != AnClickActionModeOCR) {
         self.model.ocrText = @"";
         self.model.ocrMatchMode = AnClickOCRMatchModeContains;
@@ -1243,10 +1262,14 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             BOOL success = row == ACEditorRowKindSuccessActionConfig;
             AnClickActionMode mode = success ? self.model.successActionMode : self.model.failureActionMode;
             NSString *role = success ? @"成功后" : @"失败后";
-            title = [NSString stringWithFormat:@"%@ 配置%@%@",
-                     [self branchActionConfigExistsForSuccess:success] ? @"编辑" : @"设置",
-                     role,
-                     [self branchActionShortTitleForMode:mode]];
+            NSString *verb = [self branchActionConfigExistsForSuccess:success] ? @"修改" : @"设置";
+            if (mode == AnClickActionModeImage) {
+                title = [NSString stringWithFormat:@"🖼 %@%@识图截图", verb, role];
+            } else if (mode == AnClickActionModeColor) {
+                title = [NSString stringWithFormat:@"🎨 %@%@识色取色", verb, role];
+            } else {
+                title = [NSString stringWithFormat:@"%@ %@%@配置", verb, role, [self branchActionShortTitleForMode:mode]];
+            }
         } else if (row == ACEditorRowKindSingleStep) {
             title = @"运行此单步测试";
         } else {
@@ -1410,23 +1433,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             cell.textField.keyboardType = UIKeyboardTypeNumberPad;
             cell.unitLabel.text = @"ms";
             break;
-        case ACEditorRowKindTemplatePath:
-            cell.iconLabel.text = @"🖼";
-            cell.titleLabel.text = @"图片路径";
-            cell.textField.text = self.model.templatePath;
-            break;
-        case ACEditorRowKindTemplateROI:
-            cell.iconLabel.text = @"▢";
-            cell.titleLabel.text = @"匹配区域 ROI";
-            cell.textField.text = self.model.hasTemplateROI ? [self rectText:self.model.templateROI] : @"全屏";
-            cell.textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
-            break;
-        case ACEditorRowKindMatchClickOffset:
-            cell.iconLabel.text = @"＋";
-            cell.titleLabel.text = @"成功点击偏移";
-            cell.textField.text = self.model.hasMatchClickOffset ? [self pointText:self.model.matchClickOffset] : @"0, 0";
-            cell.textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
-            break;
         case ACEditorRowKindColor: {
             cell.iconLabel.text = @"🎨";
             cell.titleLabel.text = @"目标颜色";
@@ -1587,15 +1593,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             break;
         case ACEditorRowKindDoubleTapInterval:
             self.model.doubleTapInterval = MIN(2.0, MAX(0.02, text.doubleValue / 1000.0));
-            break;
-        case ACEditorRowKindTemplatePath:
-            self.model.templatePath = text;
-            break;
-        case ACEditorRowKindTemplateROI:
-            [self updateTemplateROIFromText:text];
-            break;
-        case ACEditorRowKindMatchClickOffset:
-            [self updateMatchClickOffsetFromText:text];
             break;
         case ACEditorRowKindColor:
             [self updateModelColorFromHex:text];
@@ -1862,14 +1859,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     return [NSString stringWithFormat:@"%.0f, %.0f", point.x, point.y];
 }
 
-- (NSString *)rectText:(CGRect)rect {
-    return [NSString stringWithFormat:@"%.0f, %.0f, %.0f, %.0f",
-            rect.origin.x,
-            rect.origin.y,
-            rect.size.width,
-            rect.size.height];
-}
-
 - (NSArray<NSString *> *)numberPartsFromText:(NSString *)text {
     NSString *normalized = [[text ?: @"" stringByReplacingOccurrencesOfString:@"，" withString:@","] stringByReplacingOccurrencesOfString:@" " withString:@""];
     if (normalized.length == 0) {
@@ -1884,15 +1873,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         return NO;
     }
     *point = CGPointMake(parts[0].doubleValue, parts[1].doubleValue);
-    return YES;
-}
-
-- (BOOL)rectFromText:(NSString *)text rect:(CGRect *)rect {
-    NSArray<NSString *> *parts = [self numberPartsFromText:text];
-    if (parts.count < 4) {
-        return NO;
-    }
-    *rect = CGRectMake(parts[0].doubleValue, parts[1].doubleValue, MAX(0.0, parts[2].doubleValue), MAX(0.0, parts[3].doubleValue));
     return YES;
 }
 
@@ -1927,28 +1907,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     }
     path[index] = [NSValue valueWithCGPoint:point];
     self.model.path = path;
-}
-
-- (void)updateTemplateROIFromText:(NSString *)text {
-    CGRect rect = CGRectZero;
-    if ([self rectFromText:text rect:&rect] && rect.size.width > 0.0 && rect.size.height > 0.0) {
-        self.model.templateROI = rect;
-        self.model.hasTemplateROI = YES;
-    } else if (text.length == 0 || [text isEqualToString:@"全屏"]) {
-        self.model.hasTemplateROI = NO;
-        self.model.templateROI = CGRectZero;
-    }
-}
-
-- (void)updateMatchClickOffsetFromText:(NSString *)text {
-    CGPoint point = CGPointZero;
-    if ([self pointFromText:text point:&point]) {
-        self.model.matchClickOffset = point;
-        self.model.hasMatchClickOffset = YES;
-    } else if (text.length == 0) {
-        self.model.hasMatchClickOffset = NO;
-        self.model.matchClickOffset = CGPointZero;
-    }
 }
 
 - (NSString *)headersText:(NSDictionary<NSString *, NSString *> *)headers {

@@ -366,12 +366,6 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     dictionary[@"imageActionMode"] = @(successActionMode);
     dictionary[@"failureActionMode"] = @(failureActionMode);
     dictionary[@"threshold"] = @(MIN(1.0, MAX(0.0, self.threshold)));
-    if (self.hasTemplateROI) {
-        dictionary[@"templateROI"] = ACValueWithCGRect(self.templateROI);
-    }
-    if (self.hasMatchClickOffset) {
-        dictionary[@"matchClickOffset"] = ACValueWithCGPoint(self.matchClickOffset);
-    }
     dictionary[@"ocrMode"] = @(self.ocrMode);
     dictionary[@"ocrMatchMode"] = @(self.ocrMatchMode);
     if (self.ocrText.length > 0) {

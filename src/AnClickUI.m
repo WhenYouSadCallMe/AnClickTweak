@@ -358,6 +358,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSArray<NSDictionary *> *_recordedMacroEvents;
     NSMutableArray<AnClickTaskModel *> *_taskItems;
     NSInteger _selectedTaskIndex;
+    NSInteger _editingTaskIndex;
     NSInteger _draggingTaskIndex;
     NSInteger _pendingConfigDeleteIndex;
     CGFloat _taskReorderStartLocationY;
@@ -1485,6 +1486,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat panelHeight = initialPanelSize.height;
     _actionMode = AnClickActionModeNone;
     _selectedTaskIndex = -1;
+    _editingTaskIndex = -1;
     _draggingTaskIndex = -1;
     _taskReordering = NO;
     _taskReorderStartLocationY = 0.0;
@@ -3529,6 +3531,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self hideFunctionMenu];
     [self hideGlobalSettings];
     _editingTaskModel = nil;
+    _editingTaskIndex = -1;
     [self setTaskEditorVisible:NO];
     [self refreshTaskList];
     _statusLabel.text = _taskItems.count == 0
@@ -5367,7 +5370,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeOCR),
         @(AnClickActionModeColor),
         @(AnClickActionModeMacro),
-        @(AnClickActionModeDelay),
         @(AnClickActionModeJump),
     ];
 }
@@ -5397,7 +5399,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeOCR),
         @(AnClickActionModeColor),
         @(AnClickActionModeMacro),
-        @(AnClickActionModeDelay),
         @(AnClickActionModeJump),
     ];
 }
@@ -6090,8 +6091,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     AnClickTaskModel *model = _editingTaskModel ?: [self taskEditorModelByMergingRuntimeState];
+    NSInteger displayTaskIndex = (_editingTaskIndex >= 0 && _editingTaskIndex < (NSInteger)_taskItems.count)
+        ? _editingTaskIndex
+        : _selectedTaskIndex;
     [_taskEditorView configureWithModel:model
-                              taskIndex:_selectedTaskIndex
+                              taskIndex:displayTaskIndex
                             branchTitle:[self branchRecognitionContextTitle]
                              actionName:[self currentActionName]];
 }
@@ -7076,6 +7080,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             }
         }
         [self finishTemplateCapture];
+        [self stageTaskEditorModelForRuntime:_editingTaskModel];
         [self refreshEditorConfigControls];
         [self refreshTaskList];
         [self updateStatusForCurrentConfig];
@@ -9191,6 +9196,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)addTaskFromCurrentConfig {
     [self resetCurrentActionConfiguration];
     _selectedTaskIndex = -1;
+    _editingTaskIndex = -1;
     _editingTaskModel = [[AnClickTaskModel alloc] init];
     _statusLabel.text = @"新增任务 请选择动作";
     [self setTaskEditorVisible:YES];
@@ -9256,6 +9262,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _editingBranchActionMode = AnClickActionModeNone;
         _editingTaskModel = [[AnClickTaskModel alloc] initWithDictionary:ownerTask];
         _selectedTaskIndex = ownerIndex;
+        _editingTaskIndex = ownerIndex;
         [self persistCurrentTaskList];
         [self refreshTaskList];
         [self selectTaskAtIndex:ownerIndex];
@@ -9264,16 +9271,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                              [self actionNameForMode:branchMode]];
         return;
     }
-    BOOL updatingExistingTask = _selectedTaskIndex >= 0 &&
-        _selectedTaskIndex < (NSInteger)_taskItems.count &&
-        [self taskModelAtIndex:(NSUInteger)_selectedTaskIndex] != nil;
-    model.expanded = updatingExistingTask && [self taskModelAtIndex:(NSUInteger)_selectedTaskIndex].expanded;
-    if (_selectedTaskIndex < 0 || _selectedTaskIndex >= (NSInteger)_taskItems.count) {
+    NSInteger targetIndex = (_editingTaskIndex >= 0 && _editingTaskIndex < (NSInteger)_taskItems.count)
+        ? _editingTaskIndex
+        : _selectedTaskIndex;
+    BOOL updatingExistingTask = targetIndex >= 0 &&
+        targetIndex < (NSInteger)_taskItems.count &&
+        [self taskModelAtIndex:(NSUInteger)targetIndex] != nil;
+    model.expanded = updatingExistingTask && [self taskModelAtIndex:(NSUInteger)targetIndex].expanded;
+    if (!updatingExistingTask) {
         [_taskItems addObject:[model copy]];
         _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
     } else {
-        _taskItems[(NSUInteger)_selectedTaskIndex] = [model copy];
+        _taskItems[(NSUInteger)targetIndex] = [model copy];
+        _selectedTaskIndex = targetIndex;
     }
+    _editingTaskIndex = _selectedTaskIndex;
     _editingTaskModel = [model copy];
     [self refreshTaskList];
     [self showTaskHome];
@@ -9287,11 +9299,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)taskEditorViewDidCancel:(__unused AnClickTaskEditorView *)editorView {
     _editingTaskModel = nil;
+    _editingTaskIndex = -1;
     [self showTaskHome];
 }
 
 - (void)taskEditorViewDidClose:(__unused AnClickTaskEditorView *)editorView {
     _editingTaskModel = nil;
+    _editingTaskIndex = -1;
     [self collapsePanel];
 }
 
@@ -9380,6 +9394,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     [self persistCurrentTaskList];
     [self refreshTaskList];
+
+    if (mode == AnClickActionModeImage) {
+        [self beginBranchTemplateCaptureForSuccess:success];
+        return;
+    }
+    if (mode == AnClickActionModeColor) {
+        [self beginBranchColorPickingForSuccess:success];
+        return;
+    }
+
     [self beginEditingRecognitionActionConfigForSuccess:success mode:mode];
 }
 
@@ -9395,9 +9419,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self selectActionModeValue:mode];
 }
 
-- (void)taskEditorView:(__unused AnClickTaskEditorView *)editorView didUpdateModel:(AnClickTaskModel *)model {
+- (void)taskEditorView:(AnClickTaskEditorView *)editorView didUpdateModel:(AnClickTaskModel *)model {
     _editingTaskModel = [model copy];
+    if (_editingTaskIndex < 0 && _selectedTaskIndex >= 0 && _selectedTaskIndex < (NSInteger)_taskItems.count) {
+        _editingTaskIndex = _selectedTaskIndex;
+    }
     [self stageTaskEditorModelForRuntime:model];
+    if (editorView == _taskEditorView) {
+        _editingTaskModel = [editorView.model copy];
+    }
 }
 
 - (void)selectTaskAtIndex:(NSInteger)index {
@@ -9406,6 +9436,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     _selectedTaskIndex = index;
+    _editingTaskIndex = index;
     [self dismissConfigKeyboardAndSync];
     [self loadTaskConfigurationFromModel:[self taskModelAtIndex:(NSUInteger)index]
                               statusText:[NSString stringWithFormat:@"修改任务%ld", (long)index + 1]];
@@ -9869,6 +9900,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     [ownerTask removeObjectForKey:success ? @"successActionTaskIndex" : @"failureActionTaskIndex"];
     _taskItems[(NSUInteger)_selectedTaskIndex] = [[AnClickTaskModel alloc] initWithDictionary:ownerTask];
+    _editingTaskModel = [[AnClickTaskModel alloc] initWithDictionary:ownerTask];
     [self persistCurrentTaskList];
     [self refreshCollapsedButtonTitle];
 }
@@ -9914,6 +9946,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _editingBranchOwnerTaskIndex = ownerIndex;
     _editingBranchActionMode = mode;
     _selectedTaskIndex = -1;
+    _editingTaskIndex = ownerIndex;
     _editingTaskModel = [[AnClickTaskModel alloc] initWithDictionary:branchTask];
     [self loadTaskConfigurationFromTask:branchTask
                              statusText:[NSString stringWithFormat:@"设置%@后%@",
@@ -13801,6 +13834,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [self storeBranchActionConfig:config success:success mode:mode];
         }
         [self finishColorPickingOverlay];
+        [self stageTaskEditorModelForRuntime:_editingTaskModel];
         [self refreshEditorConfigControls];
         [self refreshTaskList];
         [self updateStatusForCurrentConfig];
