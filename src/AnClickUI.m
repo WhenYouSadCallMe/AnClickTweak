@@ -490,6 +490,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSInteger _recognitionSuccessActionTaskIndex;
     NSInteger _recognitionFailureActionTaskIndex;
     NSInteger _editingBranchOwnerTaskIndex;
+    AnClickTaskModel *_editingNestedBranchParentModel;
     NSString *_currentTemplatePath;
     NSString *_actionDescription;
     NSString *_ocrTargetText;
@@ -509,6 +510,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     AnClickActionMode _imageActionMode;
     AnClickActionMode _failureActionMode;
     AnClickActionMode _editingBranchActionMode;
+    AnClickActionMode _editingNestedBranchActionMode;
     AnClickActionMode _branchTemplateCaptureMode;
     AnClickActionMode _branchColorPickMode;
     AnClickOCRMode _ocrMode;
@@ -517,6 +519,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _panelSceneUnavailable;
     BOOL _editingBranchRecognitionConfig;
     BOOL _editingBranchRecognitionSuccess;
+    BOOL _editingNestedBranchActionConfig;
+    BOOL _editingNestedBranchActionSuccess;
     BOOL _branchColorPickActive;
     BOOL _branchColorPickSuccess;
 }
@@ -1507,6 +1511,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _recognitionSuccessActionTaskIndex = -1;
     _recognitionFailureActionTaskIndex = -1;
     _editingBranchOwnerTaskIndex = -1;
+    _editingNestedBranchActionMode = AnClickActionModeNone;
     _editingBranchActionMode = AnClickActionModeNone;
     _taskRunSingleStepStopIndex = -1;
     _globalDelayMilliseconds = 0;
@@ -3517,6 +3522,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)showTaskHome {
+    _editingNestedBranchActionConfig = NO;
+    _editingNestedBranchActionSuccess = NO;
+    _editingNestedBranchActionMode = AnClickActionModeNone;
+    _editingNestedBranchParentModel = nil;
     if (_editingBranchRecognitionConfig) {
         NSInteger ownerIndex = _editingBranchOwnerTaskIndex;
         _editingBranchRecognitionConfig = NO;
@@ -4979,6 +4988,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)branchRecognitionContextTitle {
+    if (_editingNestedBranchActionConfig && _editingNestedBranchActionMode != AnClickActionModeNone) {
+        return [NSString stringWithFormat:@"%@后%@",
+                _editingNestedBranchActionSuccess ? @"成功" : @"失败",
+                [self actionNameForMode:_editingNestedBranchActionMode]];
+    }
     if (!_editingBranchRecognitionConfig || _editingBranchActionMode == AnClickActionModeNone) {
         return nil;
     }
@@ -5366,6 +5380,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
+        @(AnClickActionModeDelay),
         @(AnClickActionModeImage),
         @(AnClickActionModeOCR),
         @(AnClickActionModeColor),
@@ -5395,6 +5410,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
+        @(AnClickActionModeDelay),
         @(AnClickActionModeImage),
         @(AnClickActionModeOCR),
         @(AnClickActionModeColor),
@@ -5417,6 +5433,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeTap),
         @(AnClickActionModeDoubleTap),
         @(AnClickActionModeLongPress),
+        @(AnClickActionModeSwipe),
+        @(AnClickActionModeNetwork),
+        @(AnClickActionModeDelay),
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeJump),
     ];
@@ -5428,6 +5447,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeTap),
         @(AnClickActionModeDoubleTap),
         @(AnClickActionModeLongPress),
+        @(AnClickActionModeSwipe),
+        @(AnClickActionModeNetwork),
+        @(AnClickActionModeDelay),
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeJump),
     ];
@@ -8855,15 +8877,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [detailStack addArrangedSubview:line];
         }
 
-        UIButton *runButton = [self taskListSmallButtonWithTitle:@"运行此单步测试"
+        UIButton *runButton = [self taskListSmallButtonWithTitle:@"单步测试"
                                                              tag:AnClickTaskListRunButtonTagBase + indexPath.row
                                                           action:@selector(runSingleTaskTestButtonAtIndex:)
                                                             tint:[self themeHighlightColor]];
+        UIButton *editButton = [self taskListSmallButtonWithTitle:@"修改"
+                                                              tag:AnClickTaskListEditButtonTagBase + indexPath.row
+                                                           action:@selector(editTaskButtonAtIndex:)
+                                                             tint:[self themeHighlightColor]];
         UIButton *collapseButton = [self taskListSmallButtonWithTitle:@"折叠 ▲"
                                                                  tag:AnClickTaskListCollapseButtonTagBase + indexPath.row
                                                                action:@selector(collapseTaskButtonAtIndex:)
                                                                  tint:[self themeHighlightColor]];
         [cardView addSubview:runButton];
+        [cardView addSubview:editButton];
         [cardView addSubview:collapseButton];
 
         UILabel *logicCaption = nil;
@@ -8895,8 +8922,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
             [runButton.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
             [runButton.heightAnchor constraintEqualToConstant:34.0],
+            [editButton.topAnchor constraintEqualToAnchor:runButton.topAnchor],
+            [editButton.leadingAnchor constraintEqualToAnchor:runButton.trailingAnchor constant:gap],
+            [editButton.widthAnchor constraintEqualToAnchor:runButton.widthAnchor multiplier:0.62],
+            [editButton.heightAnchor constraintEqualToAnchor:runButton.heightAnchor],
             [collapseButton.topAnchor constraintEqualToAnchor:runButton.topAnchor],
-            [collapseButton.leadingAnchor constraintEqualToAnchor:runButton.trailingAnchor constant:gap],
+            [collapseButton.leadingAnchor constraintEqualToAnchor:editButton.trailingAnchor constant:gap],
             [collapseButton.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
             [collapseButton.widthAnchor constraintEqualToAnchor:runButton.widthAnchor multiplier:0.62],
             [collapseButton.heightAnchor constraintEqualToAnchor:runButton.heightAnchor],
@@ -9227,6 +9258,57 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _statusLabel.text = _taskItems.count == 0 ? @"暂无任务" : [NSString stringWithFormat:@"已删任务%ld  剩%lu", (long)index + 1, (unsigned long)_taskItems.count];
 }
 
+- (void)restoreNestedBranchParentEditorWithStatus:(NSString *)status {
+    AnClickTaskModel *parentModel = [_editingNestedBranchParentModel copy];
+    if (![parentModel isKindOfClass:AnClickTaskModel.class]) {
+        parentModel = _editingTaskModel ? [_editingTaskModel copy] : [[AnClickTaskModel alloc] init];
+    }
+    _editingNestedBranchActionConfig = NO;
+    _editingNestedBranchActionSuccess = NO;
+    _editingNestedBranchActionMode = AnClickActionModeNone;
+    _editingNestedBranchParentModel = nil;
+    _editingTaskModel = parentModel;
+    [self stageTaskEditorModelForRuntime:parentModel];
+    [self setTaskEditorVisible:YES];
+    [self refreshTaskEditorViewFromCurrentState];
+    if (status.length > 0) {
+        _statusLabel.text = status;
+    }
+}
+
+- (void)beginEditingNestedBranchActionConfigFromEditorView:(AnClickTaskEditorView *)editorView success:(BOOL)success {
+    AnClickTaskModel *parentModel = [editorView.model copy];
+    AnClickActionMode mode = success
+        ? [self normalizedImageActionMode:parentModel.successActionMode]
+        : [self normalizedFailureActionMode:parentModel.failureActionMode];
+    if (mode == AnClickActionModeNone || mode == AnClickActionModeJump) {
+        [self showToast:success ? @"成功后动作无需配置" : @"失败后动作无需配置"];
+        return;
+    }
+    if ([self modeIsRecognitionTask:mode]) {
+        [self showToast:@"分支内不再嵌套识别动作"];
+        return;
+    }
+
+    NSDictionary *existingConfig = success ? parentModel.successActionConfig : parentModel.failureActionConfig;
+    NSMutableDictionary *childTask = ([existingConfig isKindOfClass:NSDictionary.class] &&
+                                      [self modeForTask:existingConfig] == mode)
+        ? [existingConfig mutableCopy]
+        : [self draftActionTaskForMode:mode];
+    childTask[@"mode"] = @(mode);
+    _editingNestedBranchActionConfig = YES;
+    _editingNestedBranchActionSuccess = success;
+    _editingNestedBranchActionMode = mode;
+    _editingNestedBranchParentModel = parentModel;
+    _editingTaskModel = [[AnClickTaskModel alloc] initWithDictionary:childTask];
+    [self stageTaskEditorModelForRuntime:_editingTaskModel];
+    [self setTaskEditorVisible:YES];
+    [self refreshTaskEditorViewFromCurrentState];
+    _statusLabel.text = [NSString stringWithFormat:@"设置%@后%@配置",
+                         success ? @"成功" : @"失败",
+                         [self actionNameForMode:mode]];
+}
+
 - (void)saveTaskEditorModel:(AnClickTaskModel *)model {
     if (![model isKindOfClass:AnClickTaskModel.class]) {
         [self showToast:@"编辑数据无效"];
@@ -9236,6 +9318,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSMutableDictionary *task = [self taskDictionaryForModel:model];
     if (![self taskModelIsComplete:model]) {
         [self showToast:_statusLabel.text ?: @"先补全任务"];
+        return;
+    }
+    if (_editingNestedBranchActionConfig) {
+        AnClickTaskModel *parentModel = [_editingNestedBranchParentModel copy];
+        if (![parentModel isKindOfClass:AnClickTaskModel.class]) {
+            [self showToast:@"分支配置保存失败"];
+            return;
+        }
+        if (_editingNestedBranchActionSuccess) {
+            parentModel.successActionMode = _editingNestedBranchActionMode;
+            parentModel.successActionConfig = task;
+            parentModel.successRecognitionActionConfig = @{};
+        } else {
+            parentModel.failureActionMode = _editingNestedBranchActionMode;
+            parentModel.failureActionConfig = task;
+            parentModel.failureRecognitionActionConfig = @{};
+        }
+        NSString *status = [NSString stringWithFormat:@"已保存%@后%@配置",
+                            _editingNestedBranchActionSuccess ? @"成功" : @"失败",
+                            [self actionNameForMode:_editingNestedBranchActionMode]];
+        _editingNestedBranchParentModel = parentModel;
+        [self restoreNestedBranchParentEditorWithStatus:status];
         return;
     }
     if (_editingBranchRecognitionConfig) {
@@ -9273,7 +9377,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     NSInteger targetIndex = (_editingTaskIndex >= 0 && _editingTaskIndex < (NSInteger)_taskItems.count)
         ? _editingTaskIndex
-        : _selectedTaskIndex;
+        : -1;
     BOOL updatingExistingTask = targetIndex >= 0 &&
         targetIndex < (NSInteger)_taskItems.count &&
         [self taskModelAtIndex:(NSUInteger)targetIndex] != nil;
@@ -9298,12 +9402,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)taskEditorViewDidCancel:(__unused AnClickTaskEditorView *)editorView {
+    if (_editingNestedBranchActionConfig) {
+        [self restoreNestedBranchParentEditorWithStatus:@"已返回分支配置"];
+        return;
+    }
     _editingTaskModel = nil;
     _editingTaskIndex = -1;
     [self showTaskHome];
 }
 
 - (void)taskEditorViewDidClose:(__unused AnClickTaskEditorView *)editorView {
+    _editingNestedBranchActionConfig = NO;
+    _editingNestedBranchActionSuccess = NO;
+    _editingNestedBranchActionMode = AnClickActionModeNone;
+    _editingNestedBranchParentModel = nil;
     _editingTaskModel = nil;
     _editingTaskIndex = -1;
     [self collapsePanel];
@@ -9352,13 +9464,33 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self showToast:_statusLabel.text ?: @"先补全任务"];
         return;
     }
-    if (_selectedTaskIndex < 0 || _selectedTaskIndex >= (NSInteger)_taskItems.count) {
+    if (_editingBranchRecognitionConfig || _editingNestedBranchActionConfig) {
+        if (_taskRunActive || _taskRunPausedForForeground) {
+            [self stopTaskRunWithStatus:@"已停止"];
+            return;
+        }
+        UIWindow *hostWindow = [self hostWindow];
+        if (!hostWindow) {
+            [self showToast:@"无窗口"];
+            return;
+        }
+        _statusLabel.text = @"单步测试分支动作";
+        [self showToast:_statusLabel.text];
+        [self performTaskModel:_editingTaskModel inWindow:hostWindow runGeneration:++_taskRunGeneration];
+        return;
+    }
+    NSInteger targetIndex = (_editingTaskIndex >= 0 && _editingTaskIndex < (NSInteger)_taskItems.count)
+        ? _editingTaskIndex
+        : _selectedTaskIndex;
+    if (targetIndex < 0 || targetIndex >= (NSInteger)_taskItems.count) {
         [_taskItems addObject:[_editingTaskModel copy]];
         _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
     } else {
-        _editingTaskModel.expanded = [self taskModelAtIndex:(NSUInteger)_selectedTaskIndex].expanded;
-        _taskItems[(NSUInteger)_selectedTaskIndex] = [_editingTaskModel copy];
+        _editingTaskModel.expanded = [self taskModelAtIndex:(NSUInteger)targetIndex].expanded;
+        _taskItems[(NSUInteger)targetIndex] = [_editingTaskModel copy];
+        _selectedTaskIndex = targetIndex;
     }
+    _editingTaskIndex = _selectedTaskIndex;
     [self persistCurrentTaskList];
     [self refreshTaskList];
 
@@ -9368,6 +9500,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)beginEditingBranchActionConfigFromEditorView:(AnClickTaskEditorView *)editorView success:(BOOL)success {
+    if (_editingBranchRecognitionConfig && !_editingNestedBranchActionConfig) {
+        [self beginEditingNestedBranchActionConfigFromEditorView:editorView success:success];
+        return;
+    }
+
     AnClickTaskModel *ownerModel = [editorView.model copy];
     _editingTaskModel = ownerModel;
     [self stageTaskEditorModelForRuntime:ownerModel];
@@ -9766,7 +9903,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @"recognitionRetryUntilFound": @NO,
         @"recognitionRetryInterval": @1.0,
     } mutableCopy];
-    if (mode == AnClickActionModeImage) {
+    if (mode == AnClickActionModeDelay) {
+        task[@"delay"] = @0.50;
+    } else if (mode == AnClickActionModeNetwork) {
+        task[@"networkMethod"] = @"GET";
+        task[@"networkTimeout"] = @8.0;
+        task[@"networkRetryForever"] = @YES;
+        task[@"networkRetryLimit"] = @3;
+    } else if (mode == AnClickActionModeSwipe) {
+        task[@"swipeDuration"] = @0.30;
+        task[@"swipeStep"] = @1.0;
+    } else if (mode == AnClickActionModeImage) {
         task[@"useMatchPoint"] = @YES;
         task[@"threshold"] = @0.80;
     } else if (mode == AnClickActionModeOCR) {

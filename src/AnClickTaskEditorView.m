@@ -805,6 +805,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @(AnClickActionModeTap),
             @(AnClickActionModeDoubleTap),
             @(AnClickActionModeLongPress),
+            @(AnClickActionModeSwipe),
+            @(AnClickActionModeNetwork),
+            @(AnClickActionModeDelay),
             @(AnClickActionModeTwoFingerTap),
             @(AnClickActionModeJump),
         ]];
@@ -818,6 +821,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeMacro),
         @(AnClickActionModeNetwork),
+        @(AnClickActionModeDelay),
     ]];
     if (![self isEditingBranchActionConfig]) {
         [modes addObjectsFromArray:@[
@@ -841,12 +845,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 
 - (BOOL)branchActionModeNeedsFullConfig:(AnClickActionMode)mode success:(BOOL)success {
     if (![self branchActionMode:mode isAllowedForSuccess:success] ||
-        [self isEditingBranchActionConfig] ||
         mode == AnClickActionModeNone ||
         mode == AnClickActionModeJump) {
         return NO;
     }
-    return YES;
+    return ![self branchActionModeCanUseRecognitionPoint:mode];
 }
 
 - (NSString *)branchActionShortTitleForMode:(AnClickActionMode)mode {
@@ -901,7 +904,17 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @"failureActionMode": @(AnClickActionModeNone),
         @"useMatchPoint": @YES,
     } mutableCopy];
-    if (mode == AnClickActionModeImage) {
+    if (mode == AnClickActionModeDelay) {
+        config[@"delay"] = @0.50;
+    } else if (mode == AnClickActionModeNetwork) {
+        config[@"networkMethod"] = @"GET";
+        config[@"networkTimeout"] = @8.0;
+        config[@"networkRetryForever"] = @YES;
+        config[@"networkRetryLimit"] = @3;
+    } else if (mode == AnClickActionModeSwipe) {
+        config[@"swipeDuration"] = @0.30;
+        config[@"swipeStep"] = @1.0;
+    } else if (mode == AnClickActionModeImage) {
         config[@"threshold"] = @0.80;
     } else if (mode == AnClickActionModeColor) {
         config[@"colorTolerance"] = @18.0;
