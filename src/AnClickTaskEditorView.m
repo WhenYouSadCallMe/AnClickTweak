@@ -709,7 +709,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 - (NSArray<NSNumber *> *)rowsForSection:(NSInteger)section {
     switch (section) {
         case 0:
-            return @[@(ACEditorRowKindActionGrid)];
+            return [self isEditingBranchActionConfig] ? @[] : @[@(ACEditorRowKindActionGrid)];
         case 1:
             return [self parameterRows];
         case 2:
@@ -807,8 +807,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @(AnClickActionModeLongPress),
             @(AnClickActionModeSwipe),
             @(AnClickActionModeNetwork),
-            @(AnClickActionModeDelay),
             @(AnClickActionModeTwoFingerTap),
+            @(AnClickActionModeMacro),
             @(AnClickActionModeJump),
         ]];
         return modes;
@@ -821,7 +821,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeMacro),
         @(AnClickActionModeNetwork),
-        @(AnClickActionModeDelay),
     ]];
     if (![self isEditingBranchActionConfig]) {
         [modes addObjectsFromArray:@[

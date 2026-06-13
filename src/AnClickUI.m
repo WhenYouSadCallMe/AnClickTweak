@@ -83,7 +83,7 @@ static const NSInteger AnClickHomeStopLabelTag = 54002;
 static const NSInteger AnClickHomeRecordLabelTag = 54003;
 static const NSInteger AnClickHomeAddLabelTag = 54004;
 static const NSInteger AnClickHomeDeleteLabelTag = 54005;
-static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.10;
+static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.18;
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
 static void (*AnClickOriginalSpringBoardHandlePhysicalButtonEvent)(id self, SEL _cmd, id event);
 
@@ -421,6 +421,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _taskRunPausedForForeground;
     BOOL _taskRunResumeInGlobalNetworkGate;
     BOOL _taskRunResumeScheduled;
+    BOOL _panelHiddenForSingleStepTest;
     BOOL _volumeShortcutRegistered;
     BOOL _volumeKVORegistered;
     BOOL _volumeDarwinObserverRegistered;
@@ -2743,14 +2744,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (BOOL)hideOwnUIForRecognitionCaptureWithHostWindow:(UIWindow *)hostWindow {
-    BOOL runningPanelShouldStayVisible = _taskRunActive || _taskRunPausedForForeground;
-    BOOL shouldRestorePanel = _panelWindow && (!_panelWindow.hidden || runningPanelShouldStayVisible);
+    BOOL shouldRestorePanel = _panelWindow && (!_panelWindow.hidden || _taskRunActive || _taskRunPausedForForeground);
     [self clearRecognitionBox];
-    if (runningPanelShouldStayVisible) {
-        [self keepRunningCollapsedPanelVisible];
-    } else {
-        [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
-    }
+    [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
     [self hideToastForRecognitionCapture];
     return shouldRestorePanel;
 }
@@ -2772,10 +2768,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)restorePanelAfterRecognitionCaptureIfNeeded:(BOOL)shouldRestore delay:(NSTimeInterval)delay {
-    if (_taskRunActive || _taskRunPausedForForeground) {
-        [self keepRunningCollapsedPanelVisible];
-        return;
-    }
     if (!shouldRestore) {
         return;
     }
@@ -3544,7 +3536,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self setTaskEditorVisible:NO];
     [self refreshTaskList];
     _statusLabel.text = _taskItems.count == 0
-        ? @"暂无任务"
+        ? @""
         : [NSString stringWithFormat:@"任务列表 · %lu项", (unsigned long)_taskItems.count];
 }
 
@@ -5380,7 +5372,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
-        @(AnClickActionModeDelay),
         @(AnClickActionModeImage),
         @(AnClickActionModeOCR),
         @(AnClickActionModeColor),
@@ -5410,7 +5401,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
-        @(AnClickActionModeDelay),
         @(AnClickActionModeImage),
         @(AnClickActionModeOCR),
         @(AnClickActionModeColor),
@@ -5435,8 +5425,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeLongPress),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
-        @(AnClickActionModeDelay),
         @(AnClickActionModeTwoFingerTap),
+        @(AnClickActionModeMacro),
         @(AnClickActionModeJump),
     ];
 }
@@ -5449,8 +5439,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeLongPress),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
-        @(AnClickActionModeDelay),
         @(AnClickActionModeTwoFingerTap),
+        @(AnClickActionModeMacro),
         @(AnClickActionModeJump),
     ];
 }
@@ -9221,6 +9211,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _statusLabel.text = [NSString stringWithFormat:@"单步测试任务%ld", (long)index + 1];
     [self showToast:_statusLabel.text];
     [self refreshTaskList];
+    _panelHiddenForSingleStepTest = YES;
+    [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
     [self runTaskAtIndex:(NSUInteger)index inWindow:hostWindow generation:runGeneration];
 }
 
@@ -9255,7 +9247,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     [self showTaskHome];
     [self persistCurrentTaskList];
-    _statusLabel.text = _taskItems.count == 0 ? @"暂无任务" : [NSString stringWithFormat:@"已删任务%ld  剩%lu", (long)index + 1, (unsigned long)_taskItems.count];
+    _statusLabel.text = _taskItems.count == 0 ? @"" : [NSString stringWithFormat:@"已删任务%ld  剩%lu", (long)index + 1, (unsigned long)_taskItems.count];
 }
 
 - (void)restoreNestedBranchParentEditorWithStatus:(NSString *)status {
@@ -9476,7 +9468,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
         _statusLabel.text = @"单步测试分支动作";
         [self showToast:_statusLabel.text];
-        [self performTaskModel:_editingTaskModel inWindow:hostWindow runGeneration:++_taskRunGeneration];
+        [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+        NSTimeInterval duration = [self performTaskModel:_editingTaskModel inWindow:hostWindow runGeneration:0];
+        [self restorePanelAfterScreenDelay:duration + 0.15];
         return;
     }
     NSInteger targetIndex = (_editingTaskIndex >= 0 && _editingTaskIndex < (NSInteger)_taskItems.count)
@@ -9531,15 +9525,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     [self persistCurrentTaskList];
     [self refreshTaskList];
-
-    if (mode == AnClickActionModeImage) {
-        [self beginBranchTemplateCaptureForSuccess:success];
-        return;
-    }
-    if (mode == AnClickActionModeColor) {
-        [self beginBranchColorPickingForSuccess:success];
-        return;
-    }
 
     [self beginEditingRecognitionActionConfigForSuccess:success mode:mode];
 }
@@ -9921,6 +9906,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         task[@"ocrMode"] = @(AnClickOCRModeAppleVision);
         task[@"ocrBackendVersion"] = @1;
         task[@"ocrMatchMode"] = @(AnClickOCRMatchModeContains);
+        task[@"ocrSimilarity"] = @0.80;
         task[@"useMatchPoint"] = @YES;
     } else if (mode == AnClickActionModeColor) {
         task[@"colorTolerance"] = @18.0;
@@ -11315,13 +11301,29 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         singleCheckConfig[@"repeat"] = @1;
         singleCheckConfig[@"interval"] = @0.0;
         singleCheckConfig[@"recognitionRetryUntilFound"] = @NO;
+        if ([self modeIsRecognitionTask:[self successActionModeForTask:singleCheckConfig]]) {
+            singleCheckConfig[@"imageActionMode"] = @(AnClickActionModeTap);
+            [singleCheckConfig removeObjectForKey:@"successActionConfig"];
+            [singleCheckConfig removeObjectForKey:@"successRecognitionActionConfig"];
+        }
+        if ([self modeIsRecognitionTask:[self failureActionModeForTask:singleCheckConfig]]) {
+            singleCheckConfig[@"failureActionMode"] = @(AnClickActionModeNone);
+            [singleCheckConfig removeObjectForKey:@"failureActionConfig"];
+            [singleCheckConfig removeObjectForKey:@"failureRecognitionActionConfig"];
+        }
         [self performRecognitionNetworkTask:singleCheckConfig
                                    inWindow:hostWindow
                                  generation:runGeneration
-                                 completion:^(__unused BOOL matched) {
-            if (completion) {
-                completion([self actionIntervalForTask:task]);
-            }
+                                 completion:^(BOOL matched) {
+            [self performRecognitionBranchActionForTask:singleCheckConfig
+                                                success:matched
+                                               inWindow:hostWindow
+                                             generation:runGeneration
+                                             completion:^(NSTimeInterval nestedDelay) {
+                if (completion) {
+                    completion(nestedDelay + [self actionIntervalForTask:task]);
+                }
+            }];
         }];
         return;
     }
@@ -12932,6 +12934,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (showToast) {
         [self showToast:_statusLabel.text];
     }
+    if (_panelHiddenForSingleStepTest) {
+        _panelHiddenForSingleStepTest = NO;
+        [self restorePanelAfterScreenDelay:0.05];
+    }
     _volumeShortcutRunSuppressToasts = NO;
     [self refreshCollapsedButtonTitle];
     [self refreshTaskList];
@@ -12950,6 +12956,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self stopTaskRunRuntimeTimerReset:YES];
     _statusLabel.text = status.length > 0 ? status : @"单步测试完成";
     [self showToast:_statusLabel.text];
+    if (_panelHiddenForSingleStepTest) {
+        _panelHiddenForSingleStepTest = NO;
+        [self restorePanelAfterScreenDelay:0.05];
+    }
     _volumeShortcutRunSuppressToasts = NO;
     [self refreshCollapsedButtonTitle];
     [self refreshTaskList];
