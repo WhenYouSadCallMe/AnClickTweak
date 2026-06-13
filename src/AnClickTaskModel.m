@@ -1,5 +1,6 @@
 #import "AnClickTaskModel.h"
 #import <math.h>
+#import <string.h>
 
 static NSString * const ACKeyMode = @"mode";
 static NSString * const ACKeyDelay = @"delay";
@@ -40,6 +41,30 @@ static NSArray *ACArrayValue(id value) {
     return [value isKindOfClass:NSArray.class] ? [value copy] : @[];
 }
 
+static NSValue *ACValueWithCGPoint(CGPoint point) {
+    return [NSValue valueWithBytes:&point objCType:@encode(CGPoint)];
+}
+
+static NSValue *ACValueWithCGRect(CGRect rect) {
+    return [NSValue valueWithBytes:&rect objCType:@encode(CGRect)];
+}
+
+static BOOL ACNSValueGetCGPoint(NSValue *value, CGPoint *point) {
+    if (![value isKindOfClass:NSValue.class] || !point || strcmp(value.objCType, @encode(CGPoint)) != 0) {
+        return NO;
+    }
+    [value getValue:point];
+    return YES;
+}
+
+static BOOL ACNSValueGetCGRect(NSValue *value, CGRect *rect) {
+    if (![value isKindOfClass:NSValue.class] || !rect || strcmp(value.objCType, @encode(CGRect)) != 0) {
+        return NO;
+    }
+    [value getValue:rect];
+    return YES;
+}
+
 static AnClickActionMode ACSupportedActionMode(id value) {
     if (![value respondsToSelector:@selector(integerValue)]) {
         return AnClickActionModeNone;
@@ -70,8 +95,7 @@ static NSValue *ACValueObject(id value) {
 }
 
 static BOOL ACCGRectFromObject(id object, CGRect *rect) {
-    if ([object isKindOfClass:NSValue.class]) {
-        *rect = [object CGRectValue];
+    if (ACNSValueGetCGRect(object, rect)) {
         return YES;
     }
     if ([object isKindOfClass:NSDictionary.class]) {
@@ -92,8 +116,7 @@ static BOOL ACCGRectFromObject(id object, CGRect *rect) {
 }
 
 static BOOL ACCGPointFromObject(id object, CGPoint *point) {
-    if ([object isKindOfClass:NSValue.class]) {
-        *point = [object CGPointValue];
+    if (ACNSValueGetCGPoint(object, point)) {
         return YES;
     }
     if ([object isKindOfClass:NSDictionary.class]) {
@@ -275,7 +298,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
         NSDictionary *anchor = [_colorPoints.firstObject isKindOfClass:NSDictionary.class] ? _colorPoints.firstObject : nil;
         if ([anchor[@"x"] respondsToSelector:@selector(doubleValue)] &&
             [anchor[@"y"] respondsToSelector:@selector(doubleValue)]) {
-            _point = [NSValue valueWithCGPoint:CGPointMake([anchor[@"x"] doubleValue], [anchor[@"y"] doubleValue])];
+            _point = ACValueWithCGPoint(CGPointMake([anchor[@"x"] doubleValue], [anchor[@"y"] doubleValue]));
             if (!_pointScreenSize && _colorPointScreenSize) {
                 _pointScreenSize = _colorPointScreenSize;
             }
@@ -344,10 +367,10 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     dictionary[@"failureActionMode"] = @(failureActionMode);
     dictionary[@"threshold"] = @(MIN(1.0, MAX(0.0, self.threshold)));
     if (self.hasTemplateROI) {
-        dictionary[@"templateROI"] = [NSValue valueWithCGRect:self.templateROI];
+        dictionary[@"templateROI"] = ACValueWithCGRect(self.templateROI);
     }
     if (self.hasMatchClickOffset) {
-        dictionary[@"matchClickOffset"] = [NSValue valueWithCGPoint:self.matchClickOffset];
+        dictionary[@"matchClickOffset"] = ACValueWithCGPoint(self.matchClickOffset);
     }
     dictionary[@"ocrMode"] = @(self.ocrMode);
     dictionary[@"ocrMatchMode"] = @(self.ocrMatchMode);
@@ -367,7 +390,10 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     if (actionMode == AnClickActionModeColor &&
         self.colorPoints.count == 0 &&
         self.point) {
-        CGPoint point = self.point.CGPointValue;
+        CGPoint point = CGPointZero;
+        if (!ACNSValueGetCGPoint(self.point, &point)) {
+            point = CGPointZero;
+        }
         dictionary[@"colorPoints"] = @[@{
             @"x": @(point.x),
             @"y": @(point.y),
