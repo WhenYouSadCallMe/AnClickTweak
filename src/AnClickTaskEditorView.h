@@ -15,6 +15,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)taskEditorViewDidRequestTemplateCapture:(AnClickTaskEditorView *)editorView;
 - (void)taskEditorViewDidRequestRecording:(AnClickTaskEditorView *)editorView;
 - (void)taskEditorViewDidRequestSingleStepTest:(AnClickTaskEditorView *)editorView;
+- (void)taskEditorViewDidRequestSuccessActionConfig:(AnClickTaskEditorView *)editorView;
+- (void)taskEditorViewDidRequestFailureActionConfig:(AnClickTaskEditorView *)editorView;
 - (void)taskEditorView:(AnClickTaskEditorView *)editorView didSelectActionMode:(AnClickActionMode)mode;
 - (void)taskEditorView:(AnClickTaskEditorView *)editorView didUpdateModel:(AnClickTaskModel *)model;
 @end

@@ -389,7 +389,8 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     }
     if (actionMode == AnClickActionModeColor &&
         self.colorPoints.count == 0 &&
-        self.point) {
+        self.point &&
+        self.useMatchPoint) {
         CGPoint point = CGPointZero;
         if (!ACNSValueGetCGPoint(self.point, &point)) {
             point = CGPointZero;

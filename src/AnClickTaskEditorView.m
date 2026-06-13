@@ -6,7 +6,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindCoordinate,
     ACEditorRowKindSwipeStart,
     ACEditorRowKindSwipeEnd,
+    ACEditorRowKindRecognitionClickTargetMode,
     ACEditorRowKindPointPick,
+    ACEditorRowKindColorPick,
     ACEditorRowKindJitter,
     ACEditorRowKindRepeat,
     ACEditorRowKindDoubleTapInterval,
@@ -43,6 +45,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindRecognitionRetryInterval,
     ACEditorRowKindSuccessActionMode,
     ACEditorRowKindFailureActionMode,
+    ACEditorRowKindSuccessActionConfig,
+    ACEditorRowKindFailureActionConfig,
     ACEditorRowKindSuccessBranch,
     ACEditorRowKindFailureBranch,
     ACEditorRowKindSingleStep,
@@ -224,6 +228,124 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         ]];
     }
     return self;
+}
+
+@end
+
+@interface ACEditorActionChoiceCell : UITableViewCell
+@property (nonatomic, strong) UILabel *iconLabel;
+@property (nonatomic, strong) UILabel *titleLabel;
+@property (nonatomic, strong) UIScrollView *scrollView;
+@property (nonatomic, strong) UIStackView *stackView;
+@property (nonatomic, copy) void (^selectionHandler)(AnClickActionMode mode);
+- (void)configureWithTitle:(NSString *)title
+                      icon:(NSString *)icon
+                     items:(NSArray<NSDictionary *> *)items
+              selectedMode:(AnClickActionMode)selectedMode;
+@end
+
+@implementation ACEditorActionChoiceCell
+
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
+    self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
+    if (self) {
+        self.selectionStyle = UITableViewCellSelectionStyleNone;
+
+        _iconLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+        _iconLabel.font = [UIFont systemFontOfSize:19.0 weight:UIFontWeightSemibold];
+        _iconLabel.translatesAutoresizingMaskIntoConstraints = NO;
+
+        _titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+        _titleLabel.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightSemibold];
+        _titleLabel.textColor = UIColor.labelColor;
+        _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+
+        _scrollView = [[UIScrollView alloc] initWithFrame:CGRectZero];
+        _scrollView.showsHorizontalScrollIndicator = NO;
+        _scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+
+        _stackView = [[UIStackView alloc] initWithFrame:CGRectZero];
+        _stackView.axis = UILayoutConstraintAxisHorizontal;
+        _stackView.spacing = 8.0;
+        _stackView.alignment = UIStackViewAlignmentCenter;
+        _stackView.translatesAutoresizingMaskIntoConstraints = NO;
+
+        [_scrollView addSubview:_stackView];
+        [self.contentView addSubview:_iconLabel];
+        [self.contentView addSubview:_titleLabel];
+        [self.contentView addSubview:_scrollView];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [_iconLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16.0],
+            [_iconLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:14.0],
+            [_iconLabel.widthAnchor constraintEqualToConstant:26.0],
+
+            [_titleLabel.leadingAnchor constraintEqualToAnchor:_iconLabel.trailingAnchor constant:8.0],
+            [_titleLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-14.0],
+            [_titleLabel.centerYAnchor constraintEqualToAnchor:_iconLabel.centerYAnchor],
+
+            [_scrollView.leadingAnchor constraintEqualToAnchor:_titleLabel.leadingAnchor],
+            [_scrollView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-14.0],
+            [_scrollView.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:10.0],
+            [_scrollView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-12.0],
+            [_scrollView.heightAnchor constraintEqualToConstant:34.0],
+
+            [_stackView.leadingAnchor constraintEqualToAnchor:_scrollView.contentLayoutGuide.leadingAnchor],
+            [_stackView.trailingAnchor constraintEqualToAnchor:_scrollView.contentLayoutGuide.trailingAnchor],
+            [_stackView.topAnchor constraintEqualToAnchor:_scrollView.contentLayoutGuide.topAnchor],
+            [_stackView.bottomAnchor constraintEqualToAnchor:_scrollView.contentLayoutGuide.bottomAnchor],
+            [_stackView.heightAnchor constraintEqualToAnchor:_scrollView.frameLayoutGuide.heightAnchor],
+
+            [self.contentView.heightAnchor constraintGreaterThanOrEqualToConstant:84.0],
+        ]];
+    }
+    return self;
+}
+
+- (void)prepareForReuse {
+    [super prepareForReuse];
+    self.selectionHandler = nil;
+}
+
+- (void)configureWithTitle:(NSString *)title
+                      icon:(NSString *)icon
+                     items:(NSArray<NSDictionary *> *)items
+              selectedMode:(AnClickActionMode)selectedMode {
+    self.iconLabel.text = icon ?: @"";
+    self.titleLabel.text = title ?: @"";
+    for (UIView *view in self.stackView.arrangedSubviews) {
+        [self.stackView removeArrangedSubview:view];
+        [view removeFromSuperview];
+    }
+
+    for (NSDictionary *item in items) {
+        AnClickActionMode mode = (AnClickActionMode)[item[@"mode"] integerValue];
+        NSString *itemTitle = [item[@"title"] isKindOfClass:NSString.class] ? item[@"title"] : @"动作";
+        BOOL selected = mode == selectedMode;
+        UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+        button.tag = mode;
+        [button setTitle:itemTitle forState:UIControlStateNormal];
+        [button setTitleColor:selected ? UIColor.whiteColor : UIColor.labelColor forState:UIControlStateNormal];
+        button.titleLabel.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightSemibold];
+        button.contentEdgeInsets = UIEdgeInsetsMake(0, 12.0, 0, 12.0);
+        button.backgroundColor = selected ? UIColor.systemBlueColor : UIColor.secondarySystemGroupedBackgroundColor;
+        button.layer.cornerRadius = 15.0;
+        button.layer.borderWidth = 1.0;
+        button.layer.borderColor = (selected ? UIColor.systemBlueColor : UIColor.separatorColor).CGColor;
+        button.translatesAutoresizingMaskIntoConstraints = NO;
+        [button addTarget:self action:@selector(handleChoiceButton:) forControlEvents:UIControlEventTouchUpInside];
+        [self.stackView addArrangedSubview:button];
+        [NSLayoutConstraint activateConstraints:@[
+            [button.heightAnchor constraintEqualToConstant:30.0],
+            [button.widthAnchor constraintGreaterThanOrEqualToConstant:58.0],
+        ]];
+    }
+}
+
+- (void)handleChoiceButton:(UIButton *)button {
+    if (self.selectionHandler) {
+        self.selectionHandler((AnClickActionMode)button.tag);
+    }
 }
 
 @end
@@ -428,6 +550,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     [_tableView registerClass:ACEditorInputCell.class forCellReuseIdentifier:@"Input"];
     [_tableView registerClass:ACEditorSliderCell.class forCellReuseIdentifier:@"Slider"];
     [_tableView registerClass:ACEditorSegmentedCell.class forCellReuseIdentifier:@"Segmented"];
+    [_tableView registerClass:ACEditorActionChoiceCell.class forCellReuseIdentifier:@"ActionChoice"];
     [_tableView registerClass:ACEditorButtonCell.class forCellReuseIdentifier:@"Button"];
 
     [self addSubview:_cancelButton];
@@ -524,11 +647,65 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     }
     switch (section) {
         case 0: return @"动作类型";
-        case 1: return @"目标参数 - 动态数据驱动";
-        case 2: return @"时间控制";
+        case 1: return [self parameterSectionTitleForCurrentMode];
+        case 2: return [self timingSectionTitleForCurrentMode];
         case 3: return @"逻辑分支";
         case 4: return @"";
         default: return @"";
+    }
+}
+
+- (NSString *)parameterSectionTitleForCurrentMode {
+    switch (self.model.actionMode) {
+        case AnClickActionModeTap:
+        case AnClickActionModeDoubleTap:
+        case AnClickActionModeLongPress:
+        case AnClickActionModeTwoFingerTap:
+            return @"触点参数";
+        case AnClickActionModeSwipe:
+            return @"滑动轨迹";
+        case AnClickActionModeImage:
+            return @"识图参数";
+        case AnClickActionModeOCR:
+            return @"识字参数";
+        case AnClickActionModeColor:
+            return @"识色参数";
+        case AnClickActionModeNetwork:
+            return @"网络请求";
+        case AnClickActionModeJump:
+            return @"跳转目标";
+        case AnClickActionModeMacro:
+            return @"录制参数";
+        case AnClickActionModeDelay:
+            return @"延时参数";
+        default:
+            return @"目标参数";
+    }
+}
+
+- (NSString *)timingSectionTitleForCurrentMode {
+    switch (self.model.actionMode) {
+        case AnClickActionModeTap:
+        case AnClickActionModeTwoFingerTap:
+            return @"重复设置";
+        case AnClickActionModeDoubleTap:
+            return @"双击设置";
+        case AnClickActionModeLongPress:
+            return @"长按设置";
+        case AnClickActionModeSwipe:
+            return @"滑动设置";
+        case AnClickActionModeImage:
+        case AnClickActionModeOCR:
+        case AnClickActionModeColor:
+            return @"识别重试";
+        case AnClickActionModeNetwork:
+            return @"重试与超时";
+        case AnClickActionModeMacro:
+            return @"回放设置";
+        case AnClickActionModeDelay:
+            return @"延时设置";
+        default:
+            return @"动作设置";
     }
 }
 
@@ -551,10 +728,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 
 - (NSArray<NSNumber *> *)parameterRows {
     NSArray<NSNumber *> *candidates = @[
+        @(ACEditorRowKindRecognitionClickTargetMode),
         @(ACEditorRowKindCoordinate),
         @(ACEditorRowKindSwipeStart),
         @(ACEditorRowKindSwipeEnd),
         @(ACEditorRowKindPointPick),
+        @(ACEditorRowKindColorPick),
         @(ACEditorRowKindTemplate),
         @(ACEditorRowKindTemplatePath),
         @(ACEditorRowKindTemplateROI),
@@ -611,32 +790,170 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     return rows;
 }
 
+- (BOOL)isEditingBranchActionConfig {
+    return self.branchTitle.length > 0;
+}
+
+- (BOOL)branchActionModeCanUseRecognitionPoint:(AnClickActionMode)mode {
+    return mode == AnClickActionModeTap ||
+        mode == AnClickActionModeDoubleTap ||
+        mode == AnClickActionModeLongPress ||
+        mode == AnClickActionModeTwoFingerTap;
+}
+
+- (NSArray<NSNumber *> *)branchActionModesForSuccess:(BOOL)success {
+    NSMutableArray<NSNumber *> *modes = [NSMutableArray array];
+    if (!success) {
+        [modes addObject:@(AnClickActionModeNone)];
+    }
+    if ([self isEditingBranchActionConfig]) {
+        [modes addObjectsFromArray:@[
+            @(AnClickActionModeTap),
+            @(AnClickActionModeDoubleTap),
+            @(AnClickActionModeLongPress),
+            @(AnClickActionModeTwoFingerTap),
+            @(AnClickActionModeJump),
+        ]];
+        return modes;
+    }
+    [modes addObjectsFromArray:@[
+        @(AnClickActionModeTap),
+        @(AnClickActionModeDoubleTap),
+        @(AnClickActionModeLongPress),
+        @(AnClickActionModeSwipe),
+        @(AnClickActionModeTwoFingerTap),
+        @(AnClickActionModeDelay),
+        @(AnClickActionModeMacro),
+        @(AnClickActionModeNetwork),
+    ]];
+    if (![self isEditingBranchActionConfig]) {
+        [modes addObjectsFromArray:@[
+            @(AnClickActionModeImage),
+            @(AnClickActionModeOCR),
+            @(AnClickActionModeColor),
+        ]];
+    }
+    [modes addObject:@(AnClickActionModeJump)];
+    return modes;
+}
+
+- (BOOL)branchActionMode:(AnClickActionMode)mode isAllowedForSuccess:(BOOL)success {
+    for (NSNumber *modeNumber in [self branchActionModesForSuccess:success]) {
+        if (modeNumber.integerValue == mode) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (BOOL)branchActionModeNeedsFullConfig:(AnClickActionMode)mode success:(BOOL)success {
+    if (![self branchActionMode:mode isAllowedForSuccess:success] ||
+        [self isEditingBranchActionConfig] ||
+        mode == AnClickActionModeNone ||
+        mode == AnClickActionModeJump) {
+        return NO;
+    }
+    return YES;
+}
+
+- (NSString *)branchActionShortTitleForMode:(AnClickActionMode)mode {
+    switch (mode) {
+        case AnClickActionModeNone: return @"无";
+        case AnClickActionModeTap: return @"点击";
+        case AnClickActionModeDoubleTap: return @"双击";
+        case AnClickActionModeLongPress: return @"长按";
+        case AnClickActionModeSwipe: return @"滑动";
+        case AnClickActionModeTwoFingerTap: return @"多指";
+        case AnClickActionModeImage: return @"识图";
+        case AnClickActionModeMacro: return @"录制";
+        case AnClickActionModeOCR: return @"识字";
+        case AnClickActionModeColor: return @"识色";
+        case AnClickActionModeNetwork: return @"网络";
+        case AnClickActionModeJump: return @"跳转";
+        case AnClickActionModeDelay: return @"延时";
+        default: return @"动作";
+    }
+}
+
+- (NSArray<NSDictionary *> *)branchActionItemsForSuccess:(BOOL)success {
+    NSMutableArray<NSDictionary *> *items = [NSMutableArray array];
+    for (NSNumber *modeNumber in [self branchActionModesForSuccess:success]) {
+        AnClickActionMode mode = (AnClickActionMode)modeNumber.integerValue;
+        [items addObject:@{
+            @"title": [self branchActionShortTitleForMode:mode],
+            @"mode": @(mode),
+        }];
+    }
+    return items;
+}
+
+- (BOOL)branchActionConfigExistsForSuccess:(BOOL)success {
+    NSDictionary *config = success ? self.model.successActionConfig : self.model.failureActionConfig;
+    if (config.count > 0) {
+        return YES;
+    }
+    config = success ? self.model.successRecognitionActionConfig : self.model.failureRecognitionActionConfig;
+    return config.count > 0;
+}
+
+- (void)setBranchActionMode:(AnClickActionMode)mode success:(BOOL)success {
+    if (![self branchActionMode:mode isAllowedForSuccess:success]) {
+        mode = success ? AnClickActionModeTap : AnClickActionModeNone;
+    }
+    AnClickActionMode previous = success ? self.model.successActionMode : self.model.failureActionMode;
+    if (success) {
+        self.model.successActionMode = mode;
+        if (mode != AnClickActionModeJump) {
+            self.model.successBranchIndex = -1;
+        }
+        if (previous != mode) {
+            self.model.successActionConfig = @{};
+            self.model.successRecognitionActionConfig = @{};
+        }
+    } else {
+        self.model.failureActionMode = mode;
+        if (mode != AnClickActionModeJump) {
+            self.model.failureBranchIndex = -1;
+        }
+        if (previous != mode) {
+            self.model.failureActionConfig = @{};
+            self.model.failureRecognitionActionConfig = @{};
+        }
+    }
+    [self notifyModelChanged];
+    [self reloadForm];
+}
+
 - (BOOL)shouldShowRowForKind:(ACEditorRowKind)kind {
     AnClickActionMode mode = self.model.actionMode;
     if (mode == AnClickActionModeNone) {
         return kind == ACEditorRowKindActionGrid;
     }
 
-    BOOL pointMode = mode == AnClickActionModeTap ||
+    BOOL basicPointMode = mode == AnClickActionModeTap ||
         mode == AnClickActionModeDoubleTap ||
         mode == AnClickActionModeLongPress ||
-        mode == AnClickActionModeTwoFingerTap ||
-        mode == AnClickActionModeImage ||
-        mode == AnClickActionModeOCR;
+        mode == AnClickActionModeTwoFingerTap;
     BOOL recognitionMode = mode == AnClickActionModeImage ||
         mode == AnClickActionModeOCR ||
         mode == AnClickActionModeColor;
+    BOOL recognitionPointMode = recognitionMode && [self branchActionModeCanUseRecognitionPoint:self.model.successActionMode];
+    BOOL customRecognitionPointMode = recognitionPointMode && !self.model.useMatchPoint;
 
     switch (kind) {
         case ACEditorRowKindActionGrid:
             return YES;
         case ACEditorRowKindCoordinate:
-            return pointMode || mode == AnClickActionModeColor;
+            return basicPointMode || customRecognitionPointMode;
         case ACEditorRowKindSwipeStart:
         case ACEditorRowKindSwipeEnd:
             return mode == AnClickActionModeSwipe;
+        case ACEditorRowKindRecognitionClickTargetMode:
+            return recognitionPointMode;
         case ACEditorRowKindPointPick:
-            return pointMode || mode == AnClickActionModeSwipe || mode == AnClickActionModeColor;
+            return basicPointMode || mode == AnClickActionModeSwipe || customRecognitionPointMode;
+        case ACEditorRowKindColorPick:
+            return mode == AnClickActionModeColor;
         case ACEditorRowKindJitter:
             return mode == AnClickActionModeTap ||
                 mode == AnClickActionModeDoubleTap ||
@@ -687,12 +1004,17 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindDelay:
             return mode == AnClickActionModeDelay;
         case ACEditorRowKindInterval:
-            return mode == AnClickActionModeTap || mode == AnClickActionModeTwoFingerTap;
+            return (mode == AnClickActionModeTap || mode == AnClickActionModeTwoFingerTap) &&
+                self.model.repeatCount > 1;
         case ACEditorRowKindRecognitionRetryMode:
         case ACEditorRowKindRecognitionRetryInterval:
         case ACEditorRowKindSuccessActionMode:
         case ACEditorRowKindFailureActionMode:
             return recognitionMode;
+        case ACEditorRowKindSuccessActionConfig:
+            return recognitionMode && [self branchActionModeNeedsFullConfig:self.model.successActionMode success:YES];
+        case ACEditorRowKindFailureActionConfig:
+            return recognitionMode && [self branchActionModeNeedsFullConfig:self.model.failureActionMode success:NO];
         case ACEditorRowKindSuccessBranch:
             return recognitionMode && self.model.successActionMode == AnClickActionModeJump;
         case ACEditorRowKindFailureBranch:
@@ -709,10 +1031,16 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         self.model.actionMode == AnClickActionModeOCR ||
         self.model.actionMode == AnClickActionModeColor) {
         NSMutableArray<NSNumber *> *rows = [NSMutableArray arrayWithObject:@(ACEditorRowKindSuccessActionMode)];
+        if ([self shouldShowRowForKind:ACEditorRowKindSuccessActionConfig]) {
+            [rows addObject:@(ACEditorRowKindSuccessActionConfig)];
+        }
         if ([self shouldShowRowForKind:ACEditorRowKindSuccessBranch]) {
             [rows addObject:@(ACEditorRowKindSuccessBranch)];
         }
         [rows addObject:@(ACEditorRowKindFailureActionMode)];
+        if ([self shouldShowRowForKind:ACEditorRowKindFailureActionConfig]) {
+            [rows addObject:@(ACEditorRowKindFailureActionConfig)];
+        }
         if ([self shouldShowRowForKind:ACEditorRowKindFailureBranch]) {
             [rows addObject:@(ACEditorRowKindFailureBranch)];
         }
@@ -795,13 +1123,20 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         self.model.failureActionMode = AnClickActionModeNone;
         self.model.recognitionRetryUntilFound = NO;
     } else {
-        if (self.model.successActionMode != AnClickActionModeJump) {
+        if (![self branchActionMode:self.model.successActionMode isAllowedForSuccess:YES]) {
             self.model.successActionMode = AnClickActionModeTap;
+            self.model.successActionConfig = @{};
+            self.model.successRecognitionActionConfig = @{};
+        }
+        if (self.model.successActionMode != AnClickActionModeJump) {
             self.model.successBranchIndex = -1;
         }
-        if (self.model.failureActionMode != AnClickActionModeJump &&
-            self.model.failureActionMode != AnClickActionModeTap) {
+        if (![self branchActionMode:self.model.failureActionMode isAllowedForSuccess:NO]) {
             self.model.failureActionMode = AnClickActionModeNone;
+            self.model.failureActionConfig = @{};
+            self.model.failureRecognitionActionConfig = @{};
+        }
+        if (self.model.failureActionMode != AnClickActionModeJump) {
             self.model.failureBranchIndex = -1;
         }
     }
@@ -816,13 +1151,36 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) return;
             if (strongSelf.model.actionMode == mode) return;
+            BOOL recognitionMode = mode == AnClickActionModeImage ||
+                mode == AnClickActionModeOCR ||
+                mode == AnClickActionModeColor;
             strongSelf.model.actionMode = mode;
+            if (recognitionMode) {
+                strongSelf.model.useMatchPoint = YES;
+            }
             [strongSelf normalizeModelForCurrentActionMode];
             [strongSelf notifyModelChanged];
             [strongSelf.delegate taskEditorView:strongSelf didSelectActionMode:mode];
             [strongSelf reloadForm];
         };
         [cell configureWithSelectedMode:self.model.actionMode];
+        return cell;
+    }
+    if (row == ACEditorRowKindSuccessActionMode || row == ACEditorRowKindFailureActionMode) {
+        ACEditorActionChoiceCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ActionChoice" forIndexPath:indexPath];
+        BOOL success = row == ACEditorRowKindSuccessActionMode;
+        AnClickActionMode selectedMode = success ? self.model.successActionMode : self.model.failureActionMode;
+        __weak typeof(self) weakSelf = self;
+        cell.selectionHandler = ^(AnClickActionMode mode) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            [strongSelf setBranchActionMode:mode success:success];
+        };
+        [cell configureWithTitle:success ? @"成功后动作" : @"失败后动作"
+                            icon:success ? @"✓" : @"✕"
+                           items:[self branchActionItemsForSuccess:success]
+                    selectedMode:selectedMode];
+        cell.iconLabel.textColor = success ? UIColor.systemGreenColor : UIColor.systemRedColor;
         return cell;
     }
     if (row == ACEditorRowKindThreshold || row == ACEditorRowKindOCRSimilarity) {
@@ -852,8 +1210,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         return cell;
     }
     if (row == ACEditorRowKindPointPick ||
+        row == ACEditorRowKindColorPick ||
         row == ACEditorRowKindTemplate ||
         row == ACEditorRowKindMacroRecord ||
+        row == ACEditorRowKindSuccessActionConfig ||
+        row == ACEditorRowKindFailureActionConfig ||
         row == ACEditorRowKindSingleStep ||
         row == ACEditorRowKindDelete) {
         ACEditorButtonCell *cell = [tableView dequeueReusableCellWithIdentifier:@"Button" forIndexPath:indexPath];
@@ -863,17 +1224,29 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         NSString *title = @"";
         SEL action = @selector(handleButtonRow:);
         if (row == ACEditorRowKindPointPick) {
-            if (self.model.actionMode == AnClickActionModeColor) {
-                title = @"⌖ 在屏幕上拾取颜色及坐标";
-            } else if (self.model.actionMode == AnClickActionModeTwoFingerTap) {
+            if (self.model.actionMode == AnClickActionModeTwoFingerTap) {
                 title = @"⌖ 在屏幕上添加多指触点";
+            } else if (self.model.actionMode == AnClickActionModeImage ||
+                       self.model.actionMode == AnClickActionModeOCR ||
+                       self.model.actionMode == AnClickActionModeColor) {
+                title = @"⌖ 设置自定义点击坐标";
             } else {
                 title = @"⌖ 在屏幕上拾取坐标";
             }
+        } else if (row == ACEditorRowKindColorPick) {
+            title = @"⌖ 在屏幕上拾取颜色及坐标";
         } else if (row == ACEditorRowKindTemplate) {
             title = self.model.templatePath.length > 0 ? @"🖼 重新截图选择识别图像" : @"🖼 截图选择识别图像";
         } else if (row == ACEditorRowKindMacroRecord) {
             title = self.model.events.count > 0 ? @"● 重新录制动作" : @"● 开始录制动作";
+        } else if (row == ACEditorRowKindSuccessActionConfig || row == ACEditorRowKindFailureActionConfig) {
+            BOOL success = row == ACEditorRowKindSuccessActionConfig;
+            AnClickActionMode mode = success ? self.model.successActionMode : self.model.failureActionMode;
+            NSString *role = success ? @"成功后" : @"失败后";
+            title = [NSString stringWithFormat:@"%@ 配置%@%@",
+                     [self branchActionConfigExistsForSuccess:success] ? @"编辑" : @"设置",
+                     role,
+                     [self branchActionShortTitleForMode:mode]];
         } else if (row == ACEditorRowKindSingleStep) {
             title = @"运行此单步测试";
         } else {
@@ -898,13 +1271,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 
 - (BOOL)isSegmentedRow:(ACEditorRowKind)row {
     return row == ACEditorRowKindColorMatchMode ||
+        row == ACEditorRowKindRecognitionClickTargetMode ||
         row == ACEditorRowKindOCRMode ||
         row == ACEditorRowKindOCRMatchMode ||
         row == ACEditorRowKindNetworkMethod ||
         row == ACEditorRowKindNetworkRetryMode ||
-        row == ACEditorRowKindRecognitionRetryMode ||
-        row == ACEditorRowKindSuccessActionMode ||
-        row == ACEditorRowKindFailureActionMode;
+        row == ACEditorRowKindRecognitionRetryMode;
 }
 
 - (void)configureSegmentedCell:(ACEditorSegmentedCell *)cell row:(ACEditorRowKind)row {
@@ -919,6 +1291,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             cell.titleLabel.text = @"匹配模式";
             items = @[@"相等", @"不等"];
             selectedIndex = MIN(1, MAX(0, self.model.colorMatchMode));
+            break;
+        case ACEditorRowKindRecognitionClickTargetMode:
+            cell.iconLabel.text = @"⌖";
+            cell.titleLabel.text = @"点击位置";
+            items = @[@"识别中心", @"自定义坐标"];
+            selectedIndex = self.model.useMatchPoint ? 0 : 1;
             break;
         case ACEditorRowKindOCRMode:
             cell.iconLabel.text = @"🧠";
@@ -952,22 +1330,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             items = @[@"按次数", @"直到命中"];
             selectedIndex = self.model.recognitionRetryUntilFound ? 1 : 0;
             break;
-        case ACEditorRowKindSuccessActionMode:
-            cell.iconLabel.text = @"✓";
-            cell.iconLabel.textColor = UIColor.systemGreenColor;
-            cell.titleLabel.text = @"成功后动作";
-            items = @[@"点击", @"跳转"];
-            selectedIndex = self.model.successActionMode == AnClickActionModeJump ? 1 : 0;
-            break;
-        case ACEditorRowKindFailureActionMode:
-            cell.iconLabel.text = @"✕";
-            cell.iconLabel.textColor = UIColor.systemRedColor;
-            cell.titleLabel.text = @"失败后动作";
-            items = @[@"无", @"点击", @"跳转"];
-            selectedIndex = self.model.failureActionMode == AnClickActionModeJump
-                ? 2
-                : (self.model.failureActionMode == AnClickActionModeTap ? 1 : 0);
-            break;
         default:
             break;
     }
@@ -996,11 +1358,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             CGPoint point = self.model.point ? self.model.point.CGPointValue : CGPointZero;
             cell.iconLabel.text = @"⌖";
             if (self.model.actionMode == AnClickActionModeColor) {
-                cell.titleLabel.text = @"目标坐标";
+                cell.titleLabel.text = @"自定义点击坐标";
             } else if (self.model.actionMode == AnClickActionModeTwoFingerTap) {
                 cell.titleLabel.text = @"多指触点";
             } else if (self.model.actionMode == AnClickActionModeImage || self.model.actionMode == AnClickActionModeOCR) {
-                cell.titleLabel.text = @"成功点击坐标";
+                cell.titleLabel.text = @"自定义点击坐标";
             } else {
                 cell.titleLabel.text = @"触点坐标";
             }
@@ -1167,7 +1529,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             break;
         case ACEditorRowKindInterval:
             cell.iconLabel.text = @"⏱";
-            cell.titleLabel.text = @"后置延时";
+            cell.titleLabel.text = @"点击间隔";
             cell.textField.text = [NSString stringWithFormat:@"%.0f", self.model.interval * 1000.0];
             cell.textField.keyboardType = UIKeyboardTypeNumberPad;
             cell.unitLabel.text = @"ms";
@@ -1307,6 +1669,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     if (self.activeTextField == textField) {
         self.activeTextField = nil;
     }
+    if (textField.tag == ACEditorRowKindRepeat) {
+        [self reloadForm];
+    }
 }
 
 - (void)handleKeyboardWillChangeFrame:(NSNotification *)notification {
@@ -1395,6 +1760,10 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindColorMatchMode:
             self.model.colorMatchMode = selected == 1 ? 1 : 0;
             break;
+        case ACEditorRowKindRecognitionClickTargetMode:
+            self.model.useMatchPoint = selected != 1;
+            [self reloadForm];
+            break;
         case ACEditorRowKindOCRMode:
             self.model.ocrMode = AnClickOCRModeAppleVision;
             break;
@@ -1413,22 +1782,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindRecognitionRetryMode:
             self.model.recognitionRetryUntilFound = selected == 1;
             break;
-        case ACEditorRowKindSuccessActionMode:
-            self.model.successActionMode = selected == 1 ? AnClickActionModeJump : AnClickActionModeTap;
-            if (self.model.successActionMode != AnClickActionModeJump) {
-                self.model.successBranchIndex = -1;
-            }
-            [self reloadForm];
-            break;
-        case ACEditorRowKindFailureActionMode:
-            self.model.failureActionMode = selected == 2
-                ? AnClickActionModeJump
-                : (selected == 1 ? AnClickActionModeTap : AnClickActionModeNone);
-            if (self.model.failureActionMode != AnClickActionModeJump) {
-                self.model.failureBranchIndex = -1;
-            }
-            [self reloadForm];
-            break;
         default:
             break;
     }
@@ -1438,17 +1791,22 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 - (void)handleButtonRow:(UIButton *)button {
     switch ((ACEditorRowKind)button.tag) {
         case ACEditorRowKindPointPick:
-            if (self.model.actionMode == AnClickActionModeColor) {
-                [self.delegate taskEditorViewDidRequestColorPick:self];
-            } else {
-                [self.delegate taskEditorViewDidRequestPointPick:self];
-            }
+            [self.delegate taskEditorViewDidRequestPointPick:self];
+            break;
+        case ACEditorRowKindColorPick:
+            [self.delegate taskEditorViewDidRequestColorPick:self];
             break;
         case ACEditorRowKindTemplate:
             [self.delegate taskEditorViewDidRequestTemplateCapture:self];
             break;
         case ACEditorRowKindMacroRecord:
             [self.delegate taskEditorViewDidRequestRecording:self];
+            break;
+        case ACEditorRowKindSuccessActionConfig:
+            [self.delegate taskEditorViewDidRequestSuccessActionConfig:self];
+            break;
+        case ACEditorRowKindFailureActionConfig:
+            [self.delegate taskEditorViewDidRequestFailureActionConfig:self];
             break;
         case ACEditorRowKindSingleStep:
             [self.delegate taskEditorViewDidRequestSingleStepTest:self];
@@ -1543,7 +1901,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     if ([self pointFromText:text point:&point]) {
         self.model.point = [NSValue valueWithCGPoint:point];
         if (self.model.actionMode == AnClickActionModeImage ||
-            self.model.actionMode == AnClickActionModeOCR) {
+            self.model.actionMode == AnClickActionModeOCR ||
+            self.model.actionMode == AnClickActionModeColor) {
             self.model.useMatchPoint = NO;
         }
     }

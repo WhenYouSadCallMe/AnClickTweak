@@ -5073,8 +5073,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         model.colorPointScreenSize = [self currentScreenCoordinateSizeValue];
         if ([anchor[@"x"] respondsToSelector:@selector(doubleValue)] &&
             [anchor[@"y"] respondsToSelector:@selector(doubleValue)]) {
-            model.point = [NSValue valueWithCGPoint:CGPointMake([anchor[@"x"] doubleValue], [anchor[@"y"] doubleValue])];
-            model.pointScreenSize = model.colorPointScreenSize;
+            if (model.useMatchPoint || !model.point) {
+                model.point = [NSValue valueWithCGPoint:CGPointMake([anchor[@"x"] doubleValue], [anchor[@"y"] doubleValue])];
+                model.pointScreenSize = model.colorPointScreenSize;
+            }
         }
     } else {
         model.colorRed = _targetColorRed;
@@ -5207,7 +5209,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         mode == AnClickActionModeDoubleTap ||
         mode == AnClickActionModeLongPress ||
         mode == AnClickActionModeImage ||
-        mode == AnClickActionModeOCR;
+        mode == AnClickActionModeOCR ||
+        mode == AnClickActionModeColor;
 }
 
 - (void)clearTransientEditorStateForActionMode:(AnClickActionMode)mode {
@@ -5364,6 +5367,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeOCR),
         @(AnClickActionModeColor),
         @(AnClickActionModeMacro),
+        @(AnClickActionModeDelay),
         @(AnClickActionModeJump),
     ];
 }
@@ -5393,6 +5397,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeOCR),
         @(AnClickActionModeColor),
         @(AnClickActionModeMacro),
+        @(AnClickActionModeDelay),
         @(AnClickActionModeJump),
     ];
 }
@@ -5412,9 +5417,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeDoubleTap),
         @(AnClickActionModeLongPress),
         @(AnClickActionModeTwoFingerTap),
-        @(AnClickActionModeSwipe),
-        @(AnClickActionModeNetwork),
-        @(AnClickActionModeMacro),
         @(AnClickActionModeJump),
     ];
 }
@@ -5426,9 +5428,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeDoubleTap),
         @(AnClickActionModeLongPress),
         @(AnClickActionModeTwoFingerTap),
-        @(AnClickActionModeSwipe),
-        @(AnClickActionModeNetwork),
-        @(AnClickActionModeMacro),
         @(AnClickActionModeJump),
     ];
 }
@@ -5580,22 +5579,32 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)commonConfigSummary {
-    NSString *intervalText = _actionInterval >= 0.0
-        ? [NSString stringWithFormat:@" 重复间隔%@", [self millisecondsSummaryTextForDuration:_actionInterval]]
-        : @"";
-    NSString *delayText = _actionRandomDelayEnabled && _actionDelay > 0.001
-        ? [NSString stringWithFormat:@"随机等待%@-%@", _actionDelay >= 1.0 ? @"1000毫秒" : @"0毫秒", [self millisecondsSummaryTextForDuration:_actionDelay]]
-        : [NSString stringWithFormat:@"首次等待%@", [self millisecondsSummaryTextForDuration:_actionDelay]];
-    NSString *jitterText = _actionJitterRadius > 0.001
-        ? [NSString stringWithFormat:@" 抖%.0fpx", _actionJitterRadius]
-        : @"";
-    NSString *macroSpeedText = _actionMode == AnClickActionModeMacro && fabs([self normalizedMacroPlaybackSpeed:_macroPlaybackSpeed] - 1.0) > 0.001
-        ? [NSString stringWithFormat:@" 速%@", [self macroPlaybackSpeedSummaryText:_macroPlaybackSpeed]]
-        : @"";
-    NSString *longPressText = _actionMode == AnClickActionModeLongPress
-        ? [NSString stringWithFormat:@" 长%@", [self longPressDurationSummaryText:_longPressDuration]]
-        : @"";
-    return [NSString stringWithFormat:@"%@ 次%ld%@%@%@%@", delayText, (long)_actionRepeatCount, intervalText, jitterText, macroSpeedText, longPressText];
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    if (_actionMode == AnClickActionModeDelay) {
+        [parts addObject:[NSString stringWithFormat:@"等待%@", [self millisecondsSummaryTextForDuration:_actionDelay]]];
+    }
+    if (_actionMode == AnClickActionModeTap || _actionMode == AnClickActionModeTwoFingerTap) {
+        [parts addObject:[NSString stringWithFormat:@"重复%ld次", (long)MAX(1, _actionRepeatCount)]];
+        if (_actionRepeatCount > 1 && _actionInterval > 0.001) {
+            [parts addObject:[NSString stringWithFormat:@"间隔%@", [self millisecondsSummaryTextForDuration:_actionInterval]]];
+        }
+    }
+    if (_actionJitterRadius > 0.001 &&
+        (_actionMode == AnClickActionModeTap ||
+         _actionMode == AnClickActionModeDoubleTap ||
+         _actionMode == AnClickActionModeLongPress ||
+         _actionMode == AnClickActionModeSwipe ||
+         _actionMode == AnClickActionModeTwoFingerTap ||
+         _actionMode == AnClickActionModeMacro)) {
+        [parts addObject:[NSString stringWithFormat:@"抖%.0fpx", _actionJitterRadius]];
+    }
+    if (_actionMode == AnClickActionModeMacro && fabs([self normalizedMacroPlaybackSpeed:_macroPlaybackSpeed] - 1.0) > 0.001) {
+        [parts addObject:[NSString stringWithFormat:@"速%@", [self macroPlaybackSpeedSummaryText:_macroPlaybackSpeed]]];
+    }
+    if (_actionMode == AnClickActionModeLongPress) {
+        [parts addObject:[NSString stringWithFormat:@"长%@", [self longPressDurationSummaryText:_longPressDuration]]];
+    }
+    return parts.count > 0 ? [parts componentsJoinedByString:@" "] : @"已设置";
 }
 
 - (void)syncActionDescriptionFromField {
@@ -7734,9 +7743,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return [self pointCoordinateText:point];
         }
 
-        AnClickActionMode mode = [self modeForTask:task];
         BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
-        if (mode == AnClickActionModeColor || useMatchPoint) {
+        if (useMatchPoint) {
             return @"识别位置";
         }
 
@@ -7822,6 +7830,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             : [NSString stringWithFormat:@"%@%@未设置动作", prefix, [self actionNameForMode:actionMode]];
     }
 
+    NSDictionary *config = [self branchActionConfigForTask:task success:success expectedMode:actionMode];
+    if (config) {
+        return [NSString stringWithFormat:@"%@%@已配置", prefix, [self actionNameForMode:actionMode]];
+    }
+
     NSString *pointTarget = [self recognitionActionPointTargetForTask:task actionMode:actionMode success:success];
     if (pointTarget.length > 0) {
         return [NSString stringWithFormat:@"%@%@ %@", prefix, [self actionNameForMode:actionMode], pointTarget];
@@ -7863,20 +7876,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSString *)recognitionTimingFlowSummaryForTask:(NSDictionary *)task {
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
-    NSTimeInterval delay = [task[@"delay"] respondsToSelector:@selector(doubleValue)] ? MAX(0.0, [task[@"delay"] doubleValue]) : 0.0;
-    if ([task[@"randomDelay"] boolValue] && delay > 0.001) {
-        NSString *minimum = delay >= 1.0 ? @"1000毫秒" : @"0毫秒";
-        [parts addObject:[NSString stringWithFormat:@"随机等待%@-%@", minimum, [self millisecondsSummaryTextForDuration:delay]]];
-    } else {
-        [parts addObject:[NSString stringWithFormat:@"首次%@", [self millisecondsSummaryTextForDuration:delay]]];
-    }
 
     if ([self recognitionRetryUntilFoundForTask:task]) {
         [parts addObject:@"识别到为止"];
         [parts addObject:[NSString stringWithFormat:@"识别间隔%@", [self millisecondsSummaryTextForDuration:[self recognitionRetryIntervalForTask:task]]]];
     } else {
-        [parts addObject:[NSString stringWithFormat:@"尝试%ld次", (long)[self repeatCountForTask:task]]];
-        [parts addObject:[NSString stringWithFormat:@"间隔%@", [self millisecondsSummaryTextForDuration:[self actionIntervalForTask:task]]]];
+        NSInteger repeat = MAX(1, [self repeatCountForTask:task]);
+        [parts addObject:repeat > 1 ? [NSString stringWithFormat:@"尝试%ld次", (long)repeat] : @"识别一次"];
+        NSTimeInterval interval = [self actionIntervalForTask:task];
+        if (repeat > 1 && interval > 0.001) {
+            [parts addObject:[NSString stringWithFormat:@"识别间隔%@", [self millisecondsSummaryTextForDuration:interval]]];
+        }
     }
 
     CGFloat jitterRadius = [self jitterRadiusForTask:task];
@@ -7917,25 +7927,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     NSTimeInterval delay = [task[@"delay"] doubleValue];
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    NSInteger repeat = MAX(1, [task[@"repeat"] integerValue]);
     if (delay > 0.001) {
         if ([task[@"randomDelay"] boolValue]) {
             NSString *minimum = delay >= 1.0 ? @"1000毫秒" : @"0毫秒";
             [parts addObject:[NSString stringWithFormat:@"随机等待%@-%@", minimum, [self millisecondsSummaryTextForDuration:delay]]];
         } else {
-            [parts addObject:[NSString stringWithFormat:@"首次等待%@", [self millisecondsSummaryTextForDuration:delay]]];
+            [parts addObject:[NSString stringWithFormat:@"等待%@", [self millisecondsSummaryTextForDuration:delay]]];
         }
     }
     if ([self recognitionRetryUntilFoundForTask:task]) {
         [parts addObject:@"识别到为止"];
         [parts addObject:[NSString stringWithFormat:@"识别间隔%@", [self millisecondsSummaryTextForDuration:[self recognitionRetryIntervalForTask:task]]]];
     } else {
-        NSInteger repeat = MAX(1, [task[@"repeat"] integerValue]);
         if (repeat > 1 || delay > 0.001) {
             [parts addObject:[NSString stringWithFormat:@"次%ld", (long)repeat]];
         }
     }
-    if ([task[@"interval"] respondsToSelector:@selector(doubleValue)]) {
-        [parts addObject:[NSString stringWithFormat:@"重复间隔%@", [self millisecondsSummaryTextForDuration:[self actionIntervalForTask:task]]]];
+    AnClickActionMode mode = [self modeForTask:task];
+    if ((mode == AnClickActionModeTap || mode == AnClickActionModeTwoFingerTap) &&
+        repeat > 1 &&
+        [task[@"interval"] respondsToSelector:@selector(doubleValue)]) {
+        [parts addObject:[NSString stringWithFormat:@"点击间隔%@", [self millisecondsSummaryTextForDuration:[self actionIntervalForTask:task]]]];
     }
     if ([self modeForTask:task] == AnClickActionModeMacro) {
         double speed = [self macroPlaybackSpeedForTask:task];
@@ -8433,6 +8446,236 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return @"-";
 }
 
+- (UIView *)taskListDetailLineWithTitle:(NSString *)title value:(NSString *)value tint:(UIColor *)tint {
+    UIView *view = [[UIView alloc] initWithFrame:CGRectZero];
+    view.translatesAutoresizingMaskIntoConstraints = NO;
+    view.backgroundColor = [UIColor colorWithRed:0.944 green:0.947 blue:0.965 alpha:1.0];
+    view.layer.cornerRadius = 7.0;
+    view.layer.borderWidth = 1.0;
+    view.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.38].CGColor;
+
+    UILabel *titleLabel = [self taskListLabelWithText:title
+                                                font:[UIFont systemFontOfSize:12 weight:UIFontWeightBold]
+                                               color:[self themeSecondaryTextColor]
+                                               lines:1];
+    UILabel *valueLabel = [self taskListLabelWithText:value.length > 0 ? value : @"-"
+                                                font:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]
+                                               color:tint ?: [self themePrimaryTextColor]
+                                               lines:1];
+    valueLabel.textAlignment = NSTextAlignmentRight;
+    [view addSubview:titleLabel];
+    [view addSubview:valueLabel];
+    [NSLayoutConstraint activateConstraints:@[
+        [view.heightAnchor constraintEqualToConstant:30.0],
+        [titleLabel.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:8.0],
+        [titleLabel.centerYAnchor constraintEqualToAnchor:view.centerYAnchor],
+        [titleLabel.widthAnchor constraintEqualToConstant:78.0],
+        [valueLabel.leadingAnchor constraintEqualToAnchor:titleLabel.trailingAnchor constant:6.0],
+        [valueLabel.trailingAnchor constraintEqualToAnchor:view.trailingAnchor constant:-8.0],
+        [valueLabel.centerYAnchor constraintEqualToAnchor:view.centerYAnchor],
+    ]];
+    return view;
+}
+
+- (void)addTaskListDetailRowWithTitle:(NSString *)title value:(NSString *)value tint:(UIColor *)tint rows:(NSMutableArray<NSDictionary *> *)rows {
+    if (title.length == 0 || !rows) {
+        return;
+    }
+    [rows addObject:@{
+        @"title": title,
+        @"value": value.length > 0 ? value : @"-",
+        @"tint": tint ?: [self themePrimaryTextColor],
+    }];
+}
+
+- (NSString *)taskListPointSummaryForTask:(NSDictionary *)task {
+    CGPoint point = CGPointZero;
+    if ([self primaryPointForTask:task point:&point]) {
+        return [self pointCoordinateText:point];
+    }
+    if ([self modeIsRecognitionTask:[self modeForTask:task]] &&
+        ([task[@"useMatchPoint"] boolValue] || task[@"useMatchPoint"] == nil)) {
+        return @"识别中心";
+    }
+    return @"未取点";
+}
+
+- (NSString *)taskListSwipePointSummaryForTask:(NSDictionary *)task index:(NSUInteger)index {
+    NSArray<NSValue *> *path = [self resolvedPathForTask:task];
+    if (path.count > index && [path[index] isKindOfClass:NSValue.class]) {
+        NSValue *value = path[index];
+        return [self pointCoordinateText:value.CGPointValue];
+    }
+    return @"未取点";
+}
+
+- (NSString *)taskListRecognitionRetrySummaryForTask:(NSDictionary *)task {
+    if ([self recognitionRetryUntilFoundForTask:task]) {
+        return [NSString stringWithFormat:@"直到命中 · 间隔%@", [self millisecondsSummaryTextForDuration:[self recognitionRetryIntervalForTask:task]]];
+    }
+    NSInteger repeat = MAX(1, [self repeatCountForTask:task]);
+    if (repeat <= 1) {
+        return @"识别一次";
+    }
+    NSTimeInterval interval = [self actionIntervalForTask:task];
+    return interval > 0.001
+        ? [NSString stringWithFormat:@"尝试%ld次 · 间隔%@", (long)repeat, [self millisecondsSummaryTextForDuration:interval]]
+        : [NSString stringWithFormat:@"尝试%ld次", (long)repeat];
+}
+
+- (NSString *)taskListDetailTitleForTask:(NSDictionary *)task {
+    switch ([self modeForTask:task]) {
+        case AnClickActionModeTap:
+            return @"点击参数";
+        case AnClickActionModeDoubleTap:
+            return @"双击参数";
+        case AnClickActionModeLongPress:
+            return @"长按参数";
+        case AnClickActionModeSwipe:
+            return @"滑动参数";
+        case AnClickActionModeTwoFingerTap:
+            return @"多指点击参数";
+        case AnClickActionModeImage:
+            return @"识图参数";
+        case AnClickActionModeOCR:
+            return @"识字参数";
+        case AnClickActionModeColor:
+            return @"识色参数";
+        case AnClickActionModeNetwork:
+            return @"网络参数";
+        case AnClickActionModeJump:
+            return @"跳转参数";
+        case AnClickActionModeDelay:
+            return @"延时参数";
+        case AnClickActionModeMacro:
+            return @"录制参数";
+        default:
+            return @"动作参数";
+    }
+}
+
+- (NSArray<NSDictionary *> *)taskListDetailRowsForTask:(NSDictionary *)task tint:(UIColor *)tint {
+    NSMutableArray<NSDictionary *> *rows = [NSMutableArray array];
+    AnClickActionMode mode = [self modeForTask:task];
+    NSInteger repeat = MAX(1, [self repeatCountForTask:task]);
+    CGFloat jitter = [self jitterRadiusForTask:task];
+
+    switch (mode) {
+        case AnClickActionModeTap:
+            [self addTaskListDetailRowWithTitle:@"坐标" value:[self taskListPointSummaryForTask:task] tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"重复" value:[NSString stringWithFormat:@"%ld次", (long)repeat] tint:tint rows:rows];
+            if (repeat > 1) {
+                [self addTaskListDetailRowWithTitle:@"点击间隔" value:[self millisecondsSummaryTextForDuration:[self actionIntervalForTask:task]] tint:tint rows:rows];
+            }
+            if (jitter > 0.001) {
+                [self addTaskListDetailRowWithTitle:@"抖动" value:[NSString stringWithFormat:@"%.0fpx", jitter] tint:tint rows:rows];
+            }
+            break;
+        case AnClickActionModeDoubleTap:
+            [self addTaskListDetailRowWithTitle:@"坐标" value:[self taskListPointSummaryForTask:task] tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"双击间隔" value:[self millisecondsSummaryTextForDuration:[self doubleTapIntervalForTask:task]] tint:tint rows:rows];
+            if (jitter > 0.001) {
+                [self addTaskListDetailRowWithTitle:@"抖动" value:[NSString stringWithFormat:@"%.0fpx", jitter] tint:tint rows:rows];
+            }
+            break;
+        case AnClickActionModeLongPress:
+            [self addTaskListDetailRowWithTitle:@"坐标" value:[self taskListPointSummaryForTask:task] tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"长按时长" value:[self longPressDurationSummaryText:[self longPressDurationForTask:task]] tint:tint rows:rows];
+            if (jitter > 0.001) {
+                [self addTaskListDetailRowWithTitle:@"抖动" value:[NSString stringWithFormat:@"%.0fpx", jitter] tint:tint rows:rows];
+            }
+            break;
+        case AnClickActionModeSwipe:
+            [self addTaskListDetailRowWithTitle:@"起点" value:[self taskListSwipePointSummaryForTask:task index:0] tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"终点" value:[self taskListSwipePointSummaryForTask:task index:1] tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"滑动时长" value:[self millisecondsSummaryTextForDuration:[self swipeDurationForTask:task]] tint:tint rows:rows];
+            if ([task[@"swipeStep"] respondsToSelector:@selector(doubleValue)]) {
+                [self addTaskListDetailRowWithTitle:@"轨迹步长" value:[NSString stringWithFormat:@"%.0fpx", [task[@"swipeStep"] doubleValue]] tint:tint rows:rows];
+            }
+            if (jitter > 0.001) {
+                [self addTaskListDetailRowWithTitle:@"抖动" value:[NSString stringWithFormat:@"%.0fpx", jitter] tint:tint rows:rows];
+            }
+            break;
+        case AnClickActionModeTwoFingerTap: {
+            NSUInteger count = [self storedMultiTapPointsForTask:task].count;
+            [self addTaskListDetailRowWithTitle:@"触点" value:count > 0 ? [NSString stringWithFormat:@"%lu点", (unsigned long)count] : @"未取点" tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"重复" value:[NSString stringWithFormat:@"%ld次", (long)repeat] tint:tint rows:rows];
+            if (repeat > 1) {
+                [self addTaskListDetailRowWithTitle:@"点击间隔" value:[self millisecondsSummaryTextForDuration:[self actionIntervalForTask:task]] tint:tint rows:rows];
+            }
+            if (jitter > 0.001) {
+                [self addTaskListDetailRowWithTitle:@"抖动" value:[NSString stringWithFormat:@"%.0fpx", jitter] tint:tint rows:rows];
+            }
+            break;
+        }
+        case AnClickActionModeImage: {
+            [self addTaskListDetailRowWithTitle:@"识图目标" value:[self recognitionTargetSummaryForTask:task] tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"相似度阈值" value:[self thresholdSummaryForTask:task] tint:tint rows:rows];
+            NSString *clickTarget = [self recognitionActionPointTargetForTask:task actionMode:[self successActionModeForTask:task] success:YES];
+            if (clickTarget.length > 0) {
+                [self addTaskListDetailRowWithTitle:@"成功点击" value:clickTarget tint:tint rows:rows];
+            }
+            [self addTaskListDetailRowWithTitle:@"识别重试" value:[self taskListRecognitionRetrySummaryForTask:task] tint:tint rows:rows];
+            break;
+        }
+        case AnClickActionModeOCR: {
+            [self addTaskListDetailRowWithTitle:@"目标文字" value:[self recognitionTargetSummaryForTask:task] tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"匹配模式" value:[self ocrMatchModeTitleForMode:[self ocrMatchModeForTask:task]] tint:tint rows:rows];
+            double similarity = [task[@"ocrSimilarity"] respondsToSelector:@selector(doubleValue)] ? MIN(1.0, MAX(0.0, [task[@"ocrSimilarity"] doubleValue])) : 0.80;
+            [self addTaskListDetailRowWithTitle:@"识字相似度" value:[NSString stringWithFormat:@"%.0f%%", similarity * 100.0] tint:tint rows:rows];
+            NSString *clickTarget = [self recognitionActionPointTargetForTask:task actionMode:[self successActionModeForTask:task] success:YES];
+            if (clickTarget.length > 0) {
+                [self addTaskListDetailRowWithTitle:@"成功点击" value:clickTarget tint:tint rows:rows];
+            }
+            [self addTaskListDetailRowWithTitle:@"识别重试" value:[self taskListRecognitionRetrySummaryForTask:task] tint:tint rows:rows];
+            break;
+        }
+        case AnClickActionModeColor: {
+            [self addTaskListDetailRowWithTitle:@"目标颜色" value:[self recognitionTargetSummaryForTask:task] tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"颜色容差" value:[self thresholdSummaryForTask:task] tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"匹配模式" value:[task[@"colorMatchMode"] integerValue] == 1 ? @"不等" : @"相等" tint:tint rows:rows];
+            NSString *clickTarget = [self recognitionActionPointTargetForTask:task actionMode:[self successActionModeForTask:task] success:YES];
+            if (clickTarget.length > 0) {
+                [self addTaskListDetailRowWithTitle:@"成功点击" value:clickTarget tint:tint rows:rows];
+            }
+            [self addTaskListDetailRowWithTitle:@"识别重试" value:[self taskListRecognitionRetrySummaryForTask:task] tint:tint rows:rows];
+            break;
+        }
+        case AnClickActionModeNetwork: {
+            NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
+            [self addTaskListDetailRowWithTitle:@"请求地址" value:url.length > 0 ? url : @"未设置" tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"请求方法" value:[self networkMethodForTask:task] tint:tint rows:rows];
+            BOOL oneShot = [self networkTaskIsOneShot:task];
+            [self addTaskListDetailRowWithTitle:@"执行模式" value:oneShot ? @"仅请求一次" : @"判断返回" tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"重试" value:[self networkRetryForeverForTask:task] ? @"一直判断" : [NSString stringWithFormat:@"%ld次", (long)[self networkRetryLimitForTask:task]] tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"超时" value:[NSString stringWithFormat:@"%.0f秒", [self networkTimeoutForTask:task]] tint:tint rows:rows];
+            break;
+        }
+        case AnClickActionModeJump: {
+            id value = task[@"jumpTaskIndex"] ?: task[@"targetTaskIndex"] ?: task[@"jumpTaskId"];
+            NSInteger targetIndex = [value respondsToSelector:@selector(integerValue)] ? [value integerValue] : -1;
+            [self addTaskListDetailRowWithTitle:@"跳转目标" value:targetIndex >= 0 ? [NSString stringWithFormat:@"任务%ld", (long)targetIndex + 1] : @"未设置" tint:tint rows:rows];
+            break;
+        }
+        case AnClickActionModeDelay:
+            [self addTaskListDetailRowWithTitle:@"等待时长" value:[self millisecondsSummaryTextForDuration:[self delayForTask:task]] tint:tint rows:rows];
+            break;
+        case AnClickActionModeMacro: {
+            NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
+            [self addTaskListDetailRowWithTitle:@"录制内容" value:events.count > 0 ? [NSString stringWithFormat:@"%lu步", (unsigned long)events.count] : @"未录制" tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"回放速度" value:[self macroPlaybackSpeedSummaryText:[self macroPlaybackSpeedForTask:task]] tint:tint rows:rows];
+            if (events.count > 0) {
+                [self addTaskListDetailRowWithTitle:@"预计时长" value:[self millisecondsSummaryTextForDuration:[self durationForRecordedEvents:events playbackSpeed:[self macroPlaybackSpeedForTask:task]]] tint:tint rows:rows];
+            }
+            break;
+        }
+        default:
+            [self addTaskListDetailRowWithTitle:@"配置" value:@"未设置" tint:tint rows:rows];
+            break;
+    }
+    return rows;
+}
+
 - (void)refreshTaskList {
     [self refreshCollapsedButtonTitle];
     BOOL hasTasks = _taskItems.count > 0;
@@ -8589,105 +8832,50 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     UIView *lastView = titleLabel;
     if (expanded) {
-        UILabel *detailTitle = [self taskListLabelWithText:@"详细配置"
+        UILabel *detailTitle = [self taskListLabelWithText:[self taskListDetailTitleForTask:task]
                                                      font:[UIFont systemFontOfSize:13 weight:UIFontWeightBold]
                                                     color:[self themePrimaryTextColor]
                                                     lines:1];
         [cardView addSubview:detailTitle];
 
-        UILabel *coordinateCaption = [self taskListCaptionWithText:@"坐标:"];
-        [cardView addSubview:coordinateCaption];
+        UIStackView *detailStack = [[UIStackView alloc] initWithFrame:CGRectZero];
+        detailStack.translatesAutoresizingMaskIntoConstraints = NO;
+        detailStack.axis = UILayoutConstraintAxisVertical;
+        detailStack.spacing = 6.0;
+        [cardView addSubview:detailStack];
 
-        CGPoint point = CGPointZero;
-        BOOL hasPoint = [self primaryPointForTask:task point:&point];
-        UIView *xBox = [self taskListMetricViewWithTitle:@"X" value:hasPoint ? [NSString stringWithFormat:@"X: %.0f", point.x] : @"X: 自动" tint:[self themePrimaryTextColor]];
-        UIView *yBox = [self taskListMetricViewWithTitle:@"Y" value:hasPoint ? [NSString stringWithFormat:@"Y: %.0f", point.y] : @"Y: 自动" tint:[self themePrimaryTextColor]];
-        UIButton *editPointButton = [self taskListSmallButtonWithTitle:@"✎"
-                                                                    tag:AnClickTaskListEditButtonTagBase + indexPath.row
-                                                                 action:@selector(editTaskButtonAtIndex:)
-                                                                   tint:[self themeHighlightColor]];
-        [cardView addSubview:xBox];
-        [cardView addSubview:yBox];
-        [cardView addSubview:editPointButton];
-
-        UILabel *delayCaption = [self taskListCaptionWithText:@"延时"];
-        UILabel *intervalCaption = [self taskListCaptionWithText:@"后置"];
-        UILabel *pressCaption = [self taskListCaptionWithText:@"长按"];
-        [cardView addSubview:delayCaption];
-        [cardView addSubview:intervalCaption];
-        [cardView addSubview:pressCaption];
-
-        UIView *delayBox = [self taskListMetricViewWithTitle:@"前置"
-                                                       value:[self millisecondsSummaryTextForDuration:[self delayForTask:task]]
-                                                        tint:[self themePrimaryTextColor]];
-        UIView *intervalBox = [self taskListMetricViewWithTitle:@"后置"
-                                                          value:[self millisecondsSummaryTextForDuration:[self actionIntervalForTask:task]]
-                                                           tint:[self themePrimaryTextColor]];
-        UIView *pressBox = [self taskListMetricViewWithTitle:@"长按"
-                                                       value:mode == AnClickActionModeLongPress ? [self longPressDurationSummaryText:[self longPressDurationForTask:task]] : @"0ms"
-                                                        tint:[self themePrimaryTextColor]];
-        [cardView addSubview:delayBox];
-        [cardView addSubview:intervalBox];
-        [cardView addSubview:pressBox];
-
-        NSString *targetTitle = @"动作目标";
-        if (mode == AnClickActionModeImage) {
-            targetTitle = @"识图目标";
-        } else if (mode == AnClickActionModeOCR) {
-            targetTitle = @"识字目标";
-        } else if (mode == AnClickActionModeColor) {
-            targetTitle = @"识色目标";
+        for (NSDictionary *row in [self taskListDetailRowsForTask:task tint:accent]) {
+            UIColor *rowTint = [row[@"tint"] isKindOfClass:UIColor.class] ? row[@"tint"] : accent;
+            UIView *line = [self taskListDetailLineWithTitle:row[@"title"] value:row[@"value"] tint:rowTint];
+            [detailStack addArrangedSubview:line];
         }
-        UILabel *targetCaption = [self taskListCaptionWithText:targetTitle];
-        UILabel *thresholdCaption = [self taskListCaptionWithText:@"阈值（相似度）"];
-        [cardView addSubview:targetCaption];
-        [cardView addSubview:thresholdCaption];
-
-        UIView *targetBox = [self taskListMetricViewWithTitle:@"目标"
-                                                        value:[self recognitionTargetSummaryForTask:task]
-                                                         tint:accent];
-        UIView *thresholdBox = [self taskListMetricViewWithTitle:@"阈值"
-                                                           value:[self thresholdSummaryForTask:task]
-                                                            tint:accent];
-        [cardView addSubview:targetBox];
-        [cardView addSubview:thresholdBox];
-
-        UIView *swatchView = [[UIView alloc] initWithFrame:CGRectZero];
-        swatchView.translatesAutoresizingMaskIntoConstraints = NO;
-        swatchView.layer.cornerRadius = 8.0;
-        swatchView.layer.borderWidth = 1.0;
-        swatchView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72].CGColor;
-        NSDictionary *sample = [self primaryColorSampleForTask:task];
-        if (sample) {
-            swatchView.backgroundColor = [UIColor colorWithRed:MIN(255, MAX(0, [sample[@"red"] integerValue])) / 255.0
-                                                         green:MIN(255, MAX(0, [sample[@"green"] integerValue])) / 255.0
-                                                          blue:MIN(255, MAX(0, [sample[@"blue"] integerValue])) / 255.0
-                                                         alpha:1.0];
-        } else {
-            swatchView.backgroundColor = [accent colorWithAlphaComponent:0.18];
-        }
-        [cardView addSubview:swatchView];
-
-        NSString *successText = [self modeIsRecognitionTask:mode] ? [self recognitionSuccessActionSummaryForTask:task] : @"成功后顺序继续";
-        NSString *failureText = [self modeIsRecognitionTask:mode] ? [self recognitionFailureActionSummaryForTask:task] : @"失败分支未启用";
-        UIView *successLine = [self taskListBranchLineWithTitle:@"成功" detail:successText success:YES];
-        UIView *failureLine = [self taskListBranchLineWithTitle:@"失败" detail:failureText success:NO];
-        [cardView addSubview:successLine];
-        [cardView addSubview:failureLine];
 
         UIButton *runButton = [self taskListSmallButtonWithTitle:@"运行此单步测试"
                                                              tag:AnClickTaskListRunButtonTagBase + indexPath.row
                                                           action:@selector(runSingleTaskTestButtonAtIndex:)
                                                             tint:[self themeHighlightColor]];
         UIButton *collapseButton = [self taskListSmallButtonWithTitle:@"折叠 ▲"
-                                                                  tag:AnClickTaskListCollapseButtonTagBase + indexPath.row
+                                                                 tag:AnClickTaskListCollapseButtonTagBase + indexPath.row
                                                                action:@selector(collapseTaskButtonAtIndex:)
                                                                  tint:[self themeHighlightColor]];
         [cardView addSubview:runButton];
         [cardView addSubview:collapseButton];
 
-        UILabel *logicCaption = [self taskListCaptionWithText:@"逻辑跳转"];
-        [cardView addSubview:logicCaption];
+        UILabel *logicCaption = nil;
+        UIView *successLine = nil;
+        UIView *failureLine = nil;
+        if ([self modeIsRecognitionTask:mode]) {
+            logicCaption = [self taskListCaptionWithText:@"逻辑跳转"];
+            [cardView addSubview:logicCaption];
+            successLine = [self taskListBranchLineWithTitle:@"成功"
+                                                     detail:[self recognitionSuccessActionSummaryForTask:task]
+                                                    success:YES];
+            failureLine = [self taskListBranchLineWithTitle:@"失败"
+                                                     detail:[self recognitionFailureActionSummaryForTask:task]
+                                                    success:NO];
+            [cardView addSubview:successLine];
+            [cardView addSubview:failureLine];
+        }
 
         CGFloat side = 14.0;
         CGFloat gap = 8.0;
@@ -8696,70 +8884,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [detailTitle.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
             [detailTitle.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
 
-            [coordinateCaption.topAnchor constraintEqualToAnchor:detailTitle.bottomAnchor constant:11.0],
-            [coordinateCaption.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
-            [coordinateCaption.widthAnchor constraintEqualToConstant:42.0],
-            [coordinateCaption.centerYAnchor constraintEqualToAnchor:xBox.centerYAnchor],
-            [xBox.topAnchor constraintEqualToAnchor:detailTitle.bottomAnchor constant:7.0],
-            [xBox.leadingAnchor constraintEqualToAnchor:coordinateCaption.trailingAnchor constant:4.0],
-            [yBox.topAnchor constraintEqualToAnchor:xBox.topAnchor],
-            [yBox.leadingAnchor constraintEqualToAnchor:xBox.trailingAnchor constant:gap],
-            [yBox.widthAnchor constraintEqualToAnchor:xBox.widthAnchor],
-            [editPointButton.leadingAnchor constraintEqualToAnchor:yBox.trailingAnchor constant:gap],
-            [editPointButton.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
-            [editPointButton.topAnchor constraintEqualToAnchor:xBox.topAnchor],
-            [editPointButton.heightAnchor constraintEqualToAnchor:xBox.heightAnchor],
-            [editPointButton.widthAnchor constraintEqualToConstant:36.0],
+            [detailStack.topAnchor constraintEqualToAnchor:detailTitle.bottomAnchor constant:7.0],
+            [detailStack.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
+            [detailStack.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
 
-            [delayCaption.topAnchor constraintEqualToAnchor:xBox.bottomAnchor constant:7.0],
-            [delayCaption.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
-            [intervalCaption.topAnchor constraintEqualToAnchor:delayCaption.topAnchor],
-            [intervalCaption.leadingAnchor constraintEqualToAnchor:delayCaption.trailingAnchor constant:gap],
-            [intervalCaption.widthAnchor constraintEqualToAnchor:delayCaption.widthAnchor],
-            [pressCaption.topAnchor constraintEqualToAnchor:delayCaption.topAnchor],
-            [pressCaption.leadingAnchor constraintEqualToAnchor:intervalCaption.trailingAnchor constant:gap],
-            [pressCaption.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
-            [pressCaption.widthAnchor constraintEqualToAnchor:delayCaption.widthAnchor],
-
-            [delayBox.topAnchor constraintEqualToAnchor:delayCaption.bottomAnchor constant:2.0],
-            [delayBox.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
-            [intervalBox.topAnchor constraintEqualToAnchor:delayBox.topAnchor],
-            [intervalBox.leadingAnchor constraintEqualToAnchor:delayBox.trailingAnchor constant:gap],
-            [intervalBox.widthAnchor constraintEqualToAnchor:delayBox.widthAnchor],
-            [pressBox.topAnchor constraintEqualToAnchor:delayBox.topAnchor],
-            [pressBox.leadingAnchor constraintEqualToAnchor:intervalBox.trailingAnchor constant:gap],
-            [pressBox.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
-            [pressBox.widthAnchor constraintEqualToAnchor:delayBox.widthAnchor],
-
-            [targetCaption.topAnchor constraintEqualToAnchor:delayBox.bottomAnchor constant:8.0],
-            [targetCaption.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
-            [thresholdCaption.topAnchor constraintEqualToAnchor:targetCaption.topAnchor],
-            [thresholdCaption.leadingAnchor constraintEqualToAnchor:cardView.centerXAnchor constant:6.0],
-            [thresholdCaption.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
-
-            [swatchView.topAnchor constraintEqualToAnchor:targetCaption.bottomAnchor constant:4.0],
-            [swatchView.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
-            [swatchView.widthAnchor constraintEqualToConstant:34.0],
-            [swatchView.heightAnchor constraintEqualToConstant:34.0],
-            [targetBox.topAnchor constraintEqualToAnchor:swatchView.topAnchor],
-            [targetBox.leadingAnchor constraintEqualToAnchor:swatchView.trailingAnchor constant:gap],
-            [thresholdBox.topAnchor constraintEqualToAnchor:swatchView.topAnchor],
-            [thresholdBox.leadingAnchor constraintEqualToAnchor:targetBox.trailingAnchor constant:gap],
-            [thresholdBox.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
-            [thresholdBox.widthAnchor constraintEqualToAnchor:targetBox.widthAnchor multiplier:0.72],
-
-            [logicCaption.topAnchor constraintEqualToAnchor:targetBox.bottomAnchor constant:9.0],
-            [logicCaption.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
-            [logicCaption.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
-
-            [successLine.topAnchor constraintEqualToAnchor:logicCaption.bottomAnchor constant:5.0],
-            [successLine.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
-            [successLine.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
-            [failureLine.topAnchor constraintEqualToAnchor:successLine.bottomAnchor constant:6.0],
-            [failureLine.leadingAnchor constraintEqualToAnchor:successLine.leadingAnchor],
-            [failureLine.trailingAnchor constraintEqualToAnchor:successLine.trailingAnchor],
-
-            [runButton.topAnchor constraintEqualToAnchor:failureLine.bottomAnchor constant:8.0],
             [runButton.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
             [runButton.heightAnchor constraintEqualToConstant:34.0],
             [collapseButton.topAnchor constraintEqualToAnchor:runButton.topAnchor],
@@ -8768,6 +8896,22 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [collapseButton.widthAnchor constraintEqualToAnchor:runButton.widthAnchor multiplier:0.62],
             [collapseButton.heightAnchor constraintEqualToAnchor:runButton.heightAnchor],
         ]];
+        if (logicCaption && successLine && failureLine) {
+            [constraints addObjectsFromArray:@[
+                [logicCaption.topAnchor constraintEqualToAnchor:detailStack.bottomAnchor constant:9.0],
+                [logicCaption.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
+                [logicCaption.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
+                [successLine.topAnchor constraintEqualToAnchor:logicCaption.bottomAnchor constant:5.0],
+                [successLine.leadingAnchor constraintEqualToAnchor:cardView.leadingAnchor constant:side],
+                [successLine.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
+                [failureLine.topAnchor constraintEqualToAnchor:successLine.bottomAnchor constant:6.0],
+                [failureLine.leadingAnchor constraintEqualToAnchor:successLine.leadingAnchor],
+                [failureLine.trailingAnchor constraintEqualToAnchor:successLine.trailingAnchor],
+                [runButton.topAnchor constraintEqualToAnchor:failureLine.bottomAnchor constant:8.0],
+            ]];
+        } else {
+            [constraints addObject:[runButton.topAnchor constraintEqualToAnchor:detailStack.bottomAnchor constant:9.0]];
+        }
         lastView = runButton;
     }
 
@@ -9209,6 +9353,44 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self runSingleTaskTestButtonAtIndex:sender];
 }
 
+- (void)beginEditingBranchActionConfigFromEditorView:(AnClickTaskEditorView *)editorView success:(BOOL)success {
+    AnClickTaskModel *ownerModel = [editorView.model copy];
+    _editingTaskModel = ownerModel;
+    [self stageTaskEditorModelForRuntime:ownerModel];
+    if (![self currentActionIsRecognitionMode]) {
+        [self showToast:@"识别任务才有成功/失败动作"];
+        return;
+    }
+
+    AnClickActionMode mode = success
+        ? [self normalizedImageActionMode:_imageActionMode]
+        : [self normalizedFailureActionMode:_failureActionMode];
+    if (mode == AnClickActionModeNone || mode == AnClickActionModeJump) {
+        [self showToast:success ? @"成功后动作无需配置" : @"失败后动作无需配置"];
+        return;
+    }
+
+    if (_selectedTaskIndex < 0 || _selectedTaskIndex >= (NSInteger)_taskItems.count) {
+        [_taskItems addObject:[ownerModel copy]];
+        _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
+    } else {
+        AnClickTaskModel *existing = [self taskModelAtIndex:(NSUInteger)_selectedTaskIndex];
+        ownerModel.expanded = existing.expanded;
+        _taskItems[(NSUInteger)_selectedTaskIndex] = [ownerModel copy];
+    }
+    [self persistCurrentTaskList];
+    [self refreshTaskList];
+    [self beginEditingRecognitionActionConfigForSuccess:success mode:mode];
+}
+
+- (void)taskEditorViewDidRequestSuccessActionConfig:(AnClickTaskEditorView *)editorView {
+    [self beginEditingBranchActionConfigFromEditorView:editorView success:YES];
+}
+
+- (void)taskEditorViewDidRequestFailureActionConfig:(AnClickTaskEditorView *)editorView {
+    [self beginEditingBranchActionConfigFromEditorView:editorView success:NO];
+}
+
 - (void)taskEditorView:(__unused AnClickTaskEditorView *)editorView didSelectActionMode:(AnClickActionMode)mode {
     [self selectActionModeValue:mode];
 }
@@ -9315,10 +9497,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return [self networkTimeoutForTask:task] + 0.25;
     }
     if ([self modeIsRecognitionTask:actionMode]) {
-        NSDictionary *config = [self branchActionConfigForTask:task success:success expectedMode:actionMode];
-        if (config && depth < 4) {
-            return [self estimatedTaskDurationForTask:config depth:depth + 1];
-        }
+        return actionMode == AnClickActionModeOCR ? 0.95 : 0.75;
     }
     return [self durationForTaskMode:actionMode];
 }
@@ -9818,7 +9997,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (BOOL)recognitionActionModeNeedsPoint:(AnClickActionMode)mode {
     return mode == AnClickActionModeTap ||
         mode == AnClickActionModeDoubleTap ||
-        mode == AnClickActionModeLongPress;
+        mode == AnClickActionModeLongPress ||
+        mode == AnClickActionModeTwoFingerTap;
+}
+
+- (BOOL)recognitionBranchActionModeCanUsePointFallback:(AnClickActionMode)mode {
+    return [self recognitionActionModeNeedsPoint:mode];
+}
+
+- (BOOL)recognitionBranchActionModeRequiresConfig:(AnClickActionMode)mode {
+    if (mode == AnClickActionModeNone || mode == AnClickActionModeJump) {
+        return NO;
+    }
+    return ![self recognitionBranchActionModeCanUsePointFallback:mode];
 }
 
 - (NSString *)recognitionActionDisplayNameForMode:(AnClickActionMode)mode networkName:(NSString *)networkName {
@@ -10019,28 +10210,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (BOOL)validateSuccessRecognitionActionTaskForTask:(NSDictionary *)task {
     AnClickActionMode successMode = [self successActionModeForTask:task];
-    if (![self modeIsRecognitionTask:successMode]) {
-        return YES;
+    NSDictionary *config = [self branchActionConfigForTask:task success:YES expectedMode:successMode];
+    if (config) {
+        return [self taskModelIsComplete:[[AnClickTaskModel alloc] initWithDictionary:config]];
     }
-    NSDictionary *config = [self recognitionActionConfigForTask:task success:YES expectedMode:successMode];
-    if (!config) {
+    if ([self recognitionBranchActionModeRequiresConfig:successMode]) {
         _statusLabel.text = [NSString stringWithFormat:@"成功后%@动作未设置", [self actionNameForMode:successMode]];
         return NO;
     }
-    return [self taskModelIsComplete:[[AnClickTaskModel alloc] initWithDictionary:config]];
+    return YES;
 }
 
 - (BOOL)validateFailureRecognitionActionTaskForTask:(NSDictionary *)task {
     AnClickActionMode failureMode = [self failureActionModeForTask:task];
-    if (![self modeIsRecognitionTask:failureMode]) {
-        return YES;
+    NSDictionary *config = [self branchActionConfigForTask:task success:NO expectedMode:failureMode];
+    if (config) {
+        return [self taskModelIsComplete:[[AnClickTaskModel alloc] initWithDictionary:config]];
     }
-    NSDictionary *config = [self recognitionActionConfigForTask:task success:NO expectedMode:failureMode];
-    if (!config) {
+    if ([self recognitionBranchActionModeRequiresConfig:failureMode]) {
         _statusLabel.text = [NSString stringWithFormat:@"失败后%@动作未设置", [self actionNameForMode:failureMode]];
         return NO;
     }
-    return [self taskModelIsComplete:[[AnClickTaskModel alloc] initWithDictionary:config]];
+    return YES;
 }
 
 - (BOOL)validateRecognitionJumpActionForTask:(NSDictionary *)task {
@@ -10094,7 +10285,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
         return YES;
     }
-    if (requireComplete && [self modeIsRecognitionTask:successMode]) {
+    if (requireComplete && [self recognitionBranchActionModeRequiresConfig:successMode]) {
         _statusLabel.text = [NSString stringWithFormat:@"先设置成功后%@配置", [self actionNameForMode:successMode]];
         return NO;
     }
@@ -10135,7 +10326,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
         return YES;
     }
-    if (requireComplete && [self modeIsRecognitionTask:failureMode]) {
+    if (requireComplete && [self recognitionBranchActionModeRequiresConfig:failureMode]) {
         _statusLabel.text = [NSString stringWithFormat:@"先设置失败后%@配置", [self actionNameForMode:failureMode]];
         return NO;
     }
@@ -10861,6 +11052,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSTimeInterval)postRecognitionSuccessDelayForTask:(NSDictionary *)task {
     AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+    if ([self branchActionConfigForTask:task success:YES expectedMode:actionMode]) {
+        return 0.0;
+    }
     NSTimeInterval interval = [self actionIntervalForTask:task];
     if (actionMode == AnClickActionModeNetwork ||
         actionMode == AnClickActionModeJump ||
@@ -10931,10 +11125,26 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    _statusLabel.text = [NSString stringWithFormat:@"识别%@后执行%@完整动作",
+    _statusLabel.text = [NSString stringWithFormat:@"识别%@后执行%@%@",
                          success ? @"成功" : @"失败",
-                         [self actionNameForMode:actionMode]];
+                         [self actionNameForMode:actionMode],
+                         [self modeIsRecognitionTask:actionMode] ? @"一次判断" : @"完整动作"];
     [self showToast:_statusLabel.text];
+    if ([self modeIsRecognitionTask:actionMode]) {
+        NSMutableDictionary *singleCheckConfig = [config mutableCopy];
+        singleCheckConfig[@"repeat"] = @1;
+        singleCheckConfig[@"interval"] = @0.0;
+        singleCheckConfig[@"recognitionRetryUntilFound"] = @NO;
+        [self performRecognitionNetworkTask:singleCheckConfig
+                                   inWindow:hostWindow
+                                 generation:runGeneration
+                                 completion:^(__unused BOOL matched) {
+            if (completion) {
+                completion([self actionIntervalForTask:task]);
+            }
+        }];
+        return;
+    }
     NSTimeInterval duration = [self performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:config]
                                             inWindow:hostWindow
                                        runGeneration:runGeneration];
@@ -11774,6 +11984,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL invertColorMatch = [task[@"colorMatchMode"] respondsToSelector:@selector(integerValue)] &&
         [task[@"colorMatchMode"] integerValue] == 1;
     AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+    BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
+    NSValue *customPointValue = task[@"point"];
     __block NSString *patternSummary = [self colorPatternSummaryForTask:task];
     BOOL shouldRestorePanel = [self hideOwnUIForRecognitionCaptureWithHostWindow:hostWindow];
     _templateSearchInProgress = YES;
@@ -11927,8 +12139,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 if (![strongSelf successActionPointForTask:task
                                                  matchPoint:pointValue.CGPointValue
                                               hasMatchPoint:YES
-                                           customPointValue:nil
-                                              useMatchPoint:YES
+                                           customPointValue:customPointValue
+                                              useMatchPoint:useMatchPoint
                                                       point:&actionPoint]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     strongSelf->_statusLabel.text = @"识色成功动作未取点";
@@ -12010,7 +12222,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         AnClickActionMode failureMode = [self failureActionModeForTask:task];
         BOOL successUsesFullConfig = [self branchActionConfigForTask:task success:YES expectedMode:actionMode] != nil;
         BOOL failureUsesFullConfig = [self branchActionConfigForTask:task success:NO expectedMode:failureMode] != nil;
-        if (actionMode == AnClickActionModeNetwork || failureMode == AnClickActionModeNetwork) {
+        if ((actionMode == AnClickActionModeNetwork && !successUsesFullConfig) ||
+            (failureMode == AnClickActionModeNetwork && !failureUsesFullConfig)) {
             NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
             if (url.length == 0 || ![self normalizedNetworkURLString:url]) {
                 _statusLabel.text = @"任务识图网络未设置";
@@ -12063,7 +12276,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         AnClickActionMode failureMode = [self failureActionModeForTask:task];
         BOOL successUsesFullConfig = [self branchActionConfigForTask:task success:YES expectedMode:actionMode] != nil;
         BOOL failureUsesFullConfig = [self branchActionConfigForTask:task success:NO expectedMode:failureMode] != nil;
-        if (actionMode == AnClickActionModeNetwork || failureMode == AnClickActionModeNetwork) {
+        if ((actionMode == AnClickActionModeNetwork && !successUsesFullConfig) ||
+            (failureMode == AnClickActionModeNetwork && !failureUsesFullConfig)) {
             NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
             if (url.length == 0 || ![self normalizedNetworkURLString:url]) {
                 _statusLabel.text = @"任务识字网络未设置";
@@ -12107,8 +12321,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
         AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
         AnClickActionMode failureMode = [self failureActionModeForTask:task];
+        BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
+        BOOL successUsesFullConfig = [self branchActionConfigForTask:task success:YES expectedMode:actionMode] != nil;
         BOOL failureUsesFullConfig = [self branchActionConfigForTask:task success:NO expectedMode:failureMode] != nil;
-        if (actionMode == AnClickActionModeNetwork || failureMode == AnClickActionModeNetwork) {
+        if ((actionMode == AnClickActionModeNetwork && !successUsesFullConfig) ||
+            (failureMode == AnClickActionModeNetwork && !failureUsesFullConfig)) {
             NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
             if (url.length == 0 || ![self normalizedNetworkURLString:url]) {
                 _statusLabel.text = @"任务识色网络未设置";
@@ -12125,6 +12342,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 _statusLabel.text = @"任务识色失败动作未取点";
                 return NO;
             }
+        }
+        if (!successUsesFullConfig &&
+            [self recognitionActionModeNeedsPoint:actionMode] &&
+            !useMatchPoint &&
+            !task[@"point"] &&
+            !task[@"successPoint"]) {
+            _statusLabel.text = @"任务识色未取点";
+            return NO;
         }
         if (![self validateSuccessRecognitionActionTaskForTask:task]) {
             return NO;
@@ -13675,10 +13900,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     _pickingSuccessActionPoint = NO;
     _pickingFailureActionPoint = NO;
-    if (_actionMode == AnClickActionModeColor) {
-        [self beginColorPicking];
-        return;
-    }
 
     UIWindow *hostWindow = [self hostWindow];
     if (!hostWindow) {
@@ -13700,6 +13921,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [self refreshTaskEditorAfterExternalResult];
         } else if (_actionMode == AnClickActionModeOCR) {
             _ocrUsesMatchPoint = NO;
+            [self refreshTaskEditorAfterExternalResult];
+        } else if (_actionMode == AnClickActionModeColor) {
+            _imageUsesMatchPoint = NO;
             [self refreshTaskEditorAfterExternalResult];
         }
     }
@@ -13917,7 +14141,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     dot.layer.cornerRadius = dotSize * 0.5;
 
     CGPoint screenPoint = [self pointPickScreenPointFromImagePoint:_pendingPointPickPoint];
-    BOOL pickingCustomClickPoint = _actionMode == AnClickActionModeImage || _actionMode == AnClickActionModeOCR;
+    BOOL pickingCustomClickPoint = _actionMode == AnClickActionModeImage ||
+        _actionMode == AnClickActionModeOCR ||
+        _actionMode == AnClickActionModeColor;
     NSString *stage = nil;
     if (_pickingSuccessActionPoint) {
         stage = @"成功坐标";
@@ -14437,6 +14663,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                         [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:[match[@"score"] doubleValue] inWindow:hostWindow duration:previewDuration];
                     }
                     CGPoint point = pointValue ? pointValue.CGPointValue : CGPointZero;
+                    if (!strongSelf->_imageUsesMatchPoint &&
+                        [strongSelf hasManualPointForMode:AnClickActionModeColor]) {
+                        point = strongSelf->_manualActionPoints[(NSUInteger)AnClickActionModeColor];
+                    }
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览识色 %@ %.0f,%.0f", patternSummary, point.x, point.y];
                     [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
                 });
