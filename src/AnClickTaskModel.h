@@ -12,7 +12,6 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) NSTimeInterval interval;
 @property (nonatomic, assign) BOOL randomDelay;
 @property (nonatomic, assign) CGFloat jitterRadius;
-@property (nonatomic, assign) CGFloat pressure;
 @property (nonatomic, copy) NSString *taskDescription;
 @property (nonatomic, assign) BOOL expanded;
 
@@ -58,16 +57,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property (nonatomic, assign) NSInteger jumpTaskIndex;
 
-@property (nonatomic, copy) NSString *macroPath;
-@property (nonatomic, copy) NSString *macroArguments;
 @property (nonatomic, assign) double macroSpeed;
-
-@property (nonatomic, assign) CGFloat gestureFromDistance;
-@property (nonatomic, assign) CGFloat gestureToDistance;
-@property (nonatomic, assign) CGFloat gestureRadius;
-@property (nonatomic, assign) CGFloat rotationStartAngle;
-@property (nonatomic, assign) CGFloat rotationEndAngle;
-@property (nonatomic, assign) NSTimeInterval gestureDuration;
 
 @property (nonatomic, assign) BOOL recognitionRetryUntilFound;
 @property (nonatomic, assign) NSTimeInterval recognitionRetryInterval;
@@ -95,8 +85,6 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) NSArray *events;
 @property (nonatomic, copy) NSArray *colorPoints;
 @property (nonatomic, copy) NSArray *networkPostPairs;
-
-@property (nonatomic, copy) NSDictionary<NSString *, id> *extraFields;
 
 - (instancetype)initWithDictionary:(NSDictionary *)dictionary;
 - (NSMutableDictionary *)dictionaryRepresentation;

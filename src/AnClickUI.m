@@ -81,6 +81,8 @@ static const NSInteger AnClickTaskListCollapseButtonTagBase = 53000;
 static const NSInteger AnClickHomeRunLabelTag = 54001;
 static const NSInteger AnClickHomeStopLabelTag = 54002;
 static const NSInteger AnClickHomeRecordLabelTag = 54003;
+static const NSInteger AnClickHomeAddLabelTag = 54004;
+static const NSInteger AnClickHomeDeleteLabelTag = 54005;
 static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.10;
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
 static void (*AnClickOriginalSpringBoardHandlePhysicalButtonEvent)(id self, SEL _cmd, id event);
@@ -272,8 +274,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)untrackNetworkTask:(NSURLSessionDataTask *)task;
 - (void)cancelActiveNetworkTasks;
 - (void)stopTaskRunWithStatus:(NSString *)status showToast:(BOOL)showToast;
+- (NSMutableDictionary *)taskDictionaryForModel:(AnClickTaskModel *)model;
+- (BOOL)taskModelIsComplete:(AnClickTaskModel *)model;
 - (NSTimeInterval)estimatedActionDurationForTask:(NSDictionary *)task success:(BOOL)success actionMode:(AnClickActionMode)actionMode depth:(NSUInteger)depth;
+- (NSTimeInterval)estimatedActionDurationForTaskModel:(AnClickTaskModel *)model success:(BOOL)success actionMode:(AnClickActionMode)actionMode depth:(NSUInteger)depth;
 - (NSTimeInterval)estimatedTaskDurationForTask:(NSDictionary *)task depth:(NSUInteger)depth;
+- (NSTimeInterval)estimatedTaskDurationForTaskModel:(AnClickTaskModel *)model depth:(NSUInteger)depth;
+- (void)runNetworkTaskModel:(AnClickTaskModel *)model atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration;
+- (void)runRecognitionTaskModel:(AnClickTaskModel *)model atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration;
 @end
 
 @implementation AnClickUI {
@@ -325,6 +333,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIView *_recognitionBoxView;
     UIView *_operationTraceView;
     UIView *_trajectoryView;
+    UIView *_taskReorderSnapshotView;
     CAShapeLayer *_trajectoryLayer;
     UIView *_functionMenuView;
     UIView *_configPromptView;
@@ -347,7 +356,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSMutableArray<NSValue *> *_recordedSwipePoints;
     NSMutableArray<NSValue *> *_liveSwipePoints;
     NSArray<NSDictionary *> *_recordedMacroEvents;
-    NSMutableArray<NSMutableDictionary *> *_taskItems;
+    NSMutableArray<AnClickTaskModel *> *_taskItems;
     NSInteger _selectedTaskIndex;
     NSInteger _pendingConfigDeleteIndex;
     BOOL _configListDeleting;
@@ -1609,7 +1618,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _addTaskButton.frame = CGRectMake(gap, 8, buttonWidth, 38);
     [_panelView addSubview:_addTaskButton];
 
-    _deleteTaskButton = [self panelButtonWithTitle:@"删除" action:@selector(deleteLastTask)];
+    _deleteTaskButton = [self panelButtonWithTitle:@"删除" action:@selector(deleteSelectedTaskFromHomeButton)];
     _deleteTaskButton.frame = CGRectMake(gap * 2.0 + buttonWidth, 8, buttonWidth, 38);
     [_panelView addSubview:_deleteTaskButton];
 
@@ -1672,6 +1681,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _taskListView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
     }
     [_taskListView registerClass:UITableViewCell.class forCellReuseIdentifier:AnClickTaskListCellIdentifier];
+    UILongPressGestureRecognizer *taskReorderLongPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleTaskListLongPressReorder:)];
+    taskReorderLongPress.minimumPressDuration = 0.28;
+    [_taskListView addGestureRecognizer:taskReorderLongPress];
     [_panelView addSubview:_taskListView];
     [self refreshTaskList];
     [self setTaskEditorVisible:NO];
@@ -3351,6 +3363,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _runTasksButton.hidden = visible;
     _homeCloseButton.hidden = visible;
     _globalSettingsButton.hidden = visible;
+    [_panelView viewWithTag:AnClickHomeAddLabelTag].hidden = visible;
+    [_panelView viewWithTag:AnClickHomeDeleteLabelTag].hidden = visible;
     [_panelView viewWithTag:AnClickHomeRunLabelTag].hidden = visible;
     [_panelView viewWithTag:AnClickHomeStopLabelTag].hidden = visible;
     [_panelView viewWithTag:AnClickHomeRecordLabelTag].hidden = visible;
@@ -3411,7 +3425,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat width = _panelView.bounds.size.width;
     CGFloat height = _panelView.bounds.size.height;
     CGFloat topY = 9.0;
-    CGFloat smallSide = 28.0;
+    CGFloat smallSide = 25.0;
     CGFloat actionSide = 25.0;
     CGFloat actionLabelWidth = 34.0;
     CGFloat actionGap = 8.0;
@@ -3425,13 +3439,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_homeCloseButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
     [_homeCloseButton addTarget:self action:@selector(collapsePanel) forControlEvents:UIControlEventTouchUpInside];
 
-    [self setCenteredIconForButton:_addTaskButton systemName:@"plus" fallbackTitle:@"+" fontSize:23];
-    _addTaskButton.frame = CGRectMake(12.0, topY, smallSide, smallSide);
-    [self styleHomeTopIconButton:_addTaskButton blueCircle:NO];
+    [self setCenteredIconForButton:_addTaskButton systemName:@"plus" fallbackTitle:@"+" fontSize:21];
+    _addTaskButton.frame = CGRectMake(14.0, topY + 1.0, smallSide, smallSide);
+    [self styleHomeTopIconButton:_addTaskButton blueCircle:YES];
+    UILabel *addLabel = [self homeToolbarLabelWithTag:AnClickHomeAddLabelTag text:@"添加"];
+    addLabel.textColor = [[self themeHighlightColor] colorWithAlphaComponent:0.92];
+    addLabel.frame = CGRectMake(9.5, topY + smallSide + 3.0, actionLabelWidth, 13.0);
 
-    [self setCenteredIconForButton:_deleteTaskButton systemName:@"trash" fallbackTitle:@"删" fontSize:20];
-    _deleteTaskButton.frame = CGRectMake(48.0, topY, smallSide, smallSide);
+    [self setCenteredIconForButton:_deleteTaskButton systemName:@"trash" fallbackTitle:@"删" fontSize:15];
+    _deleteTaskButton.frame = CGRectMake(52.0, topY + 1.0, smallSide, smallSide);
     [self styleHomeTopIconButton:_deleteTaskButton blueCircle:NO];
+    _deleteTaskButton.tintColor = [self themeDangerColor];
+    [_deleteTaskButton setTitleColor:[self themeDangerColor] forState:UIControlStateNormal];
+    UILabel *deleteLabel = [self homeToolbarLabelWithTag:AnClickHomeDeleteLabelTag text:@"删除"];
+    deleteLabel.textColor = [[self themeDangerColor] colorWithAlphaComponent:0.92];
+    deleteLabel.frame = CGRectMake(47.5, topY + smallSide + 3.0, actionLabelWidth, 13.0);
 
     [self setCenteredIconForButton:_runTasksButton systemName:@"play.fill" fallbackTitle:@"▶" fontSize:13];
     _runTasksButton.frame = CGRectMake(runX + (actionLabelWidth - actionSide) * 0.5, topY + 1.0, actionSide, actionSide);
@@ -3476,6 +3498,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [_panelView bringSubviewToFront:_runTasksButton];
         [_panelView bringSubviewToFront:_collapseButton];
         [_panelView bringSubviewToFront:_homeCloseButton];
+        [_panelView bringSubviewToFront:addLabel];
+        [_panelView bringSubviewToFront:deleteLabel];
         [_panelView bringSubviewToFront:runLabel];
         [_panelView bringSubviewToFront:stopLabel];
         [_panelView bringSubviewToFront:recordLabel];
@@ -3523,7 +3547,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [[documentsURL path] stringByAppendingPathComponent:@"anclick_current_tasks.archive"];
 }
 
-- (NSMutableArray<NSMutableDictionary *> *)savedCurrentTaskList {
+- (NSMutableArray<AnClickTaskModel *> *)savedCurrentTaskList {
     NSString *path = [self currentTaskListPath];
     NSData *data = [NSData dataWithContentsOfFile:path];
     if (data.length == 0) {
@@ -3605,30 +3629,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     });
 }
 
-- (NSMutableArray<NSMutableDictionary *> *)copyTaskItemsForSaving {
+- (NSMutableArray<NSDictionary *> *)copyTaskItemsForSaving {
     NSMutableArray *tasks = [NSMutableArray arrayWithCapacity:_taskItems.count];
-    for (NSDictionary *task in _taskItems) {
-        AnClickTaskModel *model = [[AnClickTaskModel alloc] initWithDictionary:task];
-        [tasks addObject:[model dictionaryRepresentation]];
+    for (AnClickTaskModel *model in _taskItems) {
+        NSMutableDictionary *task = [self taskDictionaryForModel:model];
+        if (task) {
+            [tasks addObject:task];
+        }
     }
     return tasks;
 }
 
-- (NSMutableArray<NSMutableDictionary *> *)mutableTasksFromSavedTasks:(NSArray *)tasks {
+- (NSMutableArray<AnClickTaskModel *> *)mutableTasksFromSavedTasks:(NSArray *)tasks {
     NSMutableArray *result = [NSMutableArray array];
     for (id task in tasks) {
         AnClickTaskModel *model = nil;
         if ([task isKindOfClass:AnClickTaskModel.class]) {
-            model = task;
+            model = [task copy];
         } else if ([task isKindOfClass:NSDictionary.class]) {
             model = [[AnClickTaskModel alloc] initWithDictionary:task];
         }
         if (model) {
-            NSMutableDictionary *dictionary = [model dictionaryRepresentation];
-            if (!dictionary[AnClickTaskExpandedKey]) {
-                dictionary[AnClickTaskExpandedKey] = @NO;
-            }
-            [result addObject:dictionary];
+            [result addObject:model];
         }
     }
     return result;
@@ -4955,14 +4977,37 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)actionNameForMode:(AnClickActionMode)mode {
-    NSArray<NSString *> *names = @[@"点击", @"双击", @"长按", @"滑动", @"多指", @"缩小", @"放大", @"旋转", @"识图", @"录制", @"识字", @"识色", @"网络", @"跳转", @"延时"];
-    if (mode < AnClickActionModeTap || mode >= AnClickActionModeCount) {
-        return @"动作";
+    switch (mode) {
+        case AnClickActionModeTap:
+            return @"点击";
+        case AnClickActionModeDoubleTap:
+            return @"双击";
+        case AnClickActionModeLongPress:
+            return @"长按";
+        case AnClickActionModeSwipe:
+            return @"滑动";
+        case AnClickActionModeTwoFingerTap:
+            return @"多指";
+        case AnClickActionModeImage:
+            return @"识图";
+        case AnClickActionModeMacro:
+            return @"录制";
+        case AnClickActionModeOCR:
+            return @"识字";
+        case AnClickActionModeColor:
+            return @"识色";
+        case AnClickActionModeNetwork:
+            return @"网络";
+        case AnClickActionModeJump:
+            return @"跳转";
+        case AnClickActionModeDelay:
+            return @"延时";
+        default:
+            return @"动作";
     }
-    return names[(NSUInteger)mode];
 }
 
-- (AnClickTaskModel *)currentTaskEditorModelFromState {
+- (AnClickTaskModel *)taskEditorModelByMergingRuntimeState {
     AnClickTaskModel *model = _editingTaskModel ? [_editingTaskModel copy] : [[AnClickTaskModel alloc] init];
     model.actionMode = _actionMode;
     model.delay = _actionMode == AnClickActionModeDelay ? MAX(0.0, _actionDelay) : 0.0;
@@ -5018,6 +5063,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         model.colorBlue = MIN(255, MAX(0, [anchor[@"blue"] integerValue]));
         model.colorPoints = colorSamples;
         model.colorPointScreenSize = [self currentScreenCoordinateSizeValue];
+        if ([anchor[@"x"] respondsToSelector:@selector(doubleValue)] &&
+            [anchor[@"y"] respondsToSelector:@selector(doubleValue)]) {
+            model.point = [NSValue valueWithCGPoint:CGPointMake([anchor[@"x"] doubleValue], [anchor[@"y"] doubleValue])];
+            model.pointScreenSize = model.colorPointScreenSize;
+        }
     } else {
         model.colorRed = _targetColorRed;
         model.colorGreen = _targetColorGreen;
@@ -5032,11 +5082,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return model;
 }
 
-- (void)applyTaskEditorModelToCurrentState:(AnClickTaskModel *)model {
+- (void)syncTaskEditorModelFromRuntimeState {
+    _editingTaskModel = [self taskEditorModelByMergingRuntimeState];
+}
+
+- (void)refreshTaskEditorAfterExternalResult {
+    [self syncTaskEditorModelFromRuntimeState];
+    [self refreshEditorConfigControls];
+}
+
+- (void)stageTaskEditorModelForRuntime:(AnClickTaskModel *)model {
     if (![model isKindOfClass:AnClickTaskModel.class]) {
         return;
     }
 
+    [self resetEditorActionState];
     _actionMode = model.actionMode;
     _actionDelay = model.actionMode == AnClickActionModeDelay ? MAX(0.0, model.delay) : 0.0;
     _actionRepeatCount = MAX(1, model.repeatCount);
@@ -5124,9 +5184,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         mode == AnClickActionModeDoubleTap ||
         mode == AnClickActionModeLongPress ||
         mode == AnClickActionModeTwoFingerTap ||
-        mode == AnClickActionModePinchIn ||
-        mode == AnClickActionModePinchOut ||
-        mode == AnClickActionModeRotate ||
         mode == AnClickActionModeSwipe ||
         mode == AnClickActionModeImage ||
         mode == AnClickActionModeMacro ||
@@ -5141,9 +5198,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return mode == AnClickActionModeTap ||
         mode == AnClickActionModeDoubleTap ||
         mode == AnClickActionModeLongPress ||
-        mode == AnClickActionModePinchIn ||
-        mode == AnClickActionModePinchOut ||
-        mode == AnClickActionModeRotate;
+        mode == AnClickActionModeImage ||
+        mode == AnClickActionModeOCR;
 }
 
 - (void)clearTransientEditorStateForActionMode:(AnClickActionMode)mode {
@@ -5260,6 +5316,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return @"等于匹配";
     }
     return @"包含匹配";
+}
+
+- (NSString *)normalizedComparableOCRText:(NSString *)text {
+    NSString *trimmed = [self trimmedActionDescription:text] ?: @"";
+    NSString *folded = [trimmed stringByFoldingWithOptions:(NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch | NSWidthInsensitiveSearch)
+                                                    locale:nil];
+    return [folded stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+}
+
+- (BOOL)ocrRecognizedText:(NSString *)recognizedText equalsTargetText:(NSString *)targetText {
+    NSString *recognized = [self normalizedComparableOCRText:recognizedText];
+    NSString *target = [self normalizedComparableOCRText:targetText];
+    return recognized.length > 0 && target.length > 0 && [recognized isEqualToString:target];
 }
 
 - (AnClickActionMode)modeForTask:(NSDictionary *)task {
@@ -5625,6 +5694,26 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return AnClickDefaultLongPressDuration;
 }
 
+- (NSTimeInterval)swipeDurationForTask:(NSDictionary *)task {
+    id value = task[@"swipeDuration"];
+    if ([value respondsToSelector:@selector(doubleValue)]) {
+        return MIN(10.0, MAX(0.05, [value doubleValue]));
+    }
+    return AnClickDefaultSwipeDuration;
+}
+
+- (NSTimeInterval)doubleTapIntervalForTask:(NSDictionary *)task {
+    id value = task[@"doubleTapInterval"];
+    if ([value respondsToSelector:@selector(doubleValue)]) {
+        return MIN(2.0, MAX(0.02, [value doubleValue]));
+    }
+    return AnClickDefaultDoubleTapInterval;
+}
+
+- (NSTimeInterval)doubleTapOperationDurationForTask:(NSDictionary *)task {
+    return AnClickDefaultTapPressDuration + [self doubleTapIntervalForTask:task] + AnClickDefaultTapPressDuration;
+}
+
 - (NSTimeInterval)longPressOperationDurationForDuration:(NSTimeInterval)pressDuration {
     return [self normalizedLongPressDuration:pressDuration] + 0.10;
 }
@@ -5956,7 +6045,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSString *)targetColorSummary {
     if ([self effectiveTargetColorSamples].count == 0) {
-        return @"截图放大取色";
+        return @"截图取色";
     }
     return [self targetColorDetailedDescription];
 }
@@ -5983,7 +6072,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    AnClickTaskModel *model = _editingTaskModel ?: [self currentTaskEditorModelFromState];
+    AnClickTaskModel *model = _editingTaskModel ?: [self taskEditorModelByMergingRuntimeState];
     [_taskEditorView configureWithModel:model
                               taskIndex:_selectedTaskIndex
                             branchTitle:[self branchRecognitionContextTitle]
@@ -6978,8 +7067,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     BOOL saved = [pngData writeToFile:[self writableTemplatePath] atomically:YES];
     [self finishTemplateCapture];
-    [self refreshTemplatePreview];
-    [self refreshEditorConfigControls];
+    [self refreshTaskEditorAfterExternalResult];
     [self autosaveSelectedTaskIfPossible];
     _statusLabel.text = saved ? [NSString stringWithFormat:@"模板已保存 %@", [self commonConfigSummary]] : @"保存失败";
 }
@@ -7301,24 +7389,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [path addLineToPoint:right];
         [path appendPath:[UIBezierPath bezierPathWithOvalInRect:CGRectMake(left.x - 8, left.y - 8, 16, 16)]];
         [path appendPath:[UIBezierPath bezierPathWithOvalInRect:CGRectMake(right.x - 8, right.y - 8, 16, 16)]];
-    } else if (mode == AnClickActionModePinchIn || mode == AnClickActionModePinchOut) {
-        CGFloat fromDistance = (mode == AnClickActionModePinchIn) ? 168.0 : 58.0;
-        CGFloat toDistance = (mode == AnClickActionModePinchIn) ? 58.0 : 168.0;
-        CGPoint startA = CGPointMake(center.x - fromDistance * 0.5, center.y);
-        CGPoint endA = CGPointMake(center.x - toDistance * 0.5, center.y);
-        CGPoint startB = CGPointMake(center.x + fromDistance * 0.5, center.y);
-        CGPoint endB = CGPointMake(center.x + toDistance * 0.5, center.y);
-        [path moveToPoint:startA];
-        [path addLineToPoint:endA];
-        [path moveToPoint:startB];
-        [path addLineToPoint:endB];
-        [path appendPath:[UIBezierPath bezierPathWithOvalInRect:CGRectMake(endA.x - 5, endA.y - 5, 10, 10)]];
-        [path appendPath:[UIBezierPath bezierPathWithOvalInRect:CGRectMake(endB.x - 5, endB.y - 5, 10, 10)]];
-    } else if (mode == AnClickActionModeRotate) {
-        [path addArcWithCenter:center radius:64.0 startAngle:(CGFloat)(-M_PI / 4.0) endAngle:(CGFloat)(M_PI * 0.75) clockwise:YES];
-        CGPoint start = CGPointMake(center.x + cos(-M_PI / 4.0) * 64.0,
-                                    center.y + sin(-M_PI / 4.0) * 64.0);
-        [path appendPath:[UIBezierPath bezierPathWithOvalInRect:CGRectMake(start.x - 5, start.y - 5, 10, 10)]];
     }
 
     layer.path = path.CGPath;
@@ -7335,6 +7405,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (strongSelf->_operationTraceView == overlay) {
             strongSelf->_operationTraceView = nil;
         }
+    });
+}
+
+- (void)performDoubleTapAtPoint:(CGPoint)point interval:(NSTimeInterval)interval {
+    [AnClickFakeTouch fastTapAtPoint:point];
+    NSTimeInterval safeInterval = MIN(2.0, MAX(0.02, interval));
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(safeInterval * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [AnClickFakeTouch fastTapAtPoint:point];
     });
 }
 
@@ -7449,7 +7527,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSTimeInterval operationTraceDuration = (_actionMode == AnClickActionModeLongPress) ? [self longPressOperationDurationForDuration:pressDuration] : 0.6;
     [self showOperationTraceForMode:_actionMode atPoint:point inWindow:hostWindow duration:operationTraceDuration];
     if (_actionMode == AnClickActionModeDoubleTap) {
-        [AnClickFakeTouch fastDoubleTapAtPoint:point];
+        NSTimeInterval interval = _editingTaskModel ? [self doubleTapIntervalForTask:[self taskDictionaryForModel:_editingTaskModel]] : AnClickDefaultDoubleTapInterval;
+        [self performDoubleTapAtPoint:point interval:interval];
         _statusLabel.text = [NSString stringWithFormat:@"双 %.0f,%.0f", point.x, point.y];
     } else if (_actionMode == AnClickActionModeLongPress) {
         _longPressHolding = YES;
@@ -7471,18 +7550,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } else if (_actionMode == AnClickActionModeTwoFingerTap) {
         [AnClickFakeTouch twoFingerTapAtPoint:point distance:72.0];
         _statusLabel.text = [NSString stringWithFormat:@"二指 %.0f,%.0f", point.x, point.y];
-    } else if (_actionMode == AnClickActionModePinchIn) {
-        [AnClickFakeTouch pinchAtPoint:point fromDistance:168.0 toDistance:58.0 duration:0.30];
-        _statusLabel.text = [NSString stringWithFormat:@"缩小 %.0f,%.0f", point.x, point.y];
-    } else if (_actionMode == AnClickActionModePinchOut) {
-        [AnClickFakeTouch pinchAtPoint:point fromDistance:58.0 toDistance:168.0 duration:0.30];
-        _statusLabel.text = [NSString stringWithFormat:@"放大 %.0f,%.0f", point.x, point.y];
-    } else if (_actionMode == AnClickActionModeRotate) {
-        [AnClickFakeTouch rotateAtPoint:point radius:64.0 startAngle:(CGFloat)(-M_PI / 4.0) endAngle:(CGFloat)(M_PI * 0.75) duration:0.36];
-        _statusLabel.text = [NSString stringWithFormat:@"旋转 %.0f,%.0f", point.x, point.y];
-    } else {
+    } else if (_actionMode == AnClickActionModeTap ||
+               _actionMode == AnClickActionModeImage ||
+               _actionMode == AnClickActionModeOCR ||
+               _actionMode == AnClickActionModeColor) {
         [AnClickFakeTouch fastTapAtPoint:point];
         _statusLabel.text = [NSString stringWithFormat:@"点 %.0f,%.0f", point.x, point.y];
+    } else {
+        _statusLabel.text = @"动作不可用";
     }
 }
 
@@ -7565,20 +7640,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (!_taskEditorVisible ||
         _selectedTaskIndex < 0 ||
         _selectedTaskIndex >= (NSInteger)_taskItems.count ||
-        [_taskItems[(NSUInteger)_selectedTaskIndex] count] == 0) {
+        ![self taskModelAtIndex:(NSUInteger)_selectedTaskIndex]) {
         return;
     }
     if (_actionMode == AnClickActionModeMacro && _recordedMacroEvents.count == 0) {
         return;
     }
 
-    AnClickTaskModel *model = _editingTaskModel ?: [self currentTaskEditorModelFromState];
-    NSMutableDictionary *task = [[model dictionaryRepresentation] mutableCopy];
-    if (!task) {
-        return;
-    }
-    _taskItems[(NSUInteger)_selectedTaskIndex] = task;
-    _editingTaskModel = [[AnClickTaskModel alloc] initWithDictionary:task];
+    AnClickTaskModel *model = _editingTaskModel ?: [self taskEditorModelByMergingRuntimeState];
+    _taskItems[(NSUInteger)_selectedTaskIndex] = [model copy];
+    _editingTaskModel = [model copy];
     [self persistCurrentTaskList];
     [self refreshCollapsedButtonTitle];
 }
@@ -8096,20 +8167,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 }
 
-- (BOOL)taskIsExpanded:(NSDictionary *)task {
-    return [task[AnClickTaskExpandedKey] boolValue];
-}
-
-- (NSMutableDictionary *)mutableTaskAtIndex:(NSUInteger)index {
+- (AnClickTaskModel *)taskModelAtIndex:(NSUInteger)index {
     if (index >= _taskItems.count) {
         return nil;
     }
-    NSMutableDictionary *task = _taskItems[index];
-    if (![task isKindOfClass:NSMutableDictionary.class]) {
-        task = [task mutableCopy];
-        _taskItems[index] = task;
-    }
-    return task;
+    AnClickTaskModel *model = _taskItems[index];
+    return [model isKindOfClass:AnClickTaskModel.class] ? model : nil;
+}
+
+- (NSMutableDictionary *)taskDictionaryAtIndex:(NSUInteger)index {
+    AnClickTaskModel *model = [self taskModelAtIndex:index];
+    return model ? [model dictionaryRepresentation] : nil;
 }
 
 - (NSString *)taskListHeaderTitleForTask:(NSDictionary *)task index:(NSUInteger)index {
@@ -8158,11 +8226,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return @"hand.point.up.left.fill";
         case AnClickActionModeSwipe:
             return @"arrow.left.and.right";
-        case AnClickActionModePinchIn:
-        case AnClickActionModePinchOut:
-            return @"arrow.up.left.and.arrow.down.right";
-        case AnClickActionModeRotate:
-            return @"rotate.right";
         case AnClickActionModeImage:
             return @"photo.fill";
         case AnClickActionModeMacro:
@@ -8367,8 +8430,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL hasTasks = _taskItems.count > 0;
     _deleteTaskButton.enabled = hasTasks;
     _deleteTaskButton.alpha = hasTasks ? 1.0 : 0.45;
+    [_panelView viewWithTag:AnClickHomeDeleteLabelTag].alpha = hasTasks ? 1.0 : 0.45;
     _runTasksButton.enabled = hasTasks || _taskRunActive;
     _runTasksButton.alpha = (hasTasks || _taskRunActive) ? 1.0 : 0.45;
+    [_panelView viewWithTag:AnClickHomeRunLabelTag].alpha = (hasTasks || _taskRunActive) ? 1.0 : 0.45;
     if (!_taskListView) {
         return;
     }
@@ -8407,9 +8472,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return cell;
     }
 
-    NSDictionary *task = _taskItems[(NSUInteger)indexPath.row];
+    AnClickTaskModel *model = [self taskModelAtIndex:(NSUInteger)indexPath.row];
+    NSDictionary *task = [self taskDictionaryForModel:model];
     AnClickActionMode mode = [self modeForTask:task];
-    BOOL expanded = [self taskIsExpanded:task];
+    BOOL expanded = model.expanded;
     BOOL selected = indexPath.row == _selectedTaskIndex;
     UIColor *accent = [self accentColorForActionMode:mode];
 
@@ -8713,20 +8779,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    NSMutableDictionary *task = [self mutableTaskAtIndex:(NSUInteger)indexPath.row];
-    BOOL expanded = ![self taskIsExpanded:task];
+    AnClickTaskModel *model = [self taskModelAtIndex:(NSUInteger)indexPath.row];
+    BOOL expanded = !model.expanded;
     NSMutableArray<NSIndexPath *> *reloadIndexPaths = [NSMutableArray arrayWithObject:indexPath];
     for (NSUInteger i = 0; i < _taskItems.count; i++) {
         if ((NSInteger)i == indexPath.row) {
             continue;
         }
-        NSMutableDictionary *otherTask = [self mutableTaskAtIndex:i];
-        if ([self taskIsExpanded:otherTask]) {
-            otherTask[AnClickTaskExpandedKey] = @NO;
+        AnClickTaskModel *otherModel = [self taskModelAtIndex:i];
+        if (otherModel.expanded) {
+            otherModel.expanded = NO;
             [reloadIndexPaths addObject:[NSIndexPath indexPathForRow:(NSInteger)i inSection:0]];
         }
     }
-    task[AnClickTaskExpandedKey] = @(expanded);
+    model.expanded = expanded;
     _selectedTaskIndex = indexPath.row;
     [tableView performBatchUpdates:^{
         [tableView reloadRowsAtIndexPaths:reloadIndexPaths withRowAnimation:UITableViewRowAnimationFade];
@@ -8744,8 +8810,165 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self deleteTaskAtIndex:indexPath.row];
 }
 
+- (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
+    return tableView == _taskListView &&
+        indexPath.row >= 0 &&
+        indexPath.row < (NSInteger)_taskItems.count;
+}
+
 - (NSString *)tableView:(UITableView *)tableView titleForDeleteConfirmationButtonForRowAtIndexPath:(NSIndexPath *)indexPath {
     return @"删除";
+}
+
+- (BOOL)moveTaskFromIndex:(NSInteger)sourceIndex toIndex:(NSInteger)destinationIndex {
+    if (sourceIndex < 0 ||
+        destinationIndex < 0 ||
+        sourceIndex >= (NSInteger)_taskItems.count ||
+        destinationIndex >= (NSInteger)_taskItems.count ||
+        sourceIndex == destinationIndex) {
+        return NO;
+    }
+
+    AnClickTaskModel *model = [_taskItems[(NSUInteger)sourceIndex] copy];
+    [_taskItems removeObjectAtIndex:(NSUInteger)sourceIndex];
+    [_taskItems insertObject:model atIndex:(NSUInteger)destinationIndex];
+
+    if (_selectedTaskIndex == sourceIndex) {
+        _selectedTaskIndex = destinationIndex;
+    } else if (sourceIndex < _selectedTaskIndex && _selectedTaskIndex <= destinationIndex) {
+        _selectedTaskIndex--;
+    } else if (destinationIndex <= _selectedTaskIndex && _selectedTaskIndex < sourceIndex) {
+        _selectedTaskIndex++;
+    }
+    return YES;
+}
+
+- (void)deleteSelectedTaskFromHomeButton {
+    if (_taskItems.count == 0) {
+        _statusLabel.text = @"没有任务可删除";
+        return;
+    }
+
+    NSInteger index = _selectedTaskIndex;
+    if (index < 0 || index >= (NSInteger)_taskItems.count) {
+        for (NSUInteger i = 0; i < _taskItems.count; i++) {
+            if ([self taskModelAtIndex:i].expanded) {
+                index = (NSInteger)i;
+                break;
+            }
+        }
+    }
+    if (index < 0 || index >= (NSInteger)_taskItems.count) {
+        index = (NSInteger)_taskItems.count - 1;
+    }
+    [self deleteTaskAtIndex:index];
+}
+
+- (void)finishTaskListReorderAtLocation:(__unused CGPoint)location cancelled:(BOOL)cancelled {
+    UITableViewCell *cell = nil;
+    if (_draggingTaskIndex >= 0 && _draggingTaskIndex < (NSInteger)_taskItems.count) {
+        cell = [_taskListView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:_draggingTaskIndex inSection:0]];
+    }
+    CGRect targetFrame = cell ? cell.frame : _taskReorderSnapshotView.frame;
+    _taskListView.scrollEnabled = YES;
+    _taskReordering = NO;
+    _draggingTaskIndex = -1;
+
+    [UIView animateWithDuration:0.18 animations:^{
+        self->_taskReorderSnapshotView.transform = CGAffineTransformIdentity;
+        self->_taskReorderSnapshotView.alpha = 0.0;
+        self->_taskReorderSnapshotView.frame = targetFrame;
+    } completion:^(__unused BOOL finished) {
+        cell.hidden = NO;
+        [self->_taskReorderSnapshotView removeFromSuperview];
+        self->_taskReorderSnapshotView = nil;
+        [self->_taskListView reloadData];
+    }];
+
+    [self persistCurrentTaskList];
+    _statusLabel.text = cancelled ? @"排序取消" : @"排序完成";
+}
+
+- (void)handleTaskListLongPressReorder:(UILongPressGestureRecognizer *)recognizer {
+    if (recognizer.view != _taskListView || _taskItems.count < 2 || _taskRunActive) {
+        return;
+    }
+
+    CGPoint location = [recognizer locationInView:_taskListView];
+    if (recognizer.state == UIGestureRecognizerStateBegan) {
+        NSIndexPath *indexPath = [_taskListView indexPathForRowAtPoint:location];
+        if (!indexPath || indexPath.row < 0 || indexPath.row >= (NSInteger)_taskItems.count) {
+            return;
+        }
+
+        UITableViewCell *cell = [_taskListView cellForRowAtIndexPath:indexPath];
+        if (!cell) {
+            return;
+        }
+        _taskReordering = YES;
+        _draggingTaskIndex = indexPath.row;
+        _selectedTaskIndex = indexPath.row;
+        _taskReorderStartLocationY = location.y;
+        _taskReorderStartCenterY = CGRectGetMidY(cell.frame);
+        _taskReorderSnapshotView = [cell snapshotViewAfterScreenUpdates:NO];
+        if (!_taskReorderSnapshotView) {
+            _taskReordering = NO;
+            _draggingTaskIndex = -1;
+            return;
+        }
+        _taskReorderSnapshotView.frame = cell.frame;
+        _taskReorderSnapshotView.layer.shadowColor = UIColor.blackColor.CGColor;
+        _taskReorderSnapshotView.layer.shadowOpacity = 0.22;
+        _taskReorderSnapshotView.layer.shadowRadius = 12.0;
+        _taskReorderSnapshotView.layer.shadowOffset = CGSizeMake(0.0, 6.0);
+        [_taskListView addSubview:_taskReorderSnapshotView];
+        cell.hidden = YES;
+        _taskListView.scrollEnabled = NO;
+        _statusLabel.text = @"上下拖动调整顺序";
+
+        [UIView animateWithDuration:0.14 animations:^{
+            self->_taskReorderSnapshotView.transform = CGAffineTransformMakeScale(1.02, 1.02);
+            self->_taskReorderSnapshotView.alpha = 0.96;
+        }];
+        return;
+    }
+
+    if (!_taskReordering || !_taskReorderSnapshotView) {
+        return;
+    }
+
+    if (recognizer.state == UIGestureRecognizerStateChanged) {
+        CGPoint center = _taskReorderSnapshotView.center;
+        center.y = _taskReorderStartCenterY + (location.y - _taskReorderStartLocationY);
+        _taskReorderSnapshotView.center = center;
+
+        NSIndexPath *targetIndexPath = [_taskListView indexPathForRowAtPoint:location];
+        if (!targetIndexPath ||
+            targetIndexPath.row < 0 ||
+            targetIndexPath.row >= (NSInteger)_taskItems.count ||
+            targetIndexPath.row == _draggingTaskIndex) {
+            return;
+        }
+
+        NSIndexPath *sourceIndexPath = [NSIndexPath indexPathForRow:_draggingTaskIndex inSection:0];
+        if ([self moveTaskFromIndex:_draggingTaskIndex toIndex:targetIndexPath.row]) {
+            _draggingTaskIndex = targetIndexPath.row;
+            [_taskListView moveRowAtIndexPath:sourceIndexPath toIndexPath:targetIndexPath];
+            for (UITableViewCell *visibleCell in _taskListView.visibleCells) {
+                visibleCell.hidden = NO;
+            }
+            UITableViewCell *hiddenCell = [_taskListView cellForRowAtIndexPath:targetIndexPath];
+            hiddenCell.hidden = YES;
+        }
+        return;
+    }
+
+    if (recognizer.state == UIGestureRecognizerStateEnded) {
+        [self finishTaskListReorderAtLocation:location cancelled:NO];
+    } else if (recognizer.state == UIGestureRecognizerStateCancelled ||
+               recognizer.state == UIGestureRecognizerStateFailed) {
+        [self finishTaskListReorderAtLocation:location cancelled:YES];
+    }
 }
 
 - (void)editTaskButtonAtIndex:(UIButton *)sender {
@@ -8758,8 +8981,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (index < 0 || index >= (NSInteger)_taskItems.count) {
         return;
     }
-    NSMutableDictionary *task = [self mutableTaskAtIndex:(NSUInteger)index];
-    task[AnClickTaskExpandedKey] = @NO;
+    [self taskModelAtIndex:(NSUInteger)index].expanded = NO;
     NSIndexPath *indexPath = [NSIndexPath indexPathForRow:index inSection:0];
     [_taskListView performBatchUpdates:^{
         [_taskListView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationFade];
@@ -8793,8 +9015,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    NSDictionary *task = _taskItems[(NSUInteger)index];
-    if (![self taskIsComplete:task]) {
+    AnClickTaskModel *model = [self taskModelAtIndex:(NSUInteger)index];
+    if (![self taskModelIsComplete:model]) {
         [self selectTaskAtIndex:index];
         [self showToast:_statusLabel.text ?: @"先补全任务"];
         return;
@@ -8820,26 +9042,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _editingTaskModel = [[AnClickTaskModel alloc] init];
     _statusLabel.text = @"新增任务 请选择动作";
     [self setTaskEditorVisible:YES];
-}
-
-- (void)deleteLastTask {
-    if (_taskItems.count == 0) {
-        _statusLabel.text = @"没有任务";
-        return;
-    }
-
-    NSInteger removedIndex = (NSInteger)_taskItems.count - 1;
-    BOOL removedSelectedTask = _selectedTaskIndex == removedIndex;
-    [_taskItems removeLastObject];
-    if (removedSelectedTask || _taskItems.count == 0) {
-        _selectedTaskIndex = -1;
-        [self resetCurrentActionConfiguration];
-    } else if (_selectedTaskIndex >= (NSInteger)_taskItems.count) {
-        _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
-    }
-    [self showTaskHome];
-    [self persistCurrentTaskList];
-    _statusLabel.text = _taskItems.count == 0 ? @"暂无任务" : [NSString stringWithFormat:@"已删剩%lu", (unsigned long)_taskItems.count];
 }
 
 - (void)deleteTaskAtIndex:(NSInteger)index {
@@ -8873,8 +9075,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
     _editingTaskModel = [model copy];
-    NSMutableDictionary *task = [[model dictionaryRepresentation] mutableCopy];
-    if (!task || ![self taskIsComplete:task]) {
+    NSMutableDictionary *task = [self taskDictionaryForModel:model];
+    if (![self taskModelIsComplete:model]) {
         [self showToast:_statusLabel.text ?: @"先补全任务"];
         return;
     }
@@ -8889,13 +9091,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return;
         }
 
-        NSMutableDictionary *ownerTask = [_taskItems[(NSUInteger)ownerIndex] mutableCopy];
+        NSMutableDictionary *ownerTask = [self taskDictionaryAtIndex:(NSUInteger)ownerIndex];
         ownerTask[[self branchActionConfigKeyForSuccess:success]] = task;
         if ([self modeIsRecognitionTask:branchMode]) {
             ownerTask[[self recognitionActionConfigKeyForSuccess:success]] = task;
         }
         [ownerTask removeObjectForKey:success ? @"successActionTaskIndex" : @"failureActionTaskIndex"];
-        _taskItems[(NSUInteger)ownerIndex] = ownerTask;
+        _taskItems[(NSUInteger)ownerIndex] = [[AnClickTaskModel alloc] initWithDictionary:ownerTask];
         _editingBranchRecognitionConfig = NO;
         _editingBranchRecognitionSuccess = NO;
         _editingBranchOwnerTaskIndex = -1;
@@ -8912,16 +9114,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     BOOL updatingExistingTask = _selectedTaskIndex >= 0 &&
         _selectedTaskIndex < (NSInteger)_taskItems.count &&
-        [_taskItems[(NSUInteger)_selectedTaskIndex] count] > 0;
-    BOOL wasExpanded = updatingExistingTask && [self taskIsExpanded:_taskItems[(NSUInteger)_selectedTaskIndex]];
-    task[AnClickTaskExpandedKey] = @(wasExpanded);
+        [self taskModelAtIndex:(NSUInteger)_selectedTaskIndex] != nil;
+    model.expanded = updatingExistingTask && [self taskModelAtIndex:(NSUInteger)_selectedTaskIndex].expanded;
     if (_selectedTaskIndex < 0 || _selectedTaskIndex >= (NSInteger)_taskItems.count) {
-        [_taskItems addObject:task];
+        [_taskItems addObject:[model copy]];
         _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
     } else {
-        _taskItems[(NSUInteger)_selectedTaskIndex] = task;
+        _taskItems[(NSUInteger)_selectedTaskIndex] = [model copy];
     }
-    _editingTaskModel = [[AnClickTaskModel alloc] initWithDictionary:task];
+    _editingTaskModel = [model copy];
     [self refreshTaskList];
     [self showTaskHome];
     [self persistCurrentTaskList];
@@ -8956,37 +9157,41 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)taskEditorViewDidRequestPointPick:(AnClickTaskEditorView *)editorView {
     _editingTaskModel = [editorView.model copy];
-    [self applyTaskEditorModelToCurrentState:editorView.model];
+    [self stageTaskEditorModelForRuntime:editorView.model];
     [self beginPointPicking];
 }
 
 - (void)taskEditorViewDidRequestColorPick:(AnClickTaskEditorView *)editorView {
     _editingTaskModel = [editorView.model copy];
-    [self applyTaskEditorModelToCurrentState:editorView.model];
+    [self stageTaskEditorModelForRuntime:editorView.model];
     [self beginColorPicking];
 }
 
 - (void)taskEditorViewDidRequestTemplateCapture:(AnClickTaskEditorView *)editorView {
     _editingTaskModel = [editorView.model copy];
-    [self applyTaskEditorModelToCurrentState:editorView.model];
+    [self stageTaskEditorModelForRuntime:editorView.model];
     [self beginTemplateCapture];
+}
+
+- (void)taskEditorViewDidRequestRecording:(AnClickTaskEditorView *)editorView {
+    _editingTaskModel = [editorView.model copy];
+    [self stageTaskEditorModelForRuntime:editorView.model];
+    [self toggleMacroRecording];
 }
 
 - (void)taskEditorViewDidRequestSingleStepTest:(AnClickTaskEditorView *)editorView {
     _editingTaskModel = [editorView.model copy];
-    [self applyTaskEditorModelToCurrentState:_editingTaskModel];
-    NSMutableDictionary *task = [_editingTaskModel dictionaryRepresentation].mutableCopy;
-    if (!task || ![self taskIsComplete:task]) {
+    [self stageTaskEditorModelForRuntime:_editingTaskModel];
+    if (![self taskModelIsComplete:_editingTaskModel]) {
         [self showToast:_statusLabel.text ?: @"先补全任务"];
         return;
     }
     if (_selectedTaskIndex < 0 || _selectedTaskIndex >= (NSInteger)_taskItems.count) {
-        [_taskItems addObject:task];
+        [_taskItems addObject:[_editingTaskModel copy]];
         _selectedTaskIndex = (NSInteger)_taskItems.count - 1;
     } else {
-        BOOL wasExpanded = [self taskIsExpanded:_taskItems[(NSUInteger)_selectedTaskIndex]];
-        task[AnClickTaskExpandedKey] = @(wasExpanded);
-        _taskItems[(NSUInteger)_selectedTaskIndex] = task;
+        _editingTaskModel.expanded = [self taskModelAtIndex:(NSUInteger)_selectedTaskIndex].expanded;
+        _taskItems[(NSUInteger)_selectedTaskIndex] = [_editingTaskModel copy];
     }
     [self persistCurrentTaskList];
     [self refreshTaskList];
@@ -9002,7 +9207,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)taskEditorView:(__unused AnClickTaskEditorView *)editorView didUpdateModel:(AnClickTaskModel *)model {
     _editingTaskModel = [model copy];
-    [self applyTaskEditorModelToCurrentState:model];
+    [self stageTaskEditorModelForRuntime:model];
 }
 
 - (void)selectTaskAtIndex:(NSInteger)index {
@@ -9012,15 +9217,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     _selectedTaskIndex = index;
     [self dismissConfigKeyboardAndSync];
-    NSDictionary *task = _taskItems[(NSUInteger)index];
-    [self loadTaskConfigurationFromTask:task
-                             statusText:[NSString stringWithFormat:@"修改任务%ld", (long)index + 1]];
+    [self loadTaskConfigurationFromModel:[self taskModelAtIndex:(NSUInteger)index]
+                              statusText:[NSString stringWithFormat:@"修改任务%ld", (long)index + 1]];
 }
 
 - (void)loadTaskConfigurationFromTask:(NSDictionary *)task statusText:(NSString *)statusText {
-    AnClickTaskModel *model = [[AnClickTaskModel alloc] initWithDictionary:task];
+    [self loadTaskConfigurationFromModel:[[AnClickTaskModel alloc] initWithDictionary:task] statusText:statusText];
+}
+
+- (void)loadTaskConfigurationFromModel:(AnClickTaskModel *)model statusText:(NSString *)statusText {
+    if (![model isKindOfClass:AnClickTaskModel.class]) {
+        return;
+    }
     _editingTaskModel = [model copy];
-    [self applyTaskEditorModelToCurrentState:model];
+    [self stageTaskEditorModelForRuntime:model];
     [self refreshModeButtons];
     [self refreshTaskList];
     [self setTaskEditorVisible:YES];
@@ -9061,12 +9271,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     if (mode == AnClickActionModeSwipe) {
         return AnClickDefaultSwipeDuration;
-    }
-    if (mode == AnClickActionModePinchIn || mode == AnClickActionModePinchOut) {
-        return 0.36;
-    }
-    if (mode == AnClickActionModeRotate) {
-        return 0.42;
     }
     if (mode == AnClickActionModeImage) {
         return 1.45;
@@ -9111,6 +9315,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [self durationForTaskMode:actionMode];
 }
 
+- (NSTimeInterval)estimatedActionDurationForTaskModel:(AnClickTaskModel *)model
+                                              success:(BOOL)success
+                                           actionMode:(AnClickActionMode)actionMode
+                                                depth:(NSUInteger)depth {
+    NSMutableDictionary *task = [self taskDictionaryForModel:model];
+    return task ? [self estimatedActionDurationForTask:task success:success actionMode:actionMode depth:depth] : 0.0;
+}
+
 - (NSTimeInterval)estimatedTaskDurationForTask:(NSDictionary *)task depth:(NSUInteger)depth {
     AnClickActionMode mode = [self modeForTask:task];
     NSInteger repeatCount = [self repeatCountForTask:task];
@@ -9132,8 +9344,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } else if (mode == AnClickActionModeMacro) {
         NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
         duration = [self durationForRecordedEvents:events playbackSpeed:[self macroPlaybackSpeedForTask:task]];
+    } else if (mode == AnClickActionModeDoubleTap) {
+        duration = [self doubleTapOperationDurationForTask:task];
     } else if (mode == AnClickActionModeLongPress) {
         duration = [self longPressOperationDurationForDuration:[self longPressDurationForTask:task]];
+    } else if (mode == AnClickActionModeSwipe) {
+        duration = [self swipeDurationForTask:task];
     }
 
     BOOL pointTapRepeatMode = mode == AnClickActionModeTap ||
@@ -9141,7 +9357,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         mode == AnClickActionModeTwoFingerTap;
     if (repeatCount > 1 && pointTapRepeatMode) {
         NSTimeInterval minimumStep = (mode == AnClickActionModeDoubleTap)
-            ? (AnClickDefaultTapPressDuration + AnClickDefaultDoubleTapInterval + AnClickDefaultTapPressDuration)
+            ? [self doubleTapOperationDurationForTask:task]
             : AnClickDefaultTapPressDuration;
         NSTimeInterval step = MAX(minimumStep, configuredInterval);
         return delay + step * repeatCount;
@@ -9149,6 +9365,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     NSTimeInterval interval = duration + configuredInterval;
     return delay + duration + interval * MAX(0, repeatCount - 1);
+}
+
+- (NSTimeInterval)estimatedTaskDurationForTaskModel:(AnClickTaskModel *)model depth:(NSUInteger)depth {
+    NSMutableDictionary *task = [self taskDictionaryForModel:model];
+    return task ? [self estimatedTaskDurationForTask:task depth:depth] : 0.0;
 }
 
 - (NSTimeInterval)delayForTask:(NSDictionary *)task {
@@ -9224,6 +9445,37 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [jitteredPath addObject:[NSValue valueWithCGPoint:point]];
     }
     return jitteredPath;
+}
+
+- (NSArray<NSValue *> *)path:(NSArray<NSValue *> *)path byApplyingSwipeStepForTask:(NSDictionary *)task {
+    if (path.count < 2) {
+        return path ?: @[];
+    }
+    id value = task[@"swipeStep"];
+    CGFloat step = [value respondsToSelector:@selector(doubleValue)] ? (CGFloat)[value doubleValue] : 0.0;
+    if (step < 1.0) {
+        return path;
+    }
+
+    NSMutableArray<NSValue *> *steppedPath = [NSMutableArray arrayWithCapacity:path.count];
+    [steppedPath addObject:path.firstObject];
+    for (NSUInteger index = 1; index < path.count; index++) {
+        CGPoint start = path[index - 1].CGPointValue;
+        CGPoint end = path[index].CGPointValue;
+        CGFloat dx = end.x - start.x;
+        CGFloat dy = end.y - start.y;
+        CGFloat distance = sqrt(dx * dx + dy * dy);
+        NSUInteger segments = MAX((NSUInteger)1, (NSUInteger)ceil(distance / step));
+        for (NSUInteger segment = 1; segment <= segments; segment++) {
+            CGFloat t = (CGFloat)segment / (CGFloat)segments;
+            CGPoint point = CGPointMake(start.x + dx * t, start.y + dy * t);
+            [steppedPath addObject:[NSValue valueWithCGPoint:point]];
+            if (steppedPath.count >= AnClickMacroMaxTrajectoryPoints) {
+                return steppedPath;
+            }
+        }
+    }
+    return steppedPath;
 }
 
 - (NSArray<NSValue *> *)points:(NSArray<NSValue *> *)points byApplyingJitterForTask:(NSDictionary *)task {
@@ -9358,7 +9610,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         ? [self validRecognitionSuccessActionTaskIndexForTask:task]
         : [self validRecognitionFailureActionTaskIndexForTask:task];
     if (legacyIndex >= 0 && legacyIndex < (NSInteger)_taskItems.count) {
-        NSDictionary *legacyTask = _taskItems[(NSUInteger)legacyIndex];
+        NSDictionary *legacyTask = [self taskDictionaryAtIndex:(NSUInteger)legacyIndex];
         if ([self modeForTask:legacyTask] == expectedMode) {
             return legacyTask;
         }
@@ -9370,7 +9622,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_selectedTaskIndex < 0 || _selectedTaskIndex >= (NSInteger)_taskItems.count) {
         return nil;
     }
-    NSDictionary *ownerTask = _taskItems[(NSUInteger)_selectedTaskIndex];
+    NSDictionary *ownerTask = [self taskDictionaryAtIndex:(NSUInteger)_selectedTaskIndex];
     return [self recognitionActionConfigForTask:ownerTask success:success expectedMode:mode];
 }
 
@@ -9378,7 +9630,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_selectedTaskIndex < 0 || _selectedTaskIndex >= (NSInteger)_taskItems.count) {
         return nil;
     }
-    NSDictionary *ownerTask = _taskItems[(NSUInteger)_selectedTaskIndex];
+    NSDictionary *ownerTask = [self taskDictionaryAtIndex:(NSUInteger)_selectedTaskIndex];
     return [self branchActionConfigForTask:ownerTask success:success expectedMode:mode];
 }
 
@@ -9390,7 +9642,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return nil;
     }
 
-    NSMutableDictionary *ownerTask = [_taskItems[(NSUInteger)_selectedTaskIndex] mutableCopy];
+    NSMutableDictionary *ownerTask = [self taskDictionaryAtIndex:(NSUInteger)_selectedTaskIndex];
     if (!ownerTask) {
         ownerTask = [NSMutableDictionary dictionary];
     }
@@ -9407,7 +9659,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         ownerTask[[self recognitionActionConfigKeyForSuccess:success]] = config;
     }
     [ownerTask removeObjectForKey:success ? @"successActionTaskIndex" : @"failureActionTaskIndex"];
-    _taskItems[(NSUInteger)_selectedTaskIndex] = ownerTask;
+    _taskItems[(NSUInteger)_selectedTaskIndex] = [[AnClickTaskModel alloc] initWithDictionary:ownerTask];
     [self persistCurrentTaskList];
     [self refreshCollapsedButtonTitle];
     return config;
@@ -9420,7 +9672,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
     config[@"mode"] = @(mode);
-    NSMutableDictionary *ownerTask = [_taskItems[(NSUInteger)_selectedTaskIndex] mutableCopy];
+    NSMutableDictionary *ownerTask = [self taskDictionaryAtIndex:(NSUInteger)_selectedTaskIndex];
     if (!ownerTask) {
         ownerTask = [NSMutableDictionary dictionary];
     }
@@ -9429,7 +9681,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         ownerTask[[self recognitionActionConfigKeyForSuccess:success]] = [config mutableCopy];
     }
     [ownerTask removeObjectForKey:success ? @"successActionTaskIndex" : @"failureActionTaskIndex"];
-    _taskItems[(NSUInteger)_selectedTaskIndex] = ownerTask;
+    _taskItems[(NSUInteger)_selectedTaskIndex] = [[AnClickTaskModel alloc] initWithDictionary:ownerTask];
     [self persistCurrentTaskList];
     [self refreshCollapsedButtonTitle];
 }
@@ -9443,12 +9695,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    AnClickTaskModel *editorModel = _editingTaskModel ?: [self currentTaskEditorModelFromState];
-    NSMutableDictionary *ownerTask = editorModel ? [[editorModel dictionaryRepresentation] mutableCopy] : nil;
+    AnClickTaskModel *editorModel = _editingTaskModel ?: [self taskEditorModelByMergingRuntimeState];
+    NSMutableDictionary *ownerTask = [self taskDictionaryForModel:editorModel];
     if (ownerTask) {
         NSDictionary *existingConfig = [self currentStoredBranchActionConfigForSuccess:success mode:mode];
         if (!existingConfig && [self modeIsRecognitionTask:mode]) {
-            existingConfig = [self legacyRecognitionActionTaskForTask:_taskItems[(NSUInteger)_selectedTaskIndex]
+                existingConfig = [self legacyRecognitionActionTaskForTask:[self taskDictionaryAtIndex:(NSUInteger)_selectedTaskIndex]
                                                              success:success
                                                         expectedMode:mode];
         }
@@ -9459,12 +9711,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             }
         }
         [ownerTask removeObjectForKey:success ? @"successActionTaskIndex" : @"failureActionTaskIndex"];
-        _taskItems[(NSUInteger)_selectedTaskIndex] = ownerTask;
+        _taskItems[(NSUInteger)_selectedTaskIndex] = [[AnClickTaskModel alloc] initWithDictionary:ownerTask];
         [self persistCurrentTaskList];
     }
 
     NSInteger ownerIndex = _selectedTaskIndex;
-    NSDictionary *storedConfig = [self branchActionConfigForTask:_taskItems[(NSUInteger)ownerIndex]
+    NSDictionary *storedConfig = [self branchActionConfigForTask:[self taskDictionaryAtIndex:(NSUInteger)ownerIndex]
                                                         success:success
                                                    expectedMode:mode];
     NSMutableDictionary *branchTask = storedConfig ? [storedConfig mutableCopy] : [self draftActionTaskForMode:mode];
@@ -9499,7 +9751,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         targetIndex >= (NSInteger)_taskItems.count) {
         return -1;
     }
-    NSDictionary *targetTask = _taskItems[(NSUInteger)targetIndex];
+    NSDictionary *targetTask = [self taskDictionaryAtIndex:(NSUInteger)targetIndex];
     return [self modeForTask:targetTask] == mode ? targetIndex : -1;
 }
 
@@ -9509,7 +9761,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         targetIndex >= (NSInteger)_taskItems.count) {
         return -1;
     }
-    NSDictionary *targetTask = _taskItems[(NSUInteger)targetIndex];
+    NSDictionary *targetTask = [self taskDictionaryAtIndex:(NSUInteger)targetIndex];
     return [self modeForTask:targetTask] == mode ? targetIndex : -1;
 }
 
@@ -9519,18 +9771,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     NSInteger targetIndex = _recognitionSuccessActionTaskIndex;
     if (targetIndex >= 0 && targetIndex < (NSInteger)_taskItems.count) {
-        NSDictionary *targetTask = _taskItems[(NSUInteger)targetIndex];
+        NSDictionary *targetTask = [self taskDictionaryAtIndex:(NSUInteger)targetIndex];
         AnClickActionMode targetMode = [self modeForTask:targetTask];
         if (targetMode == mode) {
             return targetIndex;
         }
         if (targetTask.count == 0 || targetMode == AnClickActionModeNone) {
-            _taskItems[(NSUInteger)targetIndex] = [self draftRecognitionTaskForMode:mode];
+            _taskItems[(NSUInteger)targetIndex] = [[AnClickTaskModel alloc] initWithDictionary:[self draftRecognitionTaskForMode:mode]];
             return targetIndex;
         }
     }
 
-    [_taskItems addObject:[self draftRecognitionTaskForMode:mode]];
+    [_taskItems addObject:[[AnClickTaskModel alloc] initWithDictionary:[self draftRecognitionTaskForMode:mode]]];
     return (NSInteger)_taskItems.count - 1;
 }
 
@@ -9540,18 +9792,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     NSInteger targetIndex = _recognitionFailureActionTaskIndex;
     if (targetIndex >= 0 && targetIndex < (NSInteger)_taskItems.count) {
-        NSDictionary *targetTask = _taskItems[(NSUInteger)targetIndex];
+        NSDictionary *targetTask = [self taskDictionaryAtIndex:(NSUInteger)targetIndex];
         AnClickActionMode targetMode = [self modeForTask:targetTask];
         if (targetMode == mode) {
             return targetIndex;
         }
         if (targetTask.count == 0 || targetMode == AnClickActionModeNone) {
-            _taskItems[(NSUInteger)targetIndex] = [self draftRecognitionTaskForMode:mode];
+            _taskItems[(NSUInteger)targetIndex] = [[AnClickTaskModel alloc] initWithDictionary:[self draftRecognitionTaskForMode:mode]];
             return targetIndex;
         }
     }
 
-    [_taskItems addObject:[self draftRecognitionTaskForMode:mode]];
+    [_taskItems addObject:[[AnClickTaskModel alloc] initWithDictionary:[self draftRecognitionTaskForMode:mode]]];
     return (NSInteger)_taskItems.count - 1;
 }
 
@@ -9662,7 +9914,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (taskIndex < 0 || taskIndex >= (NSInteger)_taskItems.count) {
         return -1;
     }
-    NSDictionary *targetTask = _taskItems[(NSUInteger)taskIndex];
+    NSDictionary *targetTask = [self taskDictionaryAtIndex:(NSUInteger)taskIndex];
     AnClickActionMode successMode = [self successActionModeForTask:task];
     return [self modeForTask:targetTask] == successMode ? taskIndex : -1;
 }
@@ -9672,7 +9924,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (taskIndex < 0 || taskIndex >= (NSInteger)_taskItems.count) {
         return -1;
     }
-    NSDictionary *targetTask = _taskItems[(NSUInteger)taskIndex];
+    NSDictionary *targetTask = [self taskDictionaryAtIndex:(NSUInteger)taskIndex];
     AnClickActionMode failureMode = [self failureActionModeForTask:task];
     return [self modeForTask:targetTask] == failureMode ? taskIndex : -1;
 }
@@ -9767,7 +10019,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _statusLabel.text = [NSString stringWithFormat:@"成功后%@动作未设置", [self actionNameForMode:successMode]];
         return NO;
     }
-    return [self taskIsComplete:config];
+    return [self taskModelIsComplete:[[AnClickTaskModel alloc] initWithDictionary:config]];
 }
 
 - (BOOL)validateFailureRecognitionActionTaskForTask:(NSDictionary *)task {
@@ -9780,7 +10032,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _statusLabel.text = [NSString stringWithFormat:@"失败后%@动作未设置", [self actionNameForMode:failureMode]];
         return NO;
     }
-    return [self taskIsComplete:config];
+    return [self taskModelIsComplete:[[AnClickTaskModel alloc] initWithDictionary:config]];
 }
 
 - (BOOL)validateRecognitionJumpActionForTask:(NSDictionary *)task {
@@ -10513,6 +10765,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     });
 }
 
+- (void)runNetworkTaskModel:(AnClickTaskModel *)model atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
+    NSMutableDictionary *task = [self taskDictionaryForModel:model];
+    if (!task) {
+        [self stopTaskRunWithStatus:@"任务数据无效" showToast:YES];
+        return;
+    }
+    [self runNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration];
+}
+
 - (BOOL)taskUsesRecognitionNetworkAction:(NSDictionary *)task {
     AnClickActionMode mode = [self modeForTask:task];
     if (mode != AnClickActionModeImage && mode != AnClickActionModeOCR && mode != AnClickActionModeColor) {
@@ -10666,7 +10927,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                          success ? @"成功" : @"失败",
                          [self actionNameForMode:actionMode]];
     [self showToast:_statusLabel.text];
-    NSTimeInterval duration = [self performTask:config inWindow:hostWindow runGeneration:runGeneration];
+    NSTimeInterval duration = [self performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:config]
+                                            inWindow:hostWindow
+                                       runGeneration:runGeneration];
     if (completion) {
         completion(duration + [self actionIntervalForTask:task]);
     }
@@ -10882,7 +11145,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                 inWindow:hostWindow
                               generation:runGeneration
                                  attempt:1
-                                   delay:[self delayForTask:task]];
+                                 delay:[self delayForTask:task]];
+}
+
+- (void)runRecognitionTaskModel:(AnClickTaskModel *)model atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
+    NSMutableDictionary *task = [self taskDictionaryForModel:model];
+    if (!task) {
+        [self stopTaskRunWithStatus:@"任务数据无效" showToast:YES];
+        return;
+    }
+    [self runRecognitionTask:task atIndex:index inWindow:hostWindow generation:runGeneration];
 }
 
 - (void)performPointActionMode:(AnClickActionMode)mode atPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow {
@@ -10913,7 +11185,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self showOperationTraceForMode:mode atPoint:point inWindow:hostWindow duration:duration];
     }
     if (mode == AnClickActionModeDoubleTap) {
-        [AnClickFakeTouch fastDoubleTapAtPoint:point];
+        [self performDoubleTapAtPoint:point interval:AnClickDefaultDoubleTapInterval];
     } else if (mode == AnClickActionModeLongPress) {
         _longPressHolding = YES;
         [AnClickFakeTouch longPressAtPoint:point duration:pressDuration];
@@ -10927,13 +11199,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         });
     } else if (mode == AnClickActionModeTwoFingerTap) {
         [AnClickFakeTouch twoFingerTapAtPoint:point distance:72.0];
-    } else if (mode == AnClickActionModePinchIn) {
-        [AnClickFakeTouch pinchAtPoint:point fromDistance:168.0 toDistance:58.0 duration:0.30];
-    } else if (mode == AnClickActionModePinchOut) {
-        [AnClickFakeTouch pinchAtPoint:point fromDistance:58.0 toDistance:168.0 duration:0.30];
-    } else if (mode == AnClickActionModeRotate) {
-        [AnClickFakeTouch rotateAtPoint:point radius:64.0 startAngle:(CGFloat)(-M_PI / 4.0) endAngle:(CGFloat)(M_PI * 0.75) duration:0.36];
-    } else {
+    } else if (mode == AnClickActionModeTap) {
         [AnClickFakeTouch fastTapAtPoint:point];
     }
 }
@@ -10992,7 +11258,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (failureConfig) {
         _statusLabel.text = [NSString stringWithFormat:@"识别失败后%@完整动作", [self actionNameForMode:failureMode]];
         [self showToast:_statusLabel.text];
-        NSTimeInterval duration = [self performTask:failureConfig inWindow:hostWindow runGeneration:runGeneration];
+        NSTimeInterval duration = [self performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:failureConfig]
+                                                inWindow:hostWindow
+                                           runGeneration:runGeneration];
         if (completion) {
             completion(duration + interval);
         }
@@ -11157,7 +11425,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     if (completion) {
                         completion(YES);
                     } else {
-                        [strongSelf performTask:successConfig inWindow:currentHostWindow runGeneration:runGeneration];
+                        [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
+                                            inWindow:currentHostWindow
+                                       runGeneration:runGeneration];
                     }
                     return;
                 }
@@ -11233,7 +11503,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
          runGeneration:(NSUInteger)runGeneration
             completion:(void (^)(BOOL success))completion {
     NSString *targetText = [self trimmedActionDescription:task[@"ocrText"]];
-    BOOL useRegex = [self ocrTaskUsesRegexMatching:task];
+    AnClickOCRMatchMode matchMode = [self ocrMatchModeForTask:task];
+    BOOL useRegex = matchMode == AnClickOCRMatchModeRegex;
     if (targetText.length == 0) {
         _statusLabel.text = useRegex ? @"正则表达式未填写" : @"识字未填写";
         [self showToast:_statusLabel.text];
@@ -11322,10 +11593,48 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 NSValue *rectValue = match[@"rect"];
                 NSNumber *scoreNumber = match[@"score"];
                 NSString *text = [match[@"text"] isKindOfClass:NSString.class] ? match[@"text"] : targetText;
+                NSString *lineText = [match[@"lineText"] isKindOfClass:NSString.class] ? match[@"lineText"] : text;
+                if (matchMode == AnClickOCRMatchModeEqual &&
+                    ![strongSelf ocrRecognizedText:lineText equalsTargetText:targetText]) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    strongSelf->_statusLabel.text = @"识字未找到";
+                    [strongSelf showToast:@"识字未找到"];
+                    if (completion) {
+                        completion(NO);
+                    } else {
+                        [strongSelf performRecognitionBranchActionForTask:task
+                                                                  success:NO
+                                                                 inWindow:currentHostWindow
+                                                               generation:runGeneration
+                                                               completion:nil];
+                    }
+                    return;
+                }
+                double requiredSimilarity = [task[@"ocrSimilarity"] respondsToSelector:@selector(doubleValue)]
+                    ? MIN(1.0, MAX(0.0, [task[@"ocrSimilarity"] doubleValue]))
+                    : 0.0;
+                if (scoreNumber && scoreNumber.doubleValue + 0.0001 < requiredSimilarity) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    strongSelf->_statusLabel.text = @"识字相似度不足";
+                    [strongSelf showToast:@"识字相似度不足"];
+                    if (completion) {
+                        completion(NO);
+                    } else {
+                        [strongSelf performRecognitionBranchActionForTask:task
+                                                                  success:NO
+                                                                 inWindow:currentHostWindow
+                                                               generation:runGeneration
+                                                               completion:nil];
+                    }
+                    return;
+                }
                 NSInteger matchCount = [match[@"matchCount"] respondsToSelector:@selector(integerValue)] ? MAX(1, [match[@"matchCount"] integerValue]) : 1;
+                NSString *matchModeTitle = matchMode == AnClickOCRMatchModeRegex
+                    ? @"正则"
+                    : (matchMode == AnClickOCRMatchModeEqual ? @"等于" : @"包含");
                 NSString *matchSummary = matchCount > 1
-                    ? [NSString stringWithFormat:@"%@ 命中%ld选1", useRegex ? @"正则" : @"包含", (long)matchCount]
-                    : (useRegex ? @"正则" : @"包含");
+                    ? [NSString stringWithFormat:@"%@ 命中%ld选1", matchModeTitle, (long)matchCount]
+                    : matchModeTitle;
                 if (!pointValue || !rectValue) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     strongSelf->_statusLabel.text = @"识字未找到";
@@ -11365,7 +11674,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     if (completion) {
                         completion(YES);
                     } else {
-                        [strongSelf performTask:successConfig inWindow:currentHostWindow runGeneration:runGeneration];
+                        [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
+                                            inWindow:currentHostWindow
+                                       runGeneration:runGeneration];
                     }
                     return;
                 }
@@ -11452,8 +11763,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     double tolerance = [task[@"colorTolerance"] respondsToSelector:@selector(doubleValue)]
         ? MIN(255.0, MAX(0.0, [task[@"colorTolerance"] doubleValue]))
         : 18.0;
+    BOOL invertColorMatch = [task[@"colorMatchMode"] respondsToSelector:@selector(integerValue)] &&
+        [task[@"colorMatchMode"] integerValue] == 1;
     AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
-    NSString *patternSummary = [self colorPatternSummaryForTask:task];
+    __block NSString *patternSummary = [self colorPatternSummaryForTask:task];
     BOOL shouldRestorePanel = [self hideOwnUIForRecognitionCaptureWithHostWindow:hostWindow];
     _templateSearchInProgress = YES;
     NSUInteger geometryGeneration = _screenGeometryGeneration;
@@ -11493,7 +11806,22 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     return;
                 }
-                if (!match) {
+                if (match && invertColorMatch) {
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    strongSelf->_statusLabel.text = @"颜色仍存在";
+                    [strongSelf showToast:@"颜色仍存在"];
+                    if (completion) {
+                        completion(NO);
+                    } else {
+                        [strongSelf performRecognitionBranchActionForTask:task
+                                                                  success:NO
+                                                                 inWindow:currentHostWindow
+                                                               generation:runGeneration
+                                                               completion:nil];
+                    }
+                    return;
+                }
+                if (!match && !invertColorMatch) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     strongSelf->_statusLabel.text = @"颜色未找到";
                     [strongSelf showToast:@"颜色未找到"];
@@ -11511,6 +11839,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 NSValue *pointValue = match[@"point"];
                 NSValue *rectValue = match[@"rect"];
                 NSNumber *scoreNumber = match[@"score"];
+                if (!match && invertColorMatch) {
+                    NSDictionary *anchor = colorPoints.firstObject;
+                    CGSize screenSize = [strongSelf currentScreenCoordinateSize];
+                    CGPoint anchorPoint = CGPointMake(screenSize.width * 0.5, screenSize.height * 0.5);
+                    if ([anchor[@"x"] respondsToSelector:@selector(doubleValue)] &&
+                        [anchor[@"y"] respondsToSelector:@selector(doubleValue)]) {
+                        anchorPoint = CGPointMake([anchor[@"x"] doubleValue], [anchor[@"y"] doubleValue]);
+                    }
+                    pointValue = [NSValue valueWithCGPoint:anchorPoint];
+                    rectValue = [NSValue valueWithCGRect:CGRectMake(anchorPoint.x - 4.0, anchorPoint.y - 4.0, 8.0, 8.0)];
+                    scoreNumber = @1.0;
+                    patternSummary = [patternSummary stringByAppendingString:@" 未出现"];
+                }
                 if (!pointValue || !rectValue) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     strongSelf->_statusLabel.text = @"识色异常";
@@ -11543,7 +11884,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     if (completion) {
                         completion(YES);
                     } else {
-                        [strongSelf performTask:successConfig inWindow:currentHostWindow runGeneration:runGeneration];
+                        [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
+                                            inWindow:currentHostWindow
+                                       runGeneration:runGeneration];
                     }
                     return;
                 }
@@ -11615,6 +11958,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return YES;
     }
     return [self networkPostBodyForTask:task].length > 0;
+}
+
+- (NSMutableDictionary *)taskDictionaryForModel:(AnClickTaskModel *)model {
+    return [model isKindOfClass:AnClickTaskModel.class] ? [model dictionaryRepresentation] : nil;
+}
+
+- (BOOL)taskModelIsComplete:(AnClickTaskModel *)model {
+    NSMutableDictionary *task = [self taskDictionaryForModel:model];
+    return task ? [self taskIsComplete:task] : NO;
 }
 
 - (BOOL)taskIsComplete:(NSDictionary *)task {
@@ -11842,6 +12194,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [self performTask:task inWindow:hostWindow runGeneration:0];
 }
 
+- (NSTimeInterval)performTaskModel:(AnClickTaskModel *)model inWindow:(UIWindow *)hostWindow {
+    return [self performTaskModel:model inWindow:hostWindow runGeneration:0];
+}
+
+- (NSTimeInterval)performTaskModel:(AnClickTaskModel *)model inWindow:(UIWindow *)hostWindow runGeneration:(NSUInteger)runGeneration {
+    NSMutableDictionary *task = [self taskDictionaryForModel:model];
+    return task ? [self performTask:task inWindow:hostWindow runGeneration:runGeneration] : 0.0;
+}
+
 - (NSTimeInterval)performTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow runGeneration:(NSUInteger)runGeneration {
     if (![self panelCanUseCurrentScene]) {
         return 0;
@@ -11886,13 +12247,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } else if (mode == AnClickActionModeMacro) {
         NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
         duration = [self durationForRecordedEvents:events playbackSpeed:[self macroPlaybackSpeedForTask:task]];
+    } else if (mode == AnClickActionModeDoubleTap) {
+        duration = [self doubleTapOperationDurationForTask:task];
     } else if (mode == AnClickActionModeLongPress) {
         duration = [self longPressOperationDurationForDuration:[self longPressDurationForTask:task]];
+    } else if (mode == AnClickActionModeSwipe) {
+        duration = [self swipeDurationForTask:task];
     }
     if (turboPointTapRepeat) {
         __weak typeof(self) weakSelf = self;
         NSTimeInterval minimumStep = (mode == AnClickActionModeDoubleTap)
-            ? (AnClickDefaultTapPressDuration + AnClickDefaultDoubleTapInterval + AnClickDefaultTapPressDuration)
+            ? [self doubleTapOperationDurationForTask:task]
             : AnClickDefaultTapPressDuration;
         NSTimeInterval step = MAX(minimumStep, configuredInterval);
         if (mode == AnClickActionModeTwoFingerTap) {
@@ -11922,7 +12287,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     }
                     CGPoint point = [strongSelf point:basePoint byApplyingJitterForTask:task];
                     if (mode == AnClickActionModeDoubleTap) {
-                        [AnClickFakeTouch fastDoubleTapAtPoint:point];
+                        [strongSelf performDoubleTapAtPoint:point interval:[strongSelf doubleTapIntervalForTask:task]];
                     } else {
                         [AnClickFakeTouch fastTapAtPoint:point];
                     }
@@ -11952,11 +12317,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 return;
             }
             if (mode == AnClickActionModeSwipe) {
-                NSArray<NSValue *> *path = [strongSelf path:[strongSelf resolvedPathForTask:task] byApplyingJitterForTask:task];
+                NSArray<NSValue *> *steppedPath = [strongSelf path:[strongSelf resolvedPathForTask:task] byApplyingSwipeStepForTask:task];
+                NSArray<NSValue *> *path = [strongSelf path:steppedPath byApplyingJitterForTask:task];
+                NSTimeInterval swipeDuration = [strongSelf swipeDurationForTask:task];
                 if (!suppressFastTrace) {
-                    [strongSelf showTrajectoryForScreenPoints:path inWindow:currentHostWindow duration:AnClickDefaultSwipeDuration];
+                    [strongSelf showTrajectoryForScreenPoints:path inWindow:currentHostWindow duration:swipeDuration];
                 }
-                [AnClickFakeTouch playPath:path duration:AnClickDefaultSwipeDuration];
+                [AnClickFakeTouch playPath:path duration:swipeDuration];
             } else if (mode == AnClickActionModeImage) {
                 [strongSelf performImageTask:task inWindow:currentHostWindow runGeneration:runGeneration];
             } else if (mode == AnClickActionModeOCR) {
@@ -11992,7 +12359,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             } else {
                 NSValue *pointValue = task[@"point"];
                 CGPoint point = [strongSelf point:[strongSelf resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue] byApplyingJitterForTask:task];
-                if (mode == AnClickActionModeLongPress) {
+                if (mode == AnClickActionModeDoubleTap) {
+                    NSTimeInterval doubleTapDuration = [strongSelf doubleTapOperationDurationForTask:task];
+                    if (!suppressFastTrace) {
+                        [strongSelf showOperationTraceForMode:mode atPoint:point inWindow:currentHostWindow duration:doubleTapDuration];
+                    }
+                    [strongSelf performDoubleTapAtPoint:point interval:[strongSelf doubleTapIntervalForTask:task]];
+                } else if (mode == AnClickActionModeLongPress) {
                     [strongSelf performPointActionMode:mode
                                                atPoint:point
                                               inWindow:currentHostWindow
@@ -12208,11 +12581,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    NSDictionary *task = _taskItems[index];
+    AnClickTaskModel *taskModel = [self taskModelAtIndex:index];
+    NSDictionary *task = [self taskDictionaryForModel:taskModel];
+    if (!task) {
+        [self stopTaskRunWithStatus:@"任务数据无效" showToast:YES];
+        return;
+    }
     AnClickActionMode mode = [self modeForTask:task];
     [self showToast:[self toastTextForTask:task index:index]];
     if (mode == AnClickActionModeJump) {
-        if (![self taskIsComplete:task]) {
+        if (![self taskModelIsComplete:taskModel]) {
             _taskRunActive = NO;
             [self clearTaskRunPauseState];
             [self cancelRunningTaskSideEffects];
@@ -12230,7 +12608,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
     if (mode == AnClickActionModeNetwork) {
-        if (![self taskIsComplete:task]) {
+        if (![self taskModelIsComplete:taskModel]) {
             _taskRunActive = NO;
             [self clearTaskRunPauseState];
             [self cancelRunningTaskSideEffects];
@@ -12241,12 +12619,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [self refreshCollapsedButtonTitle];
             return;
         }
-        [self runNetworkTask:task atIndex:index inWindow:currentHostWindow generation:runGeneration];
+        [self runNetworkTaskModel:taskModel atIndex:index inWindow:currentHostWindow generation:runGeneration];
         return;
     }
 
     if ([self modeIsRecognitionTask:mode]) {
-        if (![self taskIsComplete:task]) {
+        if (![self taskModelIsComplete:taskModel]) {
             _taskRunActive = NO;
             [self clearTaskRunPauseState];
             [self cancelRunningTaskSideEffects];
@@ -12257,11 +12635,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [self refreshCollapsedButtonTitle];
             return;
         }
-        [self runRecognitionTask:task atIndex:index inWindow:currentHostWindow generation:runGeneration];
+        [self runRecognitionTaskModel:taskModel atIndex:index inWindow:currentHostWindow generation:runGeneration];
         return;
     }
 
-    NSTimeInterval duration = [self performTask:task inWindow:currentHostWindow runGeneration:runGeneration];
+    NSTimeInterval duration = [self performTaskModel:taskModel inWindow:currentHostWindow runGeneration:runGeneration];
     if (duration <= 0) {
         _taskRunActive = NO;
         [self clearTaskRunPauseState];
@@ -12906,7 +13284,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _colorPickInfoLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightSemibold];
     _colorPickInfoLabel.adjustsFontSizeToFitWidth = YES;
     _colorPickInfoLabel.minimumScaleFactor = 0.6;
-    _colorPickInfoLabel.text = @"放大截图后点选颜色";
+    _colorPickInfoLabel.text = @"双指查看截图后点选颜色";
     [toolbar addSubview:_colorPickInfoLabel];
 
     UIButton *deleteButton = [self pointPickButtonWithTitle:@"删点" action:@selector(deleteSelectedColorPickSample)];
@@ -13199,7 +13577,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self applyTargetColorSamples:_pendingColorPickSamples];
     [self rememberManualCoordinateScreenSize];
     [self finishColorPickingOverlay];
-    [self refreshEditorConfigControls];
+    [self refreshTaskEditorAfterExternalResult];
     [self updateStatusForCurrentConfig];
     [self autosaveSelectedTaskIfPossible];
 }
@@ -13311,10 +13689,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _pickingSwipeEndPoint = NO;
         if (_actionMode == AnClickActionModeImage) {
             _imageUsesMatchPoint = NO;
-            [self refreshEditorConfigControls];
+            [self refreshTaskEditorAfterExternalResult];
         } else if (_actionMode == AnClickActionModeOCR) {
             _ocrUsesMatchPoint = NO;
-            [self refreshEditorConfigControls];
+            [self refreshTaskEditorAfterExternalResult];
         }
     }
 
@@ -13732,7 +14110,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _hasSuccessActionPoint = YES;
         [self rememberManualCoordinateScreenSize];
         [self finishPointPickingOverlay];
-        [self refreshEditorConfigControls];
+        [self refreshTaskEditorAfterExternalResult];
         [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
         _statusLabel.text = [self successActionPointSummary];
         [self updateStatusForCurrentConfig];
@@ -13745,7 +14123,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _hasFailureActionPoint = YES;
         [self rememberManualCoordinateScreenSize];
         [self finishPointPickingOverlay];
-        [self refreshEditorConfigControls];
+        [self refreshTaskEditorAfterExternalResult];
         [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
         _statusLabel.text = [self failureActionPointSummary];
         [self updateStatusForCurrentConfig];
@@ -13764,7 +14142,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _pendingPointPickPoint = [self pointPickImagePointFromScreenPoint:screenPoint];
             [self showPointPickSwipeStartMarker];
             [self updatePointPickCursor];
-            [self refreshEditorConfigControls];
+            [self refreshTaskEditorAfterExternalResult];
             _statusLabel.text = @"起点已定 继续终点";
             return;
         }
@@ -13786,7 +14164,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if (path.count >= 2) {
             [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:1.0];
         }
-        [self refreshEditorConfigControls];
+        [self refreshTaskEditorAfterExternalResult];
         [self updateStatusForCurrentConfig];
         [self autosaveSelectedTaskIfPossible];
         return;
@@ -13804,7 +14182,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [_multiTapPoints addObject:[NSValue valueWithCGPoint:screenPoint]];
         [self rememberManualCoordinateScreenSize];
         [self finishPointPickingOverlay];
-        [self refreshEditorConfigControls];
+        [self refreshTaskEditorAfterExternalResult];
         [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
         [self updateStatusForCurrentConfig];
         [self autosaveSelectedTaskIfPossible];
@@ -13815,7 +14193,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _hasManualActionPoint[(NSUInteger)_actionMode] = YES;
     [self rememberManualCoordinateScreenSize];
     [self finishPointPickingOverlay];
-    [self refreshEditorConfigControls];
+    [self refreshTaskEditorAfterExternalResult];
     [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
     [self updateStatusForCurrentConfig];
     [self autosaveSelectedTaskIfPossible];
@@ -13831,13 +14209,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    AnClickTaskModel *model = _editingTaskModel ?: [self currentTaskEditorModelFromState];
-    NSMutableDictionary *task = [[model dictionaryRepresentation] mutableCopy];
-    if (!task || ![self taskIsComplete:task]) {
+    AnClickTaskModel *model = _editingTaskModel ?: [self taskEditorModelByMergingRuntimeState];
+    if (![self taskModelIsComplete:model]) {
         return;
     }
     [self preparePanelForExternalTapWithHostWindow:hostWindow];
-    NSTimeInterval duration = [self performTask:task inWindow:hostWindow];
+    NSTimeInterval duration = [self performTaskModel:model inWindow:hostWindow];
     if (duration > 0) {
         _statusLabel.text = [NSString stringWithFormat:@"执行%@ %@", [self currentActionName], [self commonConfigSummary]];
     }
@@ -13983,9 +14360,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     if (_actionMode == AnClickActionModeNetwork) {
-        AnClickTaskModel *model = _editingTaskModel ?: [self currentTaskEditorModelFromState];
-        NSMutableDictionary *task = [[model dictionaryRepresentation] mutableCopy];
-        if (!task || ![self taskIsComplete:task]) {
+        AnClickTaskModel *model = _editingTaskModel ?: [self taskEditorModelByMergingRuntimeState];
+        NSMutableDictionary *task = [self taskDictionaryForModel:model];
+        if (![self taskModelIsComplete:model]) {
             return;
         }
         _statusLabel.text = @"测试网络";
@@ -14125,6 +14502,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _hasRecordedMacroScreenSize = YES;
         _statusLabel.text = [NSString stringWithFormat:@"已录 %lu步", (unsigned long)_recordedMacroEvents.count];
         [self refreshCollapsedButtonTitle];
+        [self syncTaskEditorModelFromRuntimeState];
         if (_returnToEditorAfterRecording) {
             _taskEditorVisible = YES;
             [self expandPanel];
@@ -14143,6 +14521,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _recordedMacroEvents = nil;
     _recordedMacroScreenSize = CGSizeZero;
     _hasRecordedMacroScreenSize = NO;
+    [self syncTaskEditorModelFromRuntimeState];
     _returnToEditorAfterRecording = _taskEditorVisible;
     [recorder startRecording];
     [self invalidatePendingPanelRestore];

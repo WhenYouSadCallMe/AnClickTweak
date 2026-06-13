@@ -40,6 +40,31 @@ static NSArray *ACArrayValue(id value) {
     return [value isKindOfClass:NSArray.class] ? [value copy] : @[];
 }
 
+static AnClickActionMode ACSupportedActionMode(id value) {
+    if (![value respondsToSelector:@selector(integerValue)]) {
+        return AnClickActionModeNone;
+    }
+
+    AnClickActionMode mode = (AnClickActionMode)[value integerValue];
+    switch (mode) {
+        case AnClickActionModeTap:
+        case AnClickActionModeDoubleTap:
+        case AnClickActionModeLongPress:
+        case AnClickActionModeSwipe:
+        case AnClickActionModeTwoFingerTap:
+        case AnClickActionModeImage:
+        case AnClickActionModeMacro:
+        case AnClickActionModeOCR:
+        case AnClickActionModeColor:
+        case AnClickActionModeNetwork:
+        case AnClickActionModeJump:
+        case AnClickActionModeDelay:
+            return mode;
+        default:
+            return AnClickActionModeNone;
+    }
+}
+
 static NSValue *ACValueObject(id value) {
     return [value isKindOfClass:NSValue.class] ? value : nil;
 }
@@ -97,7 +122,6 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
         _delay = 0.0;
         _repeatCount = 1;
         _interval = 0.03;
-        _pressure = 1.0;
         _taskDescription = @"";
         _doubleTapInterval = 0.10;
         _longPressDuration = 0.50;
@@ -125,15 +149,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
         _networkPostBody = @"";
         _networkPostExtraFields = @"";
         _jumpTaskIndex = -1;
-        _macroPath = @"";
-        _macroArguments = @"";
         _macroSpeed = 1.0;
-        _gestureFromDistance = 168.0;
-        _gestureToDistance = 58.0;
-        _gestureRadius = 64.0;
-        _rotationStartAngle = -45.0;
-        _rotationEndAngle = 135.0;
-        _gestureDuration = 0.30;
         _recognitionRetryUntilFound = NO;
         _recognitionRetryInterval = 1.0;
         _successBranchIndex = -1;
@@ -149,7 +165,6 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
         _events = @[];
         _colorPoints = @[];
         _networkPostPairs = @[];
-        _extraFields = @{};
     }
     return self;
 }
@@ -160,13 +175,12 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
         return self;
     }
 
-    _actionMode = [dictionary[ACKeyMode] respondsToSelector:@selector(integerValue)] ? (AnClickActionMode)[dictionary[ACKeyMode] integerValue] : AnClickActionModeNone;
+    _actionMode = ACSupportedActionMode(dictionary[ACKeyMode]);
     _delay = ACClampedDouble(dictionary[ACKeyDelay], 0.0, 3600.0, 0.0);
     _repeatCount = ACClampedInteger(dictionary[ACKeyRepeat], 1, 9999, 1);
     _interval = ACClampedDouble(dictionary[ACKeyInterval], 0.0, 30.0, _interval);
     _randomDelay = [dictionary[ACKeyRandomDelay] boolValue];
     _jitterRadius = ACClampedDouble(dictionary[ACKeyJitterRadius], 0.0, 200.0, 0.0);
-    _pressure = ACClampedDouble(dictionary[@"pressure"], 0.0, 1.0, 1.0);
     _taskDescription = ACStringValue(dictionary[ACKeyDescription]);
     _expanded = [dictionary[ACKeyExpanded] boolValue];
 
@@ -180,8 +194,13 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
 
     _templatePath = ACStringValue(dictionary[@"templatePath"]);
     _useMatchPoint = dictionary[@"useMatchPoint"] ? [dictionary[@"useMatchPoint"] boolValue] : YES;
-    _successActionMode = [dictionary[@"imageActionMode"] respondsToSelector:@selector(integerValue)] ? (AnClickActionMode)[dictionary[@"imageActionMode"] integerValue] : AnClickActionModeTap;
-    _failureActionMode = [dictionary[@"failureActionMode"] respondsToSelector:@selector(integerValue)] ? (AnClickActionMode)[dictionary[@"failureActionMode"] integerValue] : AnClickActionModeNone;
+    BOOL hasExplicitSuccessActionMode = dictionary[@"imageActionMode"] != nil;
+    BOOL hasExplicitFailureActionMode = dictionary[@"failureActionMode"] != nil;
+    _successActionMode = ACSupportedActionMode(dictionary[@"imageActionMode"]);
+    if (_successActionMode == AnClickActionModeNone) {
+        _successActionMode = AnClickActionModeTap;
+    }
+    _failureActionMode = ACSupportedActionMode(dictionary[@"failureActionMode"]);
     _threshold = ACClampedDouble(dictionary[@"threshold"], 0.0, 1.0, 0.80);
     CGRect roi = CGRectZero;
     _hasTemplateROI = ACCGRectFromObject(dictionary[@"templateROI"] ?: dictionary[@"roi"], &roi);
@@ -190,7 +209,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     _hasMatchClickOffset = ACCGPointFromObject(dictionary[@"matchClickOffset"] ?: dictionary[@"clickOffset"], &offset);
     _matchClickOffset = _hasMatchClickOffset ? offset : CGPointZero;
 
-    _ocrMode = [dictionary[@"ocrMode"] respondsToSelector:@selector(integerValue)] ? (AnClickOCRMode)[dictionary[@"ocrMode"] integerValue] : AnClickOCRModeAppleVision;
+    _ocrMode = AnClickOCRModeAppleVision;
     _ocrMatchMode = [dictionary[@"ocrMatchMode"] respondsToSelector:@selector(integerValue)] ? (AnClickOCRMatchMode)[dictionary[@"ocrMatchMode"] integerValue] : AnClickOCRMatchModeContains;
     _ocrText = ACStringValue(dictionary[@"ocrText"]);
     _ocrSimilarity = ACClampedDouble(dictionary[@"ocrSimilarity"], 0.0, 1.0, 0.80);
@@ -218,21 +237,18 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     id jumpValue = dictionary[@"jumpTaskIndex"] ?: dictionary[@"jumpTaskId"] ?: dictionary[@"targetTaskIndex"];
     _jumpTaskIndex = ACClampedInteger(jumpValue, -1, NSIntegerMax, -1);
 
-    _macroPath = ACStringValue(dictionary[@"macroPath"]);
-    _macroArguments = ACStringValue(dictionary[@"macroArguments"]);
     _macroSpeed = ACClampedDouble(dictionary[@"macroSpeed"], 0.1, 10.0, 1.0);
-
-    _gestureFromDistance = ACClampedDouble(dictionary[@"gestureFromDistance"], 1.0, 1000.0, _gestureFromDistance);
-    _gestureToDistance = ACClampedDouble(dictionary[@"gestureToDistance"], 1.0, 1000.0, _gestureToDistance);
-    _gestureRadius = ACClampedDouble(dictionary[@"gestureRadius"], 1.0, 1000.0, _gestureRadius);
-    _rotationStartAngle = ACClampedDouble(dictionary[@"rotationStartAngle"], -360.0, 360.0, _rotationStartAngle);
-    _rotationEndAngle = ACClampedDouble(dictionary[@"rotationEndAngle"], -360.0, 360.0, _rotationEndAngle);
-    _gestureDuration = ACClampedDouble(dictionary[@"gestureDuration"], 0.05, 10.0, _gestureDuration);
 
     _recognitionRetryUntilFound = [dictionary[@"recognitionRetryUntilFound"] boolValue];
     _recognitionRetryInterval = ACClampedDouble(dictionary[@"recognitionRetryInterval"], 0.2, 30.0, 1.0);
     _successBranchIndex = ACClampedInteger(dictionary[@"successBranchIndex"], -1, NSIntegerMax, -1);
     _failureBranchIndex = ACClampedInteger(dictionary[@"failureBranchIndex"], -1, NSIntegerMax, -1);
+    if (!hasExplicitSuccessActionMode && _successBranchIndex >= 0) {
+        _successActionMode = AnClickActionModeJump;
+    }
+    if (!hasExplicitFailureActionMode && _failureBranchIndex >= 0) {
+        _failureActionMode = AnClickActionModeJump;
+    }
     _successActionTaskIndex = ACClampedInteger(dictionary[@"successActionTaskIndex"], -1, NSIntegerMax, -1);
     _failureActionTaskIndex = ACClampedInteger(dictionary[@"failureActionTaskIndex"], -1, NSIntegerMax, -1);
     _successActionConfig = ACDictionaryValue(dictionary[@"successActionConfig"]);
@@ -255,24 +271,17 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     _events = ACArrayValue(dictionary[@"events"]);
     _colorPoints = ACArrayValue(dictionary[@"colorPoints"]);
     _networkPostPairs = ACArrayValue(dictionary[@"networkPostPairs"]);
+    if (!_point && _colorPoints.count > 0) {
+        NSDictionary *anchor = [_colorPoints.firstObject isKindOfClass:NSDictionary.class] ? _colorPoints.firstObject : nil;
+        if ([anchor[@"x"] respondsToSelector:@selector(doubleValue)] &&
+            [anchor[@"y"] respondsToSelector:@selector(doubleValue)]) {
+            _point = [NSValue valueWithCGPoint:CGPointMake([anchor[@"x"] doubleValue], [anchor[@"y"] doubleValue])];
+            if (!_pointScreenSize && _colorPointScreenSize) {
+                _pointScreenSize = _colorPointScreenSize;
+            }
+        }
+    }
 
-    NSMutableDictionary *extra = [dictionary mutableCopy];
-    NSArray<NSString *> *modeledKeys = @[
-        ACKeyMode, ACKeyDelay, ACKeyRepeat, ACKeyInterval, ACKeyRandomDelay, ACKeyJitterRadius, ACKeyDescription, ACKeyExpanded,
-        @"pressure", @"doubleTapInterval", @"pressDuration", @"pressDurationMs", @"swipeDuration", @"swipeStep",
-        @"templatePath", @"useMatchPoint", @"imageActionMode", @"failureActionMode", @"threshold", @"templateROI", @"roi", @"matchClickOffset", @"clickOffset",
-        @"ocrMode", @"ocrMatchMode", @"ocrText", @"ocrSimilarity",
-        @"colorRed", @"colorGreen", @"colorBlue", @"colorTolerance", @"colorMatchMode",
-        @"networkURL", @"networkMethod", @"networkHeaders", @"networkRequestOnly", @"networkUsesPost", @"networkRetryForever", @"networkRetryLimit", @"networkTimeout", @"networkContains", @"networkFalse", @"networkPostBody", @"networkPostBodyUsesOCRResult", @"networkPostExtraFields",
-        @"jumpTaskIndex", @"jumpTaskId", @"targetTaskIndex",
-        @"macroPath", @"macroArguments", @"macroSpeed",
-        @"gestureFromDistance", @"gestureToDistance", @"gestureRadius", @"rotationStartAngle", @"rotationEndAngle", @"gestureDuration",
-        @"recognitionRetryUntilFound", @"recognitionRetryInterval", @"successBranchIndex", @"failureBranchIndex", @"successActionTaskIndex", @"failureActionTaskIndex",
-        @"successActionConfig", @"failureActionConfig", @"successRecognitionActionConfig", @"failureRecognitionActionConfig",
-        @"point", @"pointScreenSize", @"successPoint", @"successPointScreenSize", @"failurePoint", @"failurePointScreenSize", @"pathScreenSize", @"multiPointScreenSize", @"eventsScreenSize", @"colorPointScreenSize", @"path", @"multiPoints", @"events", @"colorPoints", @"networkPostPairs",
-    ];
-    [extra removeObjectsForKeys:modeledKeys];
-    _extraFields = [extra copy];
     return self;
 }
 
@@ -299,11 +308,19 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
 }
 
 - (NSMutableDictionary *)dictionaryRepresentation {
-    NSMutableDictionary *dictionary = [self.extraFields mutableCopy] ?: [NSMutableDictionary dictionary];
-    dictionary[ACKeyMode] = @(self.actionMode);
-    dictionary[ACKeyDelay] = @(MAX(0.0, self.delay));
+    NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+    AnClickActionMode actionMode = ACSupportedActionMode(@(self.actionMode));
+    AnClickActionMode successActionMode = ACSupportedActionMode(@(self.successActionMode));
+    AnClickActionMode failureActionMode = ACSupportedActionMode(@(self.failureActionMode));
+    if (successActionMode == AnClickActionModeNone) {
+        successActionMode = AnClickActionModeTap;
+    }
+    dictionary[ACKeyMode] = @(actionMode);
+    dictionary[ACKeyDelay] = @(actionMode == AnClickActionModeDelay ? MAX(0.0, self.delay) : 0.0);
     dictionary[ACKeyRepeat] = @(MAX(1, self.repeatCount));
-    dictionary[ACKeyInterval] = @(MIN(30.0, MAX(0.0, self.interval)));
+    dictionary[ACKeyInterval] = @((actionMode == AnClickActionModeTap || actionMode == AnClickActionModeTwoFingerTap)
+        ? MIN(30.0, MAX(0.0, self.interval))
+        : 0.0);
     dictionary[ACKeyExpanded] = @(self.expanded);
     if (self.randomDelay) {
         dictionary[ACKeyRandomDelay] = @YES;
@@ -311,7 +328,6 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     if (self.jitterRadius > 0.001) {
         dictionary[ACKeyJitterRadius] = @(MIN(200.0, MAX(0.0, self.jitterRadius)));
     }
-    dictionary[@"pressure"] = @(MIN(1.0, MAX(0.0, self.pressure)));
     if (self.taskDescription.length > 0) {
         dictionary[ACKeyDescription] = self.taskDescription;
     }
@@ -324,8 +340,8 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
         dictionary[@"templatePath"] = self.templatePath;
     }
     dictionary[@"useMatchPoint"] = @(self.useMatchPoint);
-    dictionary[@"imageActionMode"] = @(self.successActionMode);
-    dictionary[@"failureActionMode"] = @(self.failureActionMode);
+    dictionary[@"imageActionMode"] = @(successActionMode);
+    dictionary[@"failureActionMode"] = @(failureActionMode);
     dictionary[@"threshold"] = @(MIN(1.0, MAX(0.0, self.threshold)));
     if (self.hasTemplateROI) {
         dictionary[@"templateROI"] = [NSValue valueWithCGRect:self.templateROI];
@@ -341,10 +357,29 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     dictionary[@"ocrSimilarity"] = @(MIN(1.0, MAX(0.0, self.ocrSimilarity)));
     dictionary[@"colorTolerance"] = @(MIN(255.0, MAX(0.0, self.colorTolerance)));
     dictionary[@"colorMatchMode"] = @(MIN(1, MAX(0, self.colorMatchMode)));
-    if (self.colorRed || self.colorGreen || self.colorBlue) {
+    if (actionMode == AnClickActionModeColor ||
+        self.colorPoints.count > 0 ||
+        self.colorRed || self.colorGreen || self.colorBlue) {
         dictionary[@"colorRed"] = @(MIN(255, MAX(0, self.colorRed)));
         dictionary[@"colorGreen"] = @(MIN(255, MAX(0, self.colorGreen)));
         dictionary[@"colorBlue"] = @(MIN(255, MAX(0, self.colorBlue)));
+    }
+    if (actionMode == AnClickActionModeColor &&
+        self.colorPoints.count == 0 &&
+        self.point) {
+        CGPoint point = self.point.CGPointValue;
+        dictionary[@"colorPoints"] = @[@{
+            @"x": @(point.x),
+            @"y": @(point.y),
+            @"dx": @0.0,
+            @"dy": @0.0,
+            @"red": @(MIN(255, MAX(0, self.colorRed))),
+            @"green": @(MIN(255, MAX(0, self.colorGreen))),
+            @"blue": @(MIN(255, MAX(0, self.colorBlue))),
+        }];
+        if (self.pointScreenSize) {
+            dictionary[@"colorPointScreenSize"] = self.pointScreenSize;
+        }
     }
     if (self.networkURL.length > 0) {
         dictionary[@"networkURL"] = self.networkURL;
@@ -375,19 +410,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     if (self.jumpTaskIndex >= 0) {
         dictionary[@"jumpTaskIndex"] = @(self.jumpTaskIndex);
     }
-    if (self.macroPath.length > 0) {
-        dictionary[@"macroPath"] = self.macroPath;
-    }
-    if (self.macroArguments.length > 0) {
-        dictionary[@"macroArguments"] = self.macroArguments;
-    }
     dictionary[@"macroSpeed"] = @(MIN(10.0, MAX(0.1, self.macroSpeed)));
-    dictionary[@"gestureFromDistance"] = @(MIN(1000.0, MAX(1.0, self.gestureFromDistance)));
-    dictionary[@"gestureToDistance"] = @(MIN(1000.0, MAX(1.0, self.gestureToDistance)));
-    dictionary[@"gestureRadius"] = @(MIN(1000.0, MAX(1.0, self.gestureRadius)));
-    dictionary[@"rotationStartAngle"] = @(MIN(360.0, MAX(-360.0, self.rotationStartAngle)));
-    dictionary[@"rotationEndAngle"] = @(MIN(360.0, MAX(-360.0, self.rotationEndAngle)));
-    dictionary[@"gestureDuration"] = @(MIN(10.0, MAX(0.05, self.gestureDuration)));
     dictionary[@"recognitionRetryUntilFound"] = @(self.recognitionRetryUntilFound);
     dictionary[@"recognitionRetryInterval"] = @(MIN(30.0, MAX(0.2, self.recognitionRetryInterval)));
     if (self.successBranchIndex >= 0) dictionary[@"successBranchIndex"] = @(self.successBranchIndex);
