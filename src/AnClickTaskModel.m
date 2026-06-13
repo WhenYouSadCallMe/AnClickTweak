@@ -45,10 +45,6 @@ static NSValue *ACValueWithCGPoint(CGPoint point) {
     return [NSValue valueWithBytes:&point objCType:@encode(CGPoint)];
 }
 
-static NSValue *ACValueWithCGRect(CGRect rect) {
-    return [NSValue valueWithBytes:&rect objCType:@encode(CGRect)];
-}
-
 static BOOL ACNSValueGetCGPoint(NSValue *value, CGPoint *point) {
     if (![value isKindOfClass:NSValue.class] || !point || strcmp(value.objCType, @encode(CGPoint)) != 0) {
         return NO;
