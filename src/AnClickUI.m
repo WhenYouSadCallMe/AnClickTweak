@@ -86,6 +86,9 @@ static const NSInteger AnClickHomeDeleteLabelTag = 54005;
 static const NSInteger AnClickHomeTimeLabelTag = 54006;
 static const NSInteger AnClickHomeLoopLabelTag = 54007;
 static const NSInteger AnClickHomeSaveLabelTag = 54008;
+static const NSInteger AnClickHomeOptionPanelTimeTag = 54101;
+static const NSInteger AnClickHomeOptionPanelLoopTag = 54102;
+static const NSInteger AnClickHomeOptionPanelSaveTag = 54103;
 static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.18;
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
 static void (*AnClickOriginalSpringBoardHandlePhysicalButtonEvent)(id self, SEL _cmd, id event);
@@ -292,6 +295,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIWindow *_toastWindow;
     UIView *_panelView;
     UIView *_homeBrandView;
+    UIView *_homeOutputView;
     UIView *_toastView;
     UIView *_hostToastView;
     UIButton *_collapsedButton;
@@ -1697,9 +1701,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_homeBrandView addSubview:_toolTitleLabel];
 
     _authorFollowButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_authorFollowButton setTitle:@"bilibili" forState:UIControlStateNormal];
+    [_authorFollowButton setTitle:@"点击关注UP主" forState:UIControlStateNormal];
     [_authorFollowButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    _authorFollowButton.titleLabel.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightBold];
+    _authorFollowButton.titleLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightBold];
+    _authorFollowButton.titleLabel.adjustsFontSizeToFitWidth = YES;
+    _authorFollowButton.titleLabel.minimumScaleFactor = 0.72;
     _authorFollowButton.backgroundColor = [self themeHighlightColor];
     _authorFollowButton.layer.cornerRadius = 8.0;
     _authorFollowButton.layer.shadowColor = [self themeHighlightColor].CGColor;
@@ -1709,14 +1715,24 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_authorFollowButton addTarget:self action:@selector(openBilibiliProfile) forControlEvents:UIControlEventTouchUpInside];
     [_homeBrandView addSubview:_authorFollowButton];
 
-    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 52, panelWidth - 16, 24)];
-    _statusLabel.text = @"待机";
+    _homeOutputView = [[UIView alloc] initWithFrame:CGRectZero];
+    _homeOutputView.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.76];
+    _homeOutputView.layer.cornerRadius = 9.0;
+    _homeOutputView.layer.borderWidth = 1.0;
+    _homeOutputView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.42].CGColor;
+    _homeOutputView.hidden = YES;
+    [controller.view addSubview:_homeOutputView];
+    UIPanGestureRecognizer *outputPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelPan:)];
+    [_homeOutputView addGestureRecognizer:outputPan];
+
+    _statusLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    _statusLabel.text = @"";
     _statusLabel.textColor = [self themeSecondaryTextColor];
-    _statusLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
+    _statusLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightSemibold];
     _statusLabel.adjustsFontSizeToFitWidth = YES;
     _statusLabel.minimumScaleFactor = 0.6;
     _statusLabel.textAlignment = NSTextAlignmentCenter;
-    [_panelView addSubview:_statusLabel];
+    [_homeOutputView addSubview:_statusLabel];
 
     _taskEditorView = [[AnClickTaskEditorView alloc] initWithFrame:_panelView.bounds];
     _taskEditorView.delegate = self;
@@ -2837,16 +2853,29 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return 7.0;
 }
 
+- (CGFloat)homeOutputFooterHeight {
+    return 25.0;
+}
+
+- (CGFloat)homeOutputFooterGap {
+    return 7.0;
+}
+
 - (CGFloat)homeBrandHeaderTotalHeightForEditorVisible:(BOOL)editorVisible {
     return editorVisible ? 0.0 : ([self homeBrandHeaderHeight] + [self homeBrandHeaderGap]);
 }
 
+- (CGFloat)homeOutputFooterTotalHeightForEditorVisible:(BOOL)editorVisible {
+    return editorVisible ? 0.0 : ([self homeOutputFooterHeight] + [self homeOutputFooterGap]);
+}
+
 - (CGRect)panelContentFrameForBounds:(CGRect)bounds editorVisible:(BOOL)editorVisible {
     CGFloat topOffset = [self homeBrandHeaderTotalHeightForEditorVisible:editorVisible];
+    CGFloat bottomOffset = [self homeOutputFooterTotalHeightForEditorVisible:editorVisible];
     return CGRectMake(0.0,
                       topOffset,
                       bounds.size.width,
-                      MAX(1.0, bounds.size.height - topOffset));
+                      MAX(1.0, bounds.size.height - topOffset - bottomOffset));
 }
 
 - (CGSize)expandedPanelSizeForEditorVisible:(BOOL)editorVisible {
@@ -2860,7 +2889,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat editorMinHeight = landscape ? 320.0 : 660.0;
     CGFloat preferredHeight = MIN(editorVisible ? editorPreferredHeight : 420.0, availableHeight);
     CGFloat minHeight = MIN(editorVisible ? editorMinHeight : 340.0, availableHeight);
-    CGFloat totalHeight = MAX(minHeight, preferredHeight) + [self homeBrandHeaderTotalHeightForEditorVisible:editorVisible];
+    CGFloat totalHeight = MAX(minHeight, preferredHeight) +
+        [self homeBrandHeaderTotalHeightForEditorVisible:editorVisible] +
+        [self homeOutputFooterTotalHeightForEditorVisible:editorVisible];
     return CGSizeMake(width, MIN(availableHeight, totalHeight));
 }
 
@@ -3260,12 +3291,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     if (hadGlobalSettings && allowHeavyRefresh) {
         [self syncGlobalSettingsFromFields];
-        [self hideGlobalSettings];
+        CGFloat preferredHeight = [self homeFloatingPanelPreferredHeightForTag:_globalSettingsView.tag
+                                                                      fallback:CGRectGetHeight(_globalSettingsView.bounds)];
+        [self layoutHomeFloatingPanel:_globalSettingsView preferredHeight:preferredHeight];
         return;
     }
 
     if (hadFunctionMenu && allowHeavyRefresh) {
-        _functionMenuView.frame = _panelView.bounds;
+        [self layoutHomeFloatingPanel:_functionMenuView
+                       preferredHeight:[self homeFloatingPanelPreferredHeightForTag:_functionMenuView.tag
+                                                                           fallback:CGRectGetHeight(_functionMenuView.bounds)]];
         if (hadConfigList) {
             [self showSavedConfigListForDeleting:configListDeleting];
         } else {
@@ -3287,8 +3322,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    _globalSettingsView.frame = _panelView.bounds;
-    _functionMenuView.frame = _panelView.bounds;
+    if (_globalSettingsView) {
+        [self layoutHomeFloatingPanel:_globalSettingsView
+                       preferredHeight:[self homeFloatingPanelPreferredHeightForTag:_globalSettingsView.tag
+                                                                           fallback:CGRectGetHeight(_globalSettingsView.bounds)]];
+    }
+    if (_functionMenuView) {
+        [self layoutHomeFloatingPanel:_functionMenuView
+                       preferredHeight:[self homeFloatingPanelPreferredHeightForTag:_functionMenuView.tag
+                                                                           fallback:CGRectGetHeight(_functionMenuView.bounds)]];
+    }
     _configPromptView.frame = _functionMenuView.bounds;
 }
 
@@ -3312,6 +3355,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _collapsedButton.hidden = YES;
         _collapsedRuntimeLabel.hidden = YES;
         _homeBrandView.hidden = _taskEditorVisible;
+        _homeOutputView.hidden = _taskEditorVisible;
         _panelView.hidden = NO;
         frame = [self rememberedExpandedPanelFrameWithSize:[self expandedPanelSize] fallbackFrame:frame];
         _panelWindow.frame = frame;
@@ -3335,6 +3379,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
     _collapsedButton.hidden = NO;
     _homeBrandView.hidden = YES;
+    _homeOutputView.hidden = YES;
     _panelView.hidden = YES;
     [self layoutCollapsedControls];
     _suppressTemplatePreviewRefresh = previousSuppressPreview;
@@ -3454,6 +3499,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalSettingsButton.hidden = visible;
     _homeBrandView.hidden = visible;
     _authorFollowButton.hidden = visible;
+    _homeOutputView.hidden = visible;
     [_panelView viewWithTag:AnClickHomeAddLabelTag].hidden = visible;
     [_panelView viewWithTag:AnClickHomeDeleteLabelTag].hidden = visible;
     [_panelView viewWithTag:AnClickHomeRunLabelTag].hidden = visible;
@@ -3547,7 +3593,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _homeBrandView.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.76];
     _homeBrandView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.42].CGColor;
 
-    CGFloat followWidth = MIN(88.0, MAX(72.0, floor(width * 0.26)));
+    CGFloat followWidth = MIN(108.0, MAX(94.0, floor(width * 0.32)));
     _authorFollowButton.hidden = NO;
     _authorFollowButton.frame = CGRectMake(CGRectGetWidth(_homeBrandView.bounds) - followWidth - 7.0,
                                            6.0,
@@ -3567,6 +3613,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _toolTitleLabel.textColor = [self themePrimaryTextColor];
     _toolTitleLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightHeavy];
     _toolTitleLabel.textAlignment = NSTextAlignmentCenter;
+
+    CGFloat outputHeight = [self homeOutputFooterHeight];
+    _homeOutputView.hidden = NO;
+    _homeOutputView.frame = CGRectMake(side,
+                                       CGRectGetHeight(_panelWindow.rootViewController.view.bounds) - outputHeight,
+                                       width - side * 2.0,
+                                       outputHeight);
+    _homeOutputView.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.76];
+    _homeOutputView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.42].CGColor;
+    _statusLabel.hidden = NO;
+    _statusLabel.frame = CGRectInset(_homeOutputView.bounds, 10.0, 3.0);
+    _statusLabel.textColor = [self themeSecondaryTextColor];
+    _statusLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightSemibold];
 
     [self setCenteredIconForButton:_addTaskButton systemName:@"plus" fallbackTitle:@"+" fontSize:21];
     _addTaskButton.frame = CGRectMake(buttonX(0), topY + 1.0, smallSide, smallSide);
@@ -3622,19 +3681,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     _globalSettingsButton.hidden = YES;
 
-    _statusLabel.hidden = NO;
-    _statusLabel.frame = CGRectMake(16.0, 48.0, width - 32.0, 14.0);
-    _statusLabel.textColor = [self themeSecondaryTextColor];
-    _statusLabel.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightMedium];
-    _taskListView.frame = CGRectMake(10.0, 66.0, width - 20.0, MAX(80.0, height - 76.0));
+    _taskListView.frame = CGRectMake(10.0, 56.0, width - 20.0, MAX(80.0, height - 66.0));
     if (_globalSettingsView) {
-        _globalSettingsView.frame = _panelView.bounds;
+        [self layoutHomeFloatingPanel:_globalSettingsView
+                       preferredHeight:[self homeFloatingPanelPreferredHeightForTag:_globalSettingsView.tag
+                                                                           fallback:CGRectGetHeight(_globalSettingsView.bounds)]];
         [_panelView bringSubviewToFront:_globalSettingsView];
     } else if (_functionMenuView) {
-        _functionMenuView.frame = _panelView.bounds;
+        [self layoutHomeFloatingPanel:_functionMenuView
+                       preferredHeight:[self homeFloatingPanelPreferredHeightForTag:_functionMenuView.tag
+                                                                           fallback:CGRectGetHeight(_functionMenuView.bounds)]];
         [_panelView bringSubviewToFront:_functionMenuView];
     } else {
         [_panelWindow.rootViewController.view bringSubviewToFront:_homeBrandView];
+        [_panelWindow.rootViewController.view bringSubviewToFront:_homeOutputView];
         [_panelView bringSubviewToFront:_addTaskButton];
         [_panelView bringSubviewToFront:_deleteTaskButton];
         [_panelView bringSubviewToFront:_homeTimeButton];
@@ -4131,14 +4191,42 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 }
 
-- (UIView *)showHomeOptionPanelWithTitle:(NSString *)title {
+- (CGRect)homeFloatingPanelFrameForHeight:(CGFloat)preferredHeight {
+    (void)preferredHeight;
+    return _panelView.bounds;
+}
+
+- (void)layoutHomeFloatingPanel:(UIView *)panel preferredHeight:(CGFloat)preferredHeight {
+    if (!panel) {
+        return;
+    }
+    panel.frame = [self homeFloatingPanelFrameForHeight:preferredHeight];
+}
+
+- (CGFloat)homeFloatingPanelPreferredHeightForTag:(NSInteger)tag fallback:(CGFloat)fallback {
+    if (tag == AnClickHomeOptionPanelTimeTag) {
+        return 332.0;
+    }
+    if (tag == AnClickHomeOptionPanelLoopTag) {
+        return 284.0;
+    }
+    if (tag == AnClickHomeOptionPanelSaveTag) {
+        return 336.0;
+    }
+    return fallback;
+}
+
+- (UIView *)showHomeOptionPanelWithTitle:(NSString *)title preferredHeight:(CGFloat)preferredHeight tag:(NSInteger)tag {
     [self dismissKeyboard];
     [self hideFunctionMenu];
     [self hideGlobalSettings];
 
     _globalSettingsView = [[UIView alloc] initWithFrame:_panelView.bounds];
+    _globalSettingsView.tag = tag;
     [self installDarkBlurInView:_globalSettingsView cornerRadius:_panelView.layer.cornerRadius];
     _globalSettingsView.layer.cornerRadius = _panelView.layer.cornerRadius;
+    _globalSettingsView.layer.borderWidth = 0.0;
+    _globalSettingsView.layer.shadowOpacity = 0.0;
     _globalSettingsView.clipsToBounds = YES;
     [_panelView addSubview:_globalSettingsView];
 
@@ -4209,16 +4297,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)showHomeTimeSettings {
-    UIView *panel = [self showHomeOptionPanelWithTitle:@"时间设置"];
+    UIView *panel = [self showHomeOptionPanelWithTitle:@"时间设置" preferredHeight:332.0 tag:AnClickHomeOptionPanelTimeTag];
     CGFloat width = panel.bounds.size.width;
     CGFloat side = 14.0;
     CGFloat contentWidth = width - side * 2.0;
 
     UILabel *caption = [self homeOptionCaptionWithText:@"只设置任务列表的定时运行和定时结束，精确到毫秒。"
-                                                 frame:CGRectMake(side, 75.0, contentWidth, 36.0)];
+                                                 frame:CGRectMake(side, 62.0, contentWidth, 30.0)];
     [panel addSubview:caption];
 
-    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 116.0, contentWidth, 226.0)];
+    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 98.0, contentWidth, 220.0)];
     [panel addSubview:card];
 
     _globalStartTimeButton = [self globalSettingsValueButtonWithAction:@selector(showGlobalStartTimePicker)];
@@ -4228,28 +4316,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                         detail:@"到达设置时间后自动开始运行任务列表"
                         button:_globalStartTimeButton
                              y:14.0];
-    UIView *line = [[UIView alloc] initWithFrame:CGRectMake(14.0, 114.0, contentWidth - 28.0, 1.0)];
+    UIView *line = [[UIView alloc] initWithFrame:CGRectMake(14.0, 111.0, contentWidth - 28.0, 1.0)];
     line.backgroundColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72];
     [card addSubview:line];
     [self addHomeTimeRowToCard:card
-                         title:@"定时结束"
+                        title:@"定时结束"
                         detail:@"到达设置时间后停止当前任务运行"
                         button:_globalStopTimeButton
-                             y:128.0];
+                             y:124.0];
     [self refreshGlobalSettingsControls];
 }
 
 - (void)showHomeLoopSettings {
-    UIView *panel = [self showHomeOptionPanelWithTitle:@"循环设置"];
+    UIView *panel = [self showHomeOptionPanelWithTitle:@"循环设置" preferredHeight:284.0 tag:AnClickHomeOptionPanelLoopTag];
     CGFloat width = panel.bounds.size.width;
     CGFloat side = 14.0;
     CGFloat contentWidth = width - side * 2.0;
 
     UILabel *caption = [self homeOptionCaptionWithText:@"设置整个任务列表循环次数。填 0 或留空表示无限循环。"
-                                                 frame:CGRectMake(side, 75.0, contentWidth, 36.0)];
+                                                 frame:CGRectMake(side, 62.0, contentWidth, 32.0)];
     [panel addSubview:caption];
 
-    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 116.0, contentWidth, 132.0)];
+    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 100.0, contentWidth, 118.0)];
     [panel addSubview:card];
 
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 16.0, contentWidth - 28.0, 22.0)];
@@ -4263,7 +4351,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [card addSubview:_globalRepeatField];
 
     UIButton *doneButton = [self configPromptButtonWithTitle:@"完成" action:@selector(hideGlobalSettings) destructive:NO];
-    doneButton.frame = CGRectMake(side, CGRectGetMaxY(card.frame) + 16.0, contentWidth, 44.0);
+    doneButton.frame = CGRectMake(side, CGRectGetMaxY(card.frame) + 14.0, contentWidth, 42.0);
     [self applyObsidian3DStyleToButton:doneButton selected:YES];
     [panel addSubview:doneButton];
 
@@ -4563,9 +4651,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self hideFunctionMenu];
 
     _functionMenuView = [[UIView alloc] initWithFrame:_panelView.bounds];
+    _functionMenuView.tag = AnClickHomeOptionPanelSaveTag;
     _configListDeleting = NO;
     [self installDarkBlurInView:_functionMenuView cornerRadius:_panelView.layer.cornerRadius];
     _functionMenuView.layer.cornerRadius = _panelView.layer.cornerRadius;
+    _functionMenuView.layer.borderWidth = 0.0;
+    _functionMenuView.layer.shadowOpacity = 0.0;
     _functionMenuView.clipsToBounds = YES;
     [_panelView addSubview:_functionMenuView];
 
@@ -4690,7 +4781,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)showSaveTaskConfigNamePrompt {
     if (_taskItems.count == 0) {
-        _statusLabel.text = @"没有任务可保存";
         [self hideFunctionMenu];
         return;
     }
@@ -4739,8 +4829,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } mutableCopy];
     [configs insertObject:config atIndex:0];
     [self writeSavedTaskConfigs:configs];
-    _statusLabel.text = @"任务配置已保存";
     [self hideFunctionMenu];
+    _statusLabel.text = @"";
 }
 
 - (void)saveCurrentTaskConfig {
@@ -4841,7 +4931,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self hideFunctionMenu];
     [self showTaskHome];
     [self persistCurrentTaskList];
-    _statusLabel.text = [NSString stringWithFormat:@"已加载 %lu 个任务", (unsigned long)_taskItems.count];
+    _statusLabel.text = @"";
 }
 
 - (void)deleteSavedConfigButton:(UIButton *)sender {
@@ -4894,9 +4984,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     [configs removeObjectAtIndex:(NSUInteger)index];
     [self writeSavedTaskConfigs:configs];
-    _statusLabel.text = @"配置已删除";
     [self hideConfigPrompt];
     [self showSavedConfigListForDeleting:YES configsOverride:configs];
+    _statusLabel.text = @"";
 }
 
 - (void)resetEditorActionState {
@@ -5000,6 +5090,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _collapsedButton.hidden = NO;
     _homeCloseButton.hidden = YES;
     _homeBrandView.hidden = YES;
+    _homeOutputView.hidden = YES;
     _panelView.hidden = YES;
     [self layoutCollapsedControls];
 }
@@ -5016,6 +5107,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _collapsedButton.hidden = NO;
     _homeCloseButton.hidden = YES;
     _homeBrandView.hidden = YES;
+    _homeOutputView.hidden = YES;
     _panelView.hidden = YES;
     _panelWindow.hidden = NO;
     _panelWindow.userInteractionEnabled = YES;
@@ -5040,6 +5132,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _collapsedButton.hidden = YES;
     _collapsedRuntimeLabel.hidden = YES;
     _homeBrandView.hidden = _taskEditorVisible;
+    _homeOutputView.hidden = _taskEditorVisible;
     _panelView.hidden = NO;
     [self setTaskEditorVisible:_taskEditorVisible];
     [self refreshTaskList];
@@ -5103,20 +5196,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (!_statusLabel || _taskRunActive) {
         return;
     }
-    if (_actionMode == AnClickActionModeNone) {
-        _statusLabel.text = @"请选择动作类型";
-        return;
-    }
-    NSString *name = [self currentActionName];
-    if (_editingBranchRecognitionConfig) {
-        NSString *role = _editingBranchRecognitionSuccess ? @"成功后" : @"失败后";
-        NSString *branchName = _editingBranchActionMode == AnClickActionModeNone
-            ? name
-            : [self actionNameForMode:_editingBranchActionMode];
-        _statusLabel.text = [NSString stringWithFormat:@"配置%@%@动作", role, branchName];
-    } else {
-        _statusLabel.text = [NSString stringWithFormat:@"配置%@", name];
-    }
+    _statusLabel.text = @"";
 }
 
 - (void)clearSuccessBranchTargetSelection {
@@ -7238,14 +7318,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self refreshEditorConfigControls];
         [self refreshTaskList];
         [self updateStatusForCurrentConfig];
-        _statusLabel.text = saved ? (success ? @"成功后识图模板已保存" : @"失败后识图模板已保存") : @"保存失败";
+        if (!saved) {
+            _statusLabel.text = @"保存失败";
+        }
         return;
     }
     BOOL saved = [pngData writeToFile:[self writableTemplatePath] atomically:YES];
     [self finishTemplateCapture];
     [self refreshTaskEditorAfterExternalResult];
     [self autosaveSelectedTaskIfPossible];
-    _statusLabel.text = saved ? [NSString stringWithFormat:@"模板已保存 %@", [self commonConfigSummary]] : @"保存失败";
+    if (!saved) {
+        _statusLabel.text = @"保存失败";
+    }
 }
 
 - (void)cancelTemplateCapture {
@@ -9156,9 +9240,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [tableView reloadRowsAtIndexPaths:reloadIndexPaths withRowAnimation:UITableViewRowAnimationFade];
     } completion:nil];
     [self persistCurrentTaskList];
-    _statusLabel.text = expanded
-        ? [NSString stringWithFormat:@"展开任务%ld", (long)indexPath.row + 1]
-        : [NSString stringWithFormat:@"折叠任务%ld", (long)indexPath.row + 1];
+    _statusLabel.text = @"";
 }
 
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -9203,7 +9285,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)deleteSelectedTaskFromHomeButton {
     if (_taskItems.count == 0) {
-        _statusLabel.text = @"没有任务可删除";
         return;
     }
 
@@ -9244,7 +9325,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }];
 
     [self persistCurrentTaskList];
-    _statusLabel.text = cancelled ? @"排序取消" : @"排序完成";
 }
 
 - (void)handleTaskListLongPressReorder:(UILongPressGestureRecognizer *)recognizer {
@@ -9282,7 +9362,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [_taskListView addSubview:_taskReorderSnapshotView];
         cell.hidden = YES;
         _taskListView.scrollEnabled = NO;
-        _statusLabel.text = @"上下拖动调整顺序";
 
         [UIView animateWithDuration:0.14 animations:^{
             self->_taskReorderSnapshotView.transform = CGAffineTransformMakeScale(1.02, 1.02);
@@ -9345,7 +9424,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [_taskListView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationFade];
     } completion:nil];
     [self persistCurrentTaskList];
-    _statusLabel.text = [NSString stringWithFormat:@"折叠任务%ld", (long)index + 1];
 }
 
 - (void)runSingleTaskTestButtonAtIndex:(UIButton *)sender {
@@ -9388,8 +9466,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _currentGlobalRunCycle = 0;
     NSUInteger runGeneration = ++_taskRunGeneration;
     [self startTaskRunRuntimeTimerReset:YES];
-    _statusLabel.text = [NSString stringWithFormat:@"单步测试任务%ld", (long)index + 1];
-    [self showToast:_statusLabel.text];
     [self refreshTaskList];
     _panelHiddenForSingleStepTest = YES;
     [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
@@ -9401,7 +9477,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _selectedTaskIndex = -1;
     _editingTaskIndex = -1;
     _editingTaskModel = [[AnClickTaskModel alloc] init];
-    _statusLabel.text = @"新增任务 请选择动作";
     [self setTaskEditorVisible:YES];
 }
 
@@ -9427,10 +9502,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     [self showTaskHome];
     [self persistCurrentTaskList];
-    _statusLabel.text = _taskItems.count == 0 ? @"" : [NSString stringWithFormat:@"已删任务%ld  剩%lu", (long)index + 1, (unsigned long)_taskItems.count];
+    _statusLabel.text = @"";
 }
 
-- (void)restoreNestedBranchParentEditorWithStatus:(NSString *)status {
+- (void)restoreNestedBranchParentEditorWithStatus:(__unused NSString *)status {
     AnClickTaskModel *parentModel = [_editingNestedBranchParentModel copy];
     if (![parentModel isKindOfClass:AnClickTaskModel.class]) {
         parentModel = _editingTaskModel ? [_editingTaskModel copy] : [[AnClickTaskModel alloc] init];
@@ -9443,9 +9518,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self stageTaskEditorModelForRuntime:parentModel];
     [self setTaskEditorVisible:YES];
     [self refreshTaskEditorViewFromCurrentState];
-    if (status.length > 0) {
-        _statusLabel.text = status;
-    }
 }
 
 - (void)beginEditingNestedBranchActionConfigFromEditorView:(AnClickTaskEditorView *)editorView success:(BOOL)success {
@@ -9476,9 +9548,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self stageTaskEditorModelForRuntime:_editingTaskModel];
     [self setTaskEditorVisible:YES];
     [self refreshTaskEditorViewFromCurrentState];
-    _statusLabel.text = [NSString stringWithFormat:@"设置%@后%@配置",
-                         success ? @"成功" : @"失败",
-                         [self actionNameForMode:mode]];
 }
 
 - (void)saveTaskEditorModel:(AnClickTaskModel *)model {
@@ -9507,11 +9576,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             parentModel.failureActionConfig = task;
             parentModel.failureRecognitionActionConfig = @{};
         }
-        NSString *status = [NSString stringWithFormat:@"已保存%@后%@配置",
-                            _editingNestedBranchActionSuccess ? @"成功" : @"失败",
-                            [self actionNameForMode:_editingNestedBranchActionMode]];
         _editingNestedBranchParentModel = parentModel;
-        [self restoreNestedBranchParentEditorWithStatus:status];
+        [self restoreNestedBranchParentEditorWithStatus:nil];
         return;
     }
     if (_editingBranchRecognitionConfig) {
@@ -9542,9 +9608,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self persistCurrentTaskList];
         [self refreshTaskList];
         [self selectTaskAtIndex:ownerIndex];
-        _statusLabel.text = [NSString stringWithFormat:@"已保存%@后%@动作",
-                             success ? @"成功" : @"失败",
-                             [self actionNameForMode:branchMode]];
         return;
     }
     NSInteger targetIndex = (_editingTaskIndex >= 0 && _editingTaskIndex < (NSInteger)_taskItems.count)
@@ -9566,7 +9629,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self refreshTaskList];
     [self showTaskHome];
     [self persistCurrentTaskList];
-    _statusLabel.text = [NSString stringWithFormat:@"%@任务%ld", updatingExistingTask ? @"已修改" : @"已保存", (long)_selectedTaskIndex + 1];
 }
 
 - (void)saveSelectedTaskFromCurrentConfig {
@@ -9575,7 +9637,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)taskEditorViewDidCancel:(__unused AnClickTaskEditorView *)editorView {
     if (_editingNestedBranchActionConfig) {
-        [self restoreNestedBranchParentEditorWithStatus:@"已返回分支配置"];
+        [self restoreNestedBranchParentEditorWithStatus:nil];
         return;
     }
     _editingTaskModel = nil;
@@ -9703,8 +9765,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [self showToast:@"无窗口"];
             return;
         }
-        _statusLabel.text = @"单步测试分支动作";
-        [self showToast:_statusLabel.text];
         [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
         NSTimeInterval duration = [self performTaskModel:_editingTaskModel inWindow:hostWindow runGeneration:0];
         [self restorePanelAfterScreenDelay:duration + 0.15];
@@ -14204,7 +14264,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self refreshEditorConfigControls];
         [self refreshTaskList];
         [self updateStatusForCurrentConfig];
-        _statusLabel.text = success ? @"成功后识色已保存" : @"失败后识色已保存";
         return;
     }
     [self applyTargetColorSamples:_pendingColorPickSamples];
@@ -14751,8 +14810,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self finishPointPickingOverlay];
         [self refreshTaskEditorViewFromCurrentState];
         [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
-        _statusLabel.text = success ? @"已设置成功分支命中后坐标" : @"已设置失败分支命中后坐标";
-        [self showToast:_statusLabel.text];
         return;
     }
 
@@ -14763,7 +14820,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self finishPointPickingOverlay];
         [self refreshTaskEditorAfterExternalResult];
         [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
-        _statusLabel.text = [self successActionPointSummary];
         [self updateStatusForCurrentConfig];
         [self autosaveSelectedTaskIfPossible];
         return;
@@ -14776,7 +14832,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self finishPointPickingOverlay];
         [self refreshTaskEditorAfterExternalResult];
         [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
-        _statusLabel.text = [self failureActionPointSummary];
         [self updateStatusForCurrentConfig];
         [self autosaveSelectedTaskIfPossible];
         return;
@@ -14794,7 +14849,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [self showPointPickSwipeStartMarker];
             [self updatePointPickCursor];
             [self refreshTaskEditorAfterExternalResult];
-            _statusLabel.text = @"起点已定 继续终点";
             return;
         }
 
