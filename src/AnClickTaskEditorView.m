@@ -44,6 +44,16 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindFailureActionMode,
     ACEditorRowKindSuccessActionConfig,
     ACEditorRowKindFailureActionConfig,
+    ACEditorRowKindSuccessRecognitionResultActionMode,
+    ACEditorRowKindFailureRecognitionResultActionMode,
+    ACEditorRowKindSuccessRecognitionResultClickTargetMode,
+    ACEditorRowKindFailureRecognitionResultClickTargetMode,
+    ACEditorRowKindSuccessRecognitionResultCoordinate,
+    ACEditorRowKindFailureRecognitionResultCoordinate,
+    ACEditorRowKindSuccessRecognitionResultPointPick,
+    ACEditorRowKindFailureRecognitionResultPointPick,
+    ACEditorRowKindSuccessRecognitionResultLongPress,
+    ACEditorRowKindFailureRecognitionResultLongPress,
     ACEditorRowKindSuccessBranch,
     ACEditorRowKindFailureBranch,
     ACEditorRowKindSingleStep,
@@ -498,6 +508,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 @property (nonatomic, weak) UITextField *activeTextField;
 @property (nonatomic, assign) UIEdgeInsets baseContentInset;
 @property (nonatomic, assign) UIEdgeInsets baseScrollIndicatorInsets;
+- (NSDictionary *)draftBranchConfigForMode:(AnClickActionMode)mode;
+- (BOOL)pointFromText:(NSString *)text point:(CGPoint *)point;
+- (NSString *)pointText:(CGPoint)point;
 @end
 
 @implementation AnClickTaskEditorView
@@ -907,6 +920,142 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     return config.count > 0;
 }
 
+- (BOOL)branchSelectedActionIsRecognitionForSuccess:(BOOL)success {
+    AnClickActionMode mode = success ? self.model.successActionMode : self.model.failureActionMode;
+    return mode == AnClickActionModeImage ||
+        mode == AnClickActionModeOCR ||
+        mode == AnClickActionModeColor;
+}
+
+- (NSMutableDictionary *)mutableBranchConfigForSuccess:(BOOL)success {
+    NSDictionary *config = success ? self.model.successActionConfig : self.model.failureActionConfig;
+    if (![config isKindOfClass:NSDictionary.class] || config.count == 0) {
+        config = success ? self.model.successRecognitionActionConfig : self.model.failureRecognitionActionConfig;
+    }
+    AnClickActionMode mode = success ? self.model.successActionMode : self.model.failureActionMode;
+    NSMutableDictionary *mutableConfig = ([config isKindOfClass:NSDictionary.class] && config.count > 0)
+        ? [config mutableCopy]
+        : [[self draftBranchConfigForMode:mode] mutableCopy];
+    mutableConfig[@"mode"] = @(mode);
+    return mutableConfig;
+}
+
+- (void)storeMutableBranchConfig:(NSDictionary *)config success:(BOOL)success {
+    if (![config isKindOfClass:NSDictionary.class]) {
+        return;
+    }
+    if (success) {
+        self.model.successActionConfig = config;
+        self.model.successRecognitionActionConfig = [self branchSelectedActionIsRecognitionForSuccess:YES] ? config : @{};
+    } else {
+        self.model.failureActionConfig = config;
+        self.model.failureRecognitionActionConfig = [self branchSelectedActionIsRecognitionForSuccess:NO] ? config : @{};
+    }
+}
+
+- (AnClickActionMode)recognitionResultActionModeForBranchSuccess:(BOOL)success {
+    NSDictionary *config = [self mutableBranchConfigForSuccess:success];
+    id value = config[@"imageActionMode"];
+    if (![value respondsToSelector:@selector(integerValue)]) {
+        return AnClickActionModeTap;
+    }
+    AnClickActionMode mode = (AnClickActionMode)[value integerValue];
+    if (![self branchActionModeCanUseRecognitionPoint:mode]) {
+        return AnClickActionModeTap;
+    }
+    return mode;
+}
+
+- (BOOL)recognitionResultUsesMatchPointForBranchSuccess:(BOOL)success {
+    NSDictionary *config = [self mutableBranchConfigForSuccess:success];
+    id value = config[@"useMatchPoint"];
+    return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : YES;
+}
+
+- (CGPoint)recognitionResultPointForBranchSuccess:(BOOL)success hasPoint:(BOOL *)hasPoint {
+    NSDictionary *config = [self mutableBranchConfigForSuccess:success];
+    id value = config[@"point"];
+    if ([value isKindOfClass:NSValue.class]) {
+        if (hasPoint) {
+            *hasPoint = YES;
+        }
+        return [(NSValue *)value CGPointValue];
+    }
+    if (hasPoint) {
+        *hasPoint = NO;
+    }
+    return CGPointZero;
+}
+
+- (NSTimeInterval)recognitionResultLongPressDurationForBranchSuccess:(BOOL)success {
+    NSDictionary *config = [self mutableBranchConfigForSuccess:success];
+    id millisecondValue = config[@"pressDurationMs"];
+    if ([millisecondValue respondsToSelector:@selector(doubleValue)]) {
+        return MAX(0.0, [millisecondValue doubleValue] / 1000.0);
+    }
+    id value = config[@"pressDuration"];
+    if ([value respondsToSelector:@selector(doubleValue)]) {
+        return MAX(0.0, [value doubleValue]);
+    }
+    return self.model.longPressDuration > 0.0 ? self.model.longPressDuration : 0.50;
+}
+
+- (NSArray<NSDictionary *> *)recognitionResultActionItems {
+    NSArray<NSNumber *> *modes = @[
+        @(AnClickActionModeTap),
+        @(AnClickActionModeDoubleTap),
+        @(AnClickActionModeLongPress),
+        @(AnClickActionModeTwoFingerTap),
+    ];
+    NSMutableArray<NSDictionary *> *items = [NSMutableArray array];
+    for (NSNumber *modeNumber in modes) {
+        AnClickActionMode mode = (AnClickActionMode)modeNumber.integerValue;
+        [items addObject:@{
+            @"title": [self branchActionShortTitleForMode:mode],
+            @"mode": @(mode),
+        }];
+    }
+    return items;
+}
+
+- (void)storeRecognitionResultUseMatchPoint:(BOOL)useMatchPoint forBranchSuccess:(BOOL)success {
+    NSMutableDictionary *config = [self mutableBranchConfigForSuccess:success];
+    config[@"useMatchPoint"] = @(useMatchPoint);
+    [self storeMutableBranchConfig:config success:success];
+    [self notifyModelChanged];
+    [self reloadForm];
+}
+
+- (void)storeRecognitionResultPointText:(NSString *)text forBranchSuccess:(BOOL)success {
+    CGPoint point = CGPointZero;
+    if (![self pointFromText:text point:&point]) {
+        return;
+    }
+    NSMutableDictionary *config = [self mutableBranchConfigForSuccess:success];
+    config[@"point"] = [NSValue valueWithCGPoint:point];
+    config[@"useMatchPoint"] = @NO;
+    [self storeMutableBranchConfig:config success:success];
+}
+
+- (void)storeRecognitionResultLongPressText:(NSString *)text forBranchSuccess:(BOOL)success {
+    NSMutableDictionary *config = [self mutableBranchConfigForSuccess:success];
+    NSTimeInterval duration = MAX(0.0, text.doubleValue / 1000.0);
+    config[@"pressDuration"] = @(duration);
+    config[@"pressDurationMs"] = @(MAX(0, text.integerValue));
+    [self storeMutableBranchConfig:config success:success];
+}
+
+- (void)setRecognitionResultActionMode:(AnClickActionMode)mode forBranchSuccess:(BOOL)success {
+    if (![self branchActionModeCanUseRecognitionPoint:mode]) {
+        mode = AnClickActionModeTap;
+    }
+    NSMutableDictionary *config = [self mutableBranchConfigForSuccess:success];
+    config[@"imageActionMode"] = @(mode);
+    [self storeMutableBranchConfig:config success:success];
+    [self notifyModelChanged];
+    [self reloadForm];
+}
+
 - (NSDictionary *)draftBranchConfigForMode:(AnClickActionMode)mode {
     if (mode == AnClickActionModeNone || mode == AnClickActionModeJump) {
         return @{};
@@ -1063,6 +1212,34 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             return recognitionMode && [self branchActionModeNeedsFullConfig:self.model.successActionMode success:YES];
         case ACEditorRowKindFailureActionConfig:
             return recognitionMode && [self branchActionModeNeedsFullConfig:self.model.failureActionMode success:NO];
+        case ACEditorRowKindSuccessRecognitionResultActionMode:
+            return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:YES];
+        case ACEditorRowKindFailureRecognitionResultActionMode:
+            return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:NO];
+        case ACEditorRowKindSuccessRecognitionResultClickTargetMode:
+            return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:YES] &&
+                [self branchActionModeCanUseRecognitionPoint:[self recognitionResultActionModeForBranchSuccess:YES]];
+        case ACEditorRowKindFailureRecognitionResultClickTargetMode:
+            return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:NO] &&
+                [self branchActionModeCanUseRecognitionPoint:[self recognitionResultActionModeForBranchSuccess:NO]];
+        case ACEditorRowKindSuccessRecognitionResultCoordinate:
+            return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:YES] &&
+                [self branchActionModeCanUseRecognitionPoint:[self recognitionResultActionModeForBranchSuccess:YES]] &&
+                ![self recognitionResultUsesMatchPointForBranchSuccess:YES];
+        case ACEditorRowKindFailureRecognitionResultCoordinate:
+            return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:NO] &&
+                [self branchActionModeCanUseRecognitionPoint:[self recognitionResultActionModeForBranchSuccess:NO]] &&
+                ![self recognitionResultUsesMatchPointForBranchSuccess:NO];
+        case ACEditorRowKindSuccessRecognitionResultPointPick:
+            return [self shouldShowRowForKind:ACEditorRowKindSuccessRecognitionResultCoordinate];
+        case ACEditorRowKindFailureRecognitionResultPointPick:
+            return [self shouldShowRowForKind:ACEditorRowKindFailureRecognitionResultCoordinate];
+        case ACEditorRowKindSuccessRecognitionResultLongPress:
+            return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:YES] &&
+                [self recognitionResultActionModeForBranchSuccess:YES] == AnClickActionModeLongPress;
+        case ACEditorRowKindFailureRecognitionResultLongPress:
+            return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:NO] &&
+                [self recognitionResultActionModeForBranchSuccess:NO] == AnClickActionModeLongPress;
         case ACEditorRowKindSuccessBranch:
             return recognitionMode && self.model.successActionMode == AnClickActionModeJump;
         case ACEditorRowKindFailureBranch:
@@ -1082,12 +1259,42 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         if ([self shouldShowRowForKind:ACEditorRowKindSuccessActionConfig]) {
             [rows addObject:@(ACEditorRowKindSuccessActionConfig)];
         }
+        if ([self shouldShowRowForKind:ACEditorRowKindSuccessRecognitionResultActionMode]) {
+            [rows addObject:@(ACEditorRowKindSuccessRecognitionResultActionMode)];
+        }
+        if ([self shouldShowRowForKind:ACEditorRowKindSuccessRecognitionResultClickTargetMode]) {
+            [rows addObject:@(ACEditorRowKindSuccessRecognitionResultClickTargetMode)];
+        }
+        if ([self shouldShowRowForKind:ACEditorRowKindSuccessRecognitionResultCoordinate]) {
+            [rows addObject:@(ACEditorRowKindSuccessRecognitionResultCoordinate)];
+        }
+        if ([self shouldShowRowForKind:ACEditorRowKindSuccessRecognitionResultPointPick]) {
+            [rows addObject:@(ACEditorRowKindSuccessRecognitionResultPointPick)];
+        }
+        if ([self shouldShowRowForKind:ACEditorRowKindSuccessRecognitionResultLongPress]) {
+            [rows addObject:@(ACEditorRowKindSuccessRecognitionResultLongPress)];
+        }
         if ([self shouldShowRowForKind:ACEditorRowKindSuccessBranch]) {
             [rows addObject:@(ACEditorRowKindSuccessBranch)];
         }
         [rows addObject:@(ACEditorRowKindFailureActionMode)];
         if ([self shouldShowRowForKind:ACEditorRowKindFailureActionConfig]) {
             [rows addObject:@(ACEditorRowKindFailureActionConfig)];
+        }
+        if ([self shouldShowRowForKind:ACEditorRowKindFailureRecognitionResultActionMode]) {
+            [rows addObject:@(ACEditorRowKindFailureRecognitionResultActionMode)];
+        }
+        if ([self shouldShowRowForKind:ACEditorRowKindFailureRecognitionResultClickTargetMode]) {
+            [rows addObject:@(ACEditorRowKindFailureRecognitionResultClickTargetMode)];
+        }
+        if ([self shouldShowRowForKind:ACEditorRowKindFailureRecognitionResultCoordinate]) {
+            [rows addObject:@(ACEditorRowKindFailureRecognitionResultCoordinate)];
+        }
+        if ([self shouldShowRowForKind:ACEditorRowKindFailureRecognitionResultPointPick]) {
+            [rows addObject:@(ACEditorRowKindFailureRecognitionResultPointPick)];
+        }
+        if ([self shouldShowRowForKind:ACEditorRowKindFailureRecognitionResultLongPress]) {
+            [rows addObject:@(ACEditorRowKindFailureRecognitionResultLongPress)];
         }
         if ([self shouldShowRowForKind:ACEditorRowKindFailureBranch]) {
             [rows addObject:@(ACEditorRowKindFailureBranch)];
@@ -1231,6 +1438,27 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         cell.iconLabel.textColor = success ? UIColor.systemGreenColor : UIColor.systemRedColor;
         return cell;
     }
+    if (row == ACEditorRowKindSuccessRecognitionResultActionMode ||
+        row == ACEditorRowKindFailureRecognitionResultActionMode) {
+        ACEditorActionChoiceCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ActionChoice" forIndexPath:indexPath];
+        BOOL success = row == ACEditorRowKindSuccessRecognitionResultActionMode;
+        AnClickActionMode ownerMode = success ? self.model.successActionMode : self.model.failureActionMode;
+        AnClickActionMode selectedMode = [self recognitionResultActionModeForBranchSuccess:success];
+        __weak typeof(self) weakSelf = self;
+        cell.selectionHandler = ^(AnClickActionMode mode) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            [strongSelf setRecognitionResultActionMode:mode forBranchSuccess:success];
+        };
+        NSString *role = success ? @"成功后" : @"失败后";
+        NSString *title = [NSString stringWithFormat:@"%@%@命中动作", role, [self branchActionShortTitleForMode:ownerMode]];
+        [cell configureWithTitle:title
+                            icon:success ? @"↳" : @"↯"
+                           items:[self recognitionResultActionItems]
+                    selectedMode:selectedMode];
+        cell.iconLabel.textColor = success ? UIColor.systemGreenColor : UIColor.systemRedColor;
+        return cell;
+    }
     if (row == ACEditorRowKindThreshold || row == ACEditorRowKindOCRSimilarity) {
         ACEditorSliderCell *cell = [tableView dequeueReusableCellWithIdentifier:@"Slider" forIndexPath:indexPath];
         cell.iconLabel.text = row == ACEditorRowKindOCRSimilarity ? @"🔎" : @"⚖";
@@ -1263,6 +1491,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         row == ACEditorRowKindMacroRecord ||
         row == ACEditorRowKindSuccessActionConfig ||
         row == ACEditorRowKindFailureActionConfig ||
+        row == ACEditorRowKindSuccessRecognitionResultPointPick ||
+        row == ACEditorRowKindFailureRecognitionResultPointPick ||
         row == ACEditorRowKindSingleStep ||
         row == ACEditorRowKindDelete) {
         ACEditorButtonCell *cell = [tableView dequeueReusableCellWithIdentifier:@"Button" forIndexPath:indexPath];
@@ -1302,6 +1532,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             } else {
                 title = [NSString stringWithFormat:@"%@ %@%@配置", verb, role, [self branchActionShortTitleForMode:mode]];
             }
+        } else if (row == ACEditorRowKindSuccessRecognitionResultPointPick ||
+                   row == ACEditorRowKindFailureRecognitionResultPointPick) {
+            title = row == ACEditorRowKindSuccessRecognitionResultPointPick
+                ? @"⌖ 设置成功分支命中后点击坐标"
+                : @"⌖ 设置失败分支命中后点击坐标";
         } else if (row == ACEditorRowKindSingleStep) {
             title = @"运行此单步测试";
         } else {
@@ -1357,6 +1592,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 - (BOOL)isSegmentedRow:(ACEditorRowKind)row {
     return row == ACEditorRowKindColorMatchMode ||
         row == ACEditorRowKindRecognitionClickTargetMode ||
+        row == ACEditorRowKindSuccessRecognitionResultClickTargetMode ||
+        row == ACEditorRowKindFailureRecognitionResultClickTargetMode ||
         row == ACEditorRowKindOCRMatchMode ||
         row == ACEditorRowKindNetworkMethod ||
         row == ACEditorRowKindNetworkRetryMode ||
@@ -1382,6 +1619,16 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             items = @[@"识别中心", @"自定义坐标"];
             selectedIndex = self.model.useMatchPoint ? 0 : 1;
             break;
+        case ACEditorRowKindSuccessRecognitionResultClickTargetMode:
+        case ACEditorRowKindFailureRecognitionResultClickTargetMode: {
+            BOOL success = row == ACEditorRowKindSuccessRecognitionResultClickTargetMode;
+            cell.iconLabel.text = success ? @"↳" : @"↯";
+            cell.iconLabel.textColor = success ? UIColor.systemGreenColor : UIColor.systemRedColor;
+            cell.titleLabel.text = @"命中点击位置";
+            items = @[@"识别中心", @"自定义坐标"];
+            selectedIndex = [self recognitionResultUsesMatchPointForBranchSuccess:success] ? 0 : 1;
+            break;
+        }
         case ACEditorRowKindOCRMatchMode:
             cell.iconLabel.text = @"≋";
             cell.titleLabel.text = @"匹配模式";
@@ -1447,6 +1694,18 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             } else {
                 cell.textField.text = self.model.point ? [NSString stringWithFormat:@"%.0f, %.0f", point.x, point.y] : @"未拾取";
             }
+            cell.textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+            break;
+        }
+        case ACEditorRowKindSuccessRecognitionResultCoordinate:
+        case ACEditorRowKindFailureRecognitionResultCoordinate: {
+            BOOL success = row == ACEditorRowKindSuccessRecognitionResultCoordinate;
+            BOOL hasPoint = NO;
+            CGPoint point = [self recognitionResultPointForBranchSuccess:success hasPoint:&hasPoint];
+            cell.iconLabel.text = success ? @"↳" : @"↯";
+            cell.iconLabel.textColor = success ? UIColor.systemGreenColor : UIColor.systemRedColor;
+            cell.titleLabel.text = success ? @"成功命中后坐标" : @"失败命中后坐标";
+            cell.textField.text = hasPoint ? [self pointText:point] : @"未拾取";
             cell.textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
             break;
         }
@@ -1607,6 +1866,18 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             cell.textField.keyboardType = UIKeyboardTypeNumberPad;
             cell.unitLabel.text = @"ms";
             break;
+        case ACEditorRowKindSuccessRecognitionResultLongPress:
+        case ACEditorRowKindFailureRecognitionResultLongPress: {
+            BOOL success = row == ACEditorRowKindSuccessRecognitionResultLongPress;
+            NSTimeInterval duration = [self recognitionResultLongPressDurationForBranchSuccess:success];
+            cell.iconLabel.text = success ? @"↳" : @"↯";
+            cell.iconLabel.textColor = success ? UIColor.systemGreenColor : UIColor.systemRedColor;
+            cell.titleLabel.text = success ? @"成功命中后长按" : @"失败命中后长按";
+            cell.textField.text = [NSString stringWithFormat:@"%.0f", duration * 1000.0];
+            cell.textField.keyboardType = UIKeyboardTypeNumberPad;
+            cell.unitLabel.text = @"ms";
+            break;
+        }
         case ACEditorRowKindSuccessBranch:
             cell.iconLabel.text = @"✓";
             cell.iconLabel.textColor = UIColor.systemGreenColor;
@@ -1631,6 +1902,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     switch ((ACEditorRowKind)textField.tag) {
         case ACEditorRowKindCoordinate:
             [self updateModelPointFromText:text];
+            break;
+        case ACEditorRowKindSuccessRecognitionResultCoordinate:
+            [self storeRecognitionResultPointText:text forBranchSuccess:YES];
+            break;
+        case ACEditorRowKindFailureRecognitionResultCoordinate:
+            [self storeRecognitionResultPointText:text forBranchSuccess:NO];
             break;
         case ACEditorRowKindSwipeStart:
             [self updateSwipePointAtIndex:0 text:text];
@@ -1694,6 +1971,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             break;
         case ACEditorRowKindLongPress:
             self.model.longPressDuration = MAX(0, text.integerValue) / 1000.0;
+            break;
+        case ACEditorRowKindSuccessRecognitionResultLongPress:
+            [self storeRecognitionResultLongPressText:text forBranchSuccess:YES];
+            break;
+        case ACEditorRowKindFailureRecognitionResultLongPress:
+            [self storeRecognitionResultLongPressText:text forBranchSuccess:NO];
             break;
         case ACEditorRowKindRecognitionRetryInterval:
             self.model.recognitionRetryInterval = MIN(30.0, MAX(0.2, text.doubleValue / 1000.0));
@@ -1814,6 +2097,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             self.model.useMatchPoint = selected != 1;
             [self reloadForm];
             break;
+        case ACEditorRowKindSuccessRecognitionResultClickTargetMode:
+            [self storeRecognitionResultUseMatchPoint:(selected != 1) forBranchSuccess:YES];
+            break;
+        case ACEditorRowKindFailureRecognitionResultClickTargetMode:
+            [self storeRecognitionResultUseMatchPoint:(selected != 1) forBranchSuccess:NO];
+            break;
         case ACEditorRowKindOCRMatchMode:
             self.model.ocrMatchMode = selected == 1 ? AnClickOCRMatchModeRegex : AnClickOCRMatchModeContains;
             break;
@@ -1852,6 +2141,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             break;
         case ACEditorRowKindFailureActionConfig:
             [self.delegate taskEditorViewDidRequestFailureActionConfig:self];
+            break;
+        case ACEditorRowKindSuccessRecognitionResultPointPick:
+            [self.delegate taskEditorView:self didRequestRecognitionResultPointPickForSuccess:YES];
+            break;
+        case ACEditorRowKindFailureRecognitionResultPointPick:
+            [self.delegate taskEditorView:self didRequestRecognitionResultPointPickForSuccess:NO];
             break;
         case ACEditorRowKindSingleStep:
             [self.delegate taskEditorViewDidRequestSingleStepTest:self];

@@ -524,6 +524,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _editingNestedBranchActionSuccess;
     BOOL _branchColorPickActive;
     BOOL _branchColorPickSuccess;
+    BOOL _pickingBranchRecognitionResultPoint;
+    BOOL _pickingBranchRecognitionResultSuccess;
 }
 
 - (UIColor *)themeHighlightColor {
@@ -9417,6 +9419,63 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self beginPointPicking];
 }
 
+- (void)taskEditorView:(AnClickTaskEditorView *)editorView didRequestRecognitionResultPointPickForSuccess:(BOOL)success {
+    AnClickTaskModel *model = [editorView.model copy];
+    AnClickActionMode branchMode = success
+        ? [self normalizedImageActionMode:model.successActionMode]
+        : [self normalizedFailureActionMode:model.failureActionMode];
+    if (![self modeIsRecognitionTask:branchMode]) {
+        [self showToast:success ? @"先选择成功后识别动作" : @"先选择失败后识别动作"];
+        return;
+    }
+    _editingTaskModel = model;
+    [self stageTaskEditorModelForRuntime:model];
+    UIWindow *hostWindow = [self hostWindow];
+    if (!hostWindow) {
+        [self showToast:@"无窗口"];
+        return;
+    }
+    _pickingBranchRecognitionResultPoint = YES;
+    _pickingBranchRecognitionResultSuccess = success;
+    _pickingSuccessActionPoint = NO;
+    _pickingFailureActionPoint = NO;
+    _pickingSwipeEndPoint = NO;
+    [self beginScreenPointPickingWithHostWindow:hostWindow];
+}
+
+- (void)storeBranchRecognitionResultPoint:(CGPoint)point success:(BOOL)success {
+    AnClickTaskModel *model = _editingTaskModel ? [_editingTaskModel copy] : [[AnClickTaskModel alloc] init];
+    AnClickActionMode branchMode = success
+        ? [self normalizedImageActionMode:model.successActionMode]
+        : [self normalizedFailureActionMode:model.failureActionMode];
+    if (![self modeIsRecognitionTask:branchMode]) {
+        return;
+    }
+
+    NSDictionary *existingConfig = success ? model.successActionConfig : model.failureActionConfig;
+    if (![existingConfig isKindOfClass:NSDictionary.class] ||
+        [self modeForTask:existingConfig] != branchMode) {
+        existingConfig = success ? model.successRecognitionActionConfig : model.failureRecognitionActionConfig;
+    }
+    NSMutableDictionary *config = ([existingConfig isKindOfClass:NSDictionary.class] &&
+                                   [self modeForTask:existingConfig] == branchMode)
+        ? [existingConfig mutableCopy]
+        : [self draftActionTaskForMode:branchMode];
+    config[@"mode"] = @(branchMode);
+    config[@"point"] = [NSValue valueWithCGPoint:point];
+    config[@"pointScreenSize"] = [self currentScreenCoordinateSizeValue];
+    config[@"useMatchPoint"] = @NO;
+
+    if (success) {
+        model.successActionConfig = config;
+        model.successRecognitionActionConfig = config;
+    } else {
+        model.failureActionConfig = config;
+        model.failureRecognitionActionConfig = config;
+    }
+    _editingTaskModel = model;
+}
+
 - (void)taskEditorViewDidRequestColorPick:(AnClickTaskEditorView *)editorView {
     _editingTaskModel = [editorView.model copy];
     [self stageTaskEditorModelForRuntime:editorView.model];
@@ -11868,7 +11927,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     return;
                 }
                 actionPoint = [strongSelf point:actionPoint byApplyingJitterForTask:task];
-                [strongSelf performPointActionMode:imageActionMode atPoint:actionPoint inWindow:currentHostWindow];
+                NSTimeInterval actionLongPressDuration = [strongSelf longPressDurationForTask:task];
+                NSTimeInterval actionDuration = imageActionMode == AnClickActionModeLongPress
+                    ? [strongSelf longPressOperationDurationForDuration:actionLongPressDuration]
+                    : [strongSelf durationForTaskMode:imageActionMode];
+                [strongSelf performPointActionMode:imageActionMode
+                                           atPoint:actionPoint
+                                          inWindow:currentHostWindow
+                                         showTrace:YES
+                                 longPressDuration:actionLongPressDuration];
                 strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f %@ %.0f,%.0f",
                                                  scoreNumber.doubleValue,
                                                  [strongSelf actionNameForMode:imageActionMode],
@@ -11876,7 +11943,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                  actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                   delay:[strongSelf durationForTaskMode:imageActionMode] + 0.03];
+                                                                   delay:actionDuration + 0.03];
                 if (completion) {
                     completion(YES);
                 }
@@ -12100,7 +12167,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     return;
                 }
                 actionPoint = [strongSelf point:actionPoint byApplyingJitterForTask:task];
-                [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
+                NSTimeInterval actionLongPressDuration = [strongSelf longPressDurationForTask:task];
+                NSTimeInterval actionDuration = actionMode == AnClickActionModeLongPress
+                    ? [strongSelf longPressOperationDurationForDuration:actionLongPressDuration]
+                    : [strongSelf durationForTaskMode:actionMode];
+                [strongSelf performPointActionMode:actionMode
+                                           atPoint:actionPoint
+                                          inWindow:currentHostWindow
+                                         showTrace:YES
+                                 longPressDuration:actionLongPressDuration];
                 strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ %.0f,%.0f",
                                                  matchSummary,
                                                  text,
@@ -12108,7 +12183,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                  actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                   delay:[strongSelf durationForTaskMode:actionMode] + 0.03];
+                                                                   delay:actionDuration + 0.03];
                 if (completion) {
                     completion(YES);
                 }
@@ -12311,14 +12386,22 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     return;
                 }
                 actionPoint = [strongSelf point:actionPoint byApplyingJitterForTask:task];
-                [strongSelf performPointActionMode:actionMode atPoint:actionPoint inWindow:currentHostWindow];
+                NSTimeInterval actionLongPressDuration = [strongSelf longPressDurationForTask:task];
+                NSTimeInterval actionDuration = actionMode == AnClickActionModeLongPress
+                    ? [strongSelf longPressOperationDurationForDuration:actionLongPressDuration]
+                    : [strongSelf durationForTaskMode:actionMode];
+                [strongSelf performPointActionMode:actionMode
+                                           atPoint:actionPoint
+                                          inWindow:currentHostWindow
+                                         showTrace:YES
+                                 longPressDuration:actionLongPressDuration];
                 strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ %.0f,%.0f",
                                                  patternSummary,
                                                  actionPoint.x,
                                                  actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                   delay:[strongSelf durationForTaskMode:actionMode] + 0.03];
+                                                                   delay:actionDuration + 0.03];
                 if (completion) {
                     completion(YES);
                 }
@@ -14069,6 +14152,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     _pickingSuccessActionPoint = NO;
     _pickingFailureActionPoint = NO;
+    _pickingBranchRecognitionResultPoint = NO;
+    _pickingBranchRecognitionResultSuccess = NO;
 
     UIWindow *hostWindow = [self hostWindow];
     if (!hostWindow) {
@@ -14442,6 +14527,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _pickingSwipeEndPoint = NO;
     _pickingSuccessActionPoint = NO;
     _pickingFailureActionPoint = NO;
+    _pickingBranchRecognitionResultPoint = NO;
+    _pickingBranchRecognitionResultSuccess = NO;
     [self restorePanelAfterExternalTap];
 }
 
@@ -14505,6 +14592,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_actionMode == AnClickActionModeNone) {
         [self cancelPointPicking];
         _statusLabel.text = @"先选择动作";
+        return;
+    }
+
+    if (_pickingBranchRecognitionResultPoint) {
+        BOOL success = _pickingBranchRecognitionResultSuccess;
+        [self storeBranchRecognitionResultPoint:screenPoint success:success];
+        _pickingBranchRecognitionResultPoint = NO;
+        _pickingBranchRecognitionResultSuccess = NO;
+        [self finishPointPickingOverlay];
+        [self refreshTaskEditorViewFromCurrentState];
+        [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow];
+        _statusLabel.text = success ? @"已设置成功分支命中后坐标" : @"已设置失败分支命中后坐标";
+        [self showToast:_statusLabel.text];
         return;
     }
 
