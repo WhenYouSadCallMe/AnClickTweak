@@ -997,7 +997,33 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     return mode;
 }
 
+- (AnClickActionMode)branchPointActionModeForSuccess:(BOOL)success {
+    if ([self branchSelectedActionIsRecognitionForSuccess:success]) {
+        return [self recognitionResultActionModeForBranchSuccess:success];
+    }
+    return success ? self.model.successActionMode : self.model.failureActionMode;
+}
+
+- (BOOL)branchPointRowsAvailableForSuccess:(BOOL)success recognitionMode:(BOOL)recognitionMode {
+    if (!recognitionMode) {
+        return NO;
+    }
+    return [self branchActionModeCanUseRecognitionPoint:[self branchPointActionModeForSuccess:success]];
+}
+
+- (BOOL)branchPointTargetModeRowAvailableForSuccess:(BOOL)success recognitionMode:(BOOL)recognitionMode {
+    if (![self branchPointRowsAvailableForSuccess:success recognitionMode:recognitionMode]) {
+        return NO;
+    }
+    return success || [self branchSelectedActionIsRecognitionForSuccess:success];
+}
+
 - (BOOL)recognitionResultUsesMatchPointForBranchSuccess:(BOOL)success {
+    if (!success &&
+        ![self branchSelectedActionIsRecognitionForSuccess:NO] &&
+        [self branchActionModeCanUseRecognitionPoint:self.model.failureActionMode]) {
+        return NO;
+    }
     NSDictionary *config = [self mutableBranchConfigForSuccess:success];
     id value = config[@"useMatchPoint"];
     return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : YES;
@@ -1131,7 +1157,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             self.model.successBranchIndex = -1;
         }
         if (previous != mode) {
-            NSDictionary *config = [self draftBranchConfigForMode:mode];
+            NSMutableDictionary *config = [[self draftBranchConfigForMode:mode] mutableCopy];
             self.model.successActionConfig = config;
             self.model.successRecognitionActionConfig = (mode == AnClickActionModeImage ||
                 mode == AnClickActionModeOCR ||
@@ -1143,7 +1169,10 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             self.model.failureBranchIndex = -1;
         }
         if (previous != mode) {
-            NSDictionary *config = [self draftBranchConfigForMode:mode];
+            NSMutableDictionary *config = [[self draftBranchConfigForMode:mode] mutableCopy];
+            if ([self branchActionModeCanUseRecognitionPoint:mode]) {
+                config[@"useMatchPoint"] = @NO;
+            }
             self.model.failureActionConfig = config;
             self.model.failureRecognitionActionConfig = (mode == AnClickActionModeImage ||
                 mode == AnClickActionModeOCR ||
@@ -1248,29 +1277,25 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindFailureRecognitionResultActionMode:
             return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:NO];
         case ACEditorRowKindSuccessRecognitionResultClickTargetMode:
-            return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:YES] &&
-                [self branchActionModeCanUseRecognitionPoint:[self recognitionResultActionModeForBranchSuccess:YES]];
+            return [self branchPointTargetModeRowAvailableForSuccess:YES recognitionMode:recognitionMode];
         case ACEditorRowKindFailureRecognitionResultClickTargetMode:
-            return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:NO] &&
-                [self branchActionModeCanUseRecognitionPoint:[self recognitionResultActionModeForBranchSuccess:NO]];
+            return [self branchPointTargetModeRowAvailableForSuccess:NO recognitionMode:recognitionMode];
         case ACEditorRowKindSuccessRecognitionResultCoordinate:
-            return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:YES] &&
-                [self branchActionModeCanUseRecognitionPoint:[self recognitionResultActionModeForBranchSuccess:YES]] &&
+            return [self branchPointRowsAvailableForSuccess:YES recognitionMode:recognitionMode] &&
                 ![self recognitionResultUsesMatchPointForBranchSuccess:YES];
         case ACEditorRowKindFailureRecognitionResultCoordinate:
-            return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:NO] &&
-                [self branchActionModeCanUseRecognitionPoint:[self recognitionResultActionModeForBranchSuccess:NO]] &&
+            return [self branchPointRowsAvailableForSuccess:NO recognitionMode:recognitionMode] &&
                 ![self recognitionResultUsesMatchPointForBranchSuccess:NO];
         case ACEditorRowKindSuccessRecognitionResultPointPick:
             return [self shouldShowRowForKind:ACEditorRowKindSuccessRecognitionResultCoordinate];
         case ACEditorRowKindFailureRecognitionResultPointPick:
             return [self shouldShowRowForKind:ACEditorRowKindFailureRecognitionResultCoordinate];
         case ACEditorRowKindSuccessRecognitionResultLongPress:
-            return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:YES] &&
-                [self recognitionResultActionModeForBranchSuccess:YES] == AnClickActionModeLongPress;
+            return [self branchPointRowsAvailableForSuccess:YES recognitionMode:recognitionMode] &&
+                [self branchPointActionModeForSuccess:YES] == AnClickActionModeLongPress;
         case ACEditorRowKindFailureRecognitionResultLongPress:
-            return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:NO] &&
-                [self recognitionResultActionModeForBranchSuccess:NO] == AnClickActionModeLongPress;
+            return [self branchPointRowsAvailableForSuccess:NO recognitionMode:recognitionMode] &&
+                [self branchPointActionModeForSuccess:NO] == AnClickActionModeLongPress;
         case ACEditorRowKindSuccessBranch:
             return recognitionMode && self.model.successActionMode == AnClickActionModeJump;
         case ACEditorRowKindFailureBranch:
@@ -1571,9 +1596,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             }
         } else if (row == ACEditorRowKindSuccessRecognitionResultPointPick ||
                    row == ACEditorRowKindFailureRecognitionResultPointPick) {
-            title = row == ACEditorRowKindSuccessRecognitionResultPointPick
-                ? @"⌖ 设置成功分支命中后点击坐标"
-                : @"⌖ 设置失败分支命中后点击坐标";
+            BOOL success = row == ACEditorRowKindSuccessRecognitionResultPointPick;
+            BOOL nestedRecognition = [self branchSelectedActionIsRecognitionForSuccess:success];
+            title = [NSString stringWithFormat:@"⌖ 设置%@分支%@点击坐标",
+                     success ? @"成功" : @"失败",
+                     nestedRecognition ? @"命中后" : @""];
         } else if (row == ACEditorRowKindSingleStep) {
             title = @"运行此单步测试";
         } else {
@@ -1661,7 +1688,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             BOOL success = row == ACEditorRowKindSuccessRecognitionResultClickTargetMode;
             cell.iconLabel.text = success ? @"↳" : @"↯";
             cell.iconLabel.textColor = success ? UIColor.systemGreenColor : UIColor.systemRedColor;
-            cell.titleLabel.text = @"命中点击位置";
+            cell.titleLabel.text = [self branchSelectedActionIsRecognitionForSuccess:success] ? @"命中点击位置" : @"点击位置";
             items = @[@"识别中心", @"自定义坐标"];
             selectedIndex = [self recognitionResultUsesMatchPointForBranchSuccess:success] ? 0 : 1;
             break;
@@ -1741,7 +1768,10 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             CGPoint point = [self recognitionResultPointForBranchSuccess:success hasPoint:&hasPoint];
             cell.iconLabel.text = success ? @"↳" : @"↯";
             cell.iconLabel.textColor = success ? UIColor.systemGreenColor : UIColor.systemRedColor;
-            cell.titleLabel.text = success ? @"成功命中后坐标" : @"失败命中后坐标";
+            BOOL nestedRecognition = [self branchSelectedActionIsRecognitionForSuccess:success];
+            cell.titleLabel.text = [NSString stringWithFormat:@"%@分支%@坐标",
+                                    success ? @"成功" : @"失败",
+                                    nestedRecognition ? @"命中后" : @""];
             cell.textField.text = hasPoint ? [self pointText:point] : @"未拾取";
             cell.textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
             break;

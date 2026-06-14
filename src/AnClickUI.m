@@ -1696,7 +1696,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _toolTitleLabel.textColor = [self themePrimaryTextColor];
     _toolTitleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightBold];
     _toolTitleLabel.adjustsFontSizeToFitWidth = YES;
-    _toolTitleLabel.minimumScaleFactor = 0.68;
+    _toolTitleLabel.minimumScaleFactor = 0.45;
+    _toolTitleLabel.numberOfLines = 1;
+    _toolTitleLabel.lineBreakMode = NSLineBreakByClipping;
     _toolTitleLabel.textAlignment = NSTextAlignmentLeft;
     [_homeBrandView addSubview:_toolTitleLabel];
 
@@ -3593,7 +3595,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _homeBrandView.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.76];
     _homeBrandView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.42].CGColor;
 
-    CGFloat followWidth = MIN(108.0, MAX(94.0, floor(width * 0.32)));
+    CGFloat followWidth = MIN(106.0, MAX(92.0, floor(width * 0.30)));
     _authorFollowButton.hidden = NO;
     _authorFollowButton.frame = CGRectMake(CGRectGetWidth(_homeBrandView.bounds) - followWidth - 7.0,
                                            6.0,
@@ -3605,14 +3607,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     _toolTitleLabel.hidden = NO;
     _toolTitleLabel.text = [self toolDisplayName];
-    CGFloat titleInset = MAX(12.0, followWidth + 18.0);
-    _toolTitleLabel.frame = CGRectMake(titleInset,
+    CGFloat titleX = 9.0;
+    CGFloat titleWidth = CGRectGetMinX(_authorFollowButton.frame) - titleX - 8.0;
+    _toolTitleLabel.frame = CGRectMake(titleX,
                                        0.0,
-                                       MAX(10.0, CGRectGetWidth(_homeBrandView.bounds) - titleInset * 2.0),
+                                       MAX(80.0, titleWidth),
                                        brandHeight);
     _toolTitleLabel.textColor = [self themePrimaryTextColor];
-    _toolTitleLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightHeavy];
-    _toolTitleLabel.textAlignment = NSTextAlignmentCenter;
+    _toolTitleLabel.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightHeavy];
+    _toolTitleLabel.textAlignment = NSTextAlignmentLeft;
 
     CGFloat outputHeight = [self homeOutputFooterHeight];
     _homeOutputView.hidden = NO;
@@ -7988,7 +7991,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
         BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
         if (useMatchPoint) {
-            return @"识别位置";
+            return @"识别中心";
         }
 
         NSValue *customPointValue = task[@"point"];
@@ -8896,6 +8899,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             if (clickTarget.length > 0) {
                 [self addTaskListDetailRowWithTitle:@"成功点击" value:clickTarget tint:tint rows:rows];
             }
+            NSString *failureClickTarget = [self recognitionActionPointTargetForTask:task actionMode:[self failureActionModeForTask:task] success:NO];
+            if (failureClickTarget.length > 0) {
+                [self addTaskListDetailRowWithTitle:@"失败点击" value:failureClickTarget tint:tint rows:rows];
+            }
             [self addTaskListDetailRowWithTitle:@"识别重试" value:[self taskListRecognitionRetrySummaryForTask:task] tint:tint rows:rows];
             break;
         }
@@ -8908,6 +8915,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             if (clickTarget.length > 0) {
                 [self addTaskListDetailRowWithTitle:@"成功点击" value:clickTarget tint:tint rows:rows];
             }
+            NSString *failureClickTarget = [self recognitionActionPointTargetForTask:task actionMode:[self failureActionModeForTask:task] success:NO];
+            if (failureClickTarget.length > 0) {
+                [self addTaskListDetailRowWithTitle:@"失败点击" value:failureClickTarget tint:tint rows:rows];
+            }
             [self addTaskListDetailRowWithTitle:@"识别重试" value:[self taskListRecognitionRetrySummaryForTask:task] tint:tint rows:rows];
             break;
         }
@@ -8918,6 +8929,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             NSString *clickTarget = [self recognitionActionPointTargetForTask:task actionMode:[self successActionModeForTask:task] success:YES];
             if (clickTarget.length > 0) {
                 [self addTaskListDetailRowWithTitle:@"成功点击" value:clickTarget tint:tint rows:rows];
+            }
+            NSString *failureClickTarget = [self recognitionActionPointTargetForTask:task actionMode:[self failureActionModeForTask:task] success:NO];
+            if (failureClickTarget.length > 0) {
+                [self addTaskListDetailRowWithTitle:@"失败点击" value:failureClickTarget tint:tint rows:rows];
             }
             [self addTaskListDetailRowWithTitle:@"识别重试" value:[self taskListRecognitionRetrySummaryForTask:task] tint:tint rows:rows];
             break;
@@ -9678,8 +9693,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     AnClickActionMode branchMode = success
         ? [self normalizedImageActionMode:model.successActionMode]
         : [self normalizedFailureActionMode:model.failureActionMode];
-    if (![self modeIsRecognitionTask:branchMode]) {
-        [self showToast:success ? @"先选择成功后识别动作" : @"先选择失败后识别动作"];
+    if (![self modeIsRecognitionTask:branchMode] &&
+        ![self modeCanUseRecognitionPoint:branchMode]) {
         return;
     }
     _editingTaskModel = model;
@@ -9702,7 +9717,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     AnClickActionMode branchMode = success
         ? [self normalizedImageActionMode:model.successActionMode]
         : [self normalizedFailureActionMode:model.failureActionMode];
-    if (![self modeIsRecognitionTask:branchMode]) {
+    if (![self modeIsRecognitionTask:branchMode] &&
+        ![self modeCanUseRecognitionPoint:branchMode]) {
         return;
     }
 
@@ -9722,10 +9738,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     if (success) {
         model.successActionConfig = config;
-        model.successRecognitionActionConfig = config;
+        model.successRecognitionActionConfig = [self modeIsRecognitionTask:branchMode] ? config : @{};
     } else {
         model.failureActionConfig = config;
-        model.failureRecognitionActionConfig = config;
+        model.failureRecognitionActionConfig = [self modeIsRecognitionTask:branchMode] ? config : @{};
     }
     _editingTaskModel = model;
 }
@@ -10183,6 +10199,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         mode == AnClickActionModeColor;
 }
 
+- (BOOL)modeCanUseRecognitionPoint:(AnClickActionMode)mode {
+    return mode == AnClickActionModeTap ||
+        mode == AnClickActionModeDoubleTap ||
+        mode == AnClickActionModeLongPress ||
+        mode == AnClickActionModeTwoFingerTap;
+}
+
 - (NSMutableDictionary *)draftActionTaskForMode:(AnClickActionMode)mode {
     NSMutableDictionary *task = [@{
         @"mode": @(mode),
@@ -10239,7 +10262,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     id fullConfig = task[[self branchActionConfigKeyForSuccess:success]];
     if ([fullConfig isKindOfClass:NSDictionary.class] &&
         [self modeForTask:(NSDictionary *)fullConfig] == expectedMode) {
-        return (NSDictionary *)fullConfig;
+        NSDictionary *fullConfigDictionary = (NSDictionary *)fullConfig;
+        if ([self modeCanUseRecognitionPoint:expectedMode]) {
+            id useMatchPointValue = fullConfigDictionary[@"useMatchPoint"];
+            BOOL useMatchPoint = [useMatchPointValue respondsToSelector:@selector(boolValue)]
+                ? [useMatchPointValue boolValue]
+                : YES;
+            if (useMatchPoint) {
+                return nil;
+            }
+        }
+        return fullConfigDictionary;
     }
     if (![self modeIsRecognitionTask:expectedMode]) {
         return nil;
@@ -14309,11 +14342,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)beginFailureActionPointPicking {
     if (![self currentActionIsRecognitionMode]) {
-        _statusLabel.text = @"识别动作才有失败坐标";
         return;
     }
     if (![self currentFailureActionNeedsPoint]) {
-        _statusLabel.text = @"先选择失败后点击动作";
         return;
     }
 
@@ -14331,11 +14362,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)beginSuccessActionPointPicking {
     if (![self currentActionIsRecognitionMode]) {
-        _statusLabel.text = @"识别动作才有成功坐标";
         return;
     }
     if (![self currentSuccessActionNeedsPoint]) {
-        _statusLabel.text = @"先选择成功后点击动作";
         return;
     }
 
