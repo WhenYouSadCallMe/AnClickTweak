@@ -349,6 +349,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 
 @interface ACEditorButtonCell : UITableViewCell
 @property (nonatomic, strong) UIButton *button;
+@property (nonatomic, strong) UIImageView *previewImageView;
+@property (nonatomic, strong) NSLayoutConstraint *previewHeightConstraint;
 @end
 
 @implementation ACEditorButtonCell
@@ -364,13 +366,28 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         _button.layer.borderColor = UIColor.separatorColor.CGColor;
         _button.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
         _button.translatesAutoresizingMaskIntoConstraints = NO;
+        _previewImageView = [[UIImageView alloc] initWithFrame:CGRectZero];
+        _previewImageView.contentMode = UIViewContentModeScaleAspectFit;
+        _previewImageView.clipsToBounds = YES;
+        _previewImageView.layer.cornerRadius = 10.0;
+        _previewImageView.layer.borderWidth = 1.0;
+        _previewImageView.layer.borderColor = UIColor.separatorColor.CGColor;
+        _previewImageView.backgroundColor = UIColor.tertiarySystemGroupedBackgroundColor;
+        _previewImageView.hidden = YES;
+        _previewImageView.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:_button];
+        [self.contentView addSubview:_previewImageView];
+        _previewHeightConstraint = [_previewImageView.heightAnchor constraintEqualToConstant:0.0];
         [NSLayoutConstraint activateConstraints:@[
             [_button.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14.0],
             [_button.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-14.0],
             [_button.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:10.0],
-            [_button.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-10.0],
             [_button.heightAnchor constraintEqualToConstant:42.0],
+            [_previewImageView.leadingAnchor constraintEqualToAnchor:_button.leadingAnchor],
+            [_previewImageView.trailingAnchor constraintEqualToAnchor:_button.trailingAnchor],
+            [_previewImageView.topAnchor constraintEqualToAnchor:_button.bottomAnchor constant:8.0],
+            [_previewImageView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-10.0],
+            _previewHeightConstraint,
         ]];
     }
     return self;
@@ -735,7 +752,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @(ACEditorRowKindColor),
         @(ACEditorRowKindColorMatchMode),
         @(ACEditorRowKindThreshold),
-        @(ACEditorRowKindOCRMode),
         @(ACEditorRowKindOCRMatchMode),
         @(ACEditorRowKindOCRText),
         @(ACEditorRowKindOCRSimilarity),
@@ -1012,6 +1028,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindColorMatchMode:
             return mode == AnClickActionModeColor;
         case ACEditorRowKindOCRMode:
+            return NO;
         case ACEditorRowKindOCRMatchMode:
         case ACEditorRowKindOCRText:
         case ACEditorRowKindOCRSimilarity:
@@ -1251,6 +1268,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         ACEditorButtonCell *cell = [tableView dequeueReusableCellWithIdentifier:@"Button" forIndexPath:indexPath];
         [cell.button removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
         cell.button.tag = row;
+        cell.previewImageView.image = nil;
+        cell.previewImageView.hidden = YES;
+        cell.previewHeightConstraint.constant = 0.0;
         UIColor *titleColor = UIColor.systemBlueColor;
         NSString *title = @"";
         SEL action = @selector(handleButtonRow:);
@@ -1297,6 +1317,13 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             cell.button.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
             cell.button.layer.borderColor = UIColor.separatorColor.CGColor;
         }
+        NSString *previewPath = [self templatePreviewPathForButtonRow:row];
+        UIImage *previewImage = previewPath.length > 0 ? [UIImage imageWithContentsOfFile:previewPath] : nil;
+        if (previewImage.CGImage) {
+            cell.previewImageView.image = previewImage;
+            cell.previewImageView.hidden = NO;
+            cell.previewHeightConstraint.constant = 96.0;
+        }
         return cell;
     }
     ACEditorInputCell *cell = [tableView dequeueReusableCellWithIdentifier:@"Input" forIndexPath:indexPath];
@@ -1304,10 +1331,32 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     return cell;
 }
 
+- (NSString *)templatePreviewPathForButtonRow:(ACEditorRowKind)row {
+    if (row == ACEditorRowKindTemplate) {
+        return self.model.templatePath ?: @"";
+    }
+    if (row != ACEditorRowKindSuccessActionConfig &&
+        row != ACEditorRowKindFailureActionConfig) {
+        return @"";
+    }
+
+    BOOL success = row == ACEditorRowKindSuccessActionConfig;
+    AnClickActionMode mode = success ? self.model.successActionMode : self.model.failureActionMode;
+    if (mode != AnClickActionModeImage) {
+        return @"";
+    }
+    NSDictionary *config = success ? self.model.successActionConfig : self.model.failureActionConfig;
+    NSString *path = [config[@"templatePath"] isKindOfClass:NSString.class] ? config[@"templatePath"] : @"";
+    if (path.length == 0) {
+        NSDictionary *recognitionConfig = success ? self.model.successRecognitionActionConfig : self.model.failureRecognitionActionConfig;
+        path = [recognitionConfig[@"templatePath"] isKindOfClass:NSString.class] ? recognitionConfig[@"templatePath"] : @"";
+    }
+    return path;
+}
+
 - (BOOL)isSegmentedRow:(ACEditorRowKind)row {
     return row == ACEditorRowKindColorMatchMode ||
         row == ACEditorRowKindRecognitionClickTargetMode ||
-        row == ACEditorRowKindOCRMode ||
         row == ACEditorRowKindOCRMatchMode ||
         row == ACEditorRowKindNetworkMethod ||
         row == ACEditorRowKindNetworkRetryMode ||
@@ -1333,19 +1382,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             items = @[@"识别中心", @"自定义坐标"];
             selectedIndex = self.model.useMatchPoint ? 0 : 1;
             break;
-        case ACEditorRowKindOCRMode:
-            cell.iconLabel.text = @"🧠";
-            cell.titleLabel.text = @"识字引擎";
-            items = @[@"Apple"];
-            selectedIndex = 0;
-            break;
         case ACEditorRowKindOCRMatchMode:
             cell.iconLabel.text = @"≋";
             cell.titleLabel.text = @"匹配模式";
-            items = @[@"包含", @"正则", @"等于"];
-            selectedIndex = self.model.ocrMatchMode == AnClickOCRMatchModeRegex
-                ? 1
-                : (self.model.ocrMatchMode == AnClickOCRMatchModeEqual ? 2 : 0);
+            items = @[@"包含", @"正则"];
+            selectedIndex = self.model.ocrMatchMode == AnClickOCRMatchModeRegex ? 1 : 0;
             break;
         case ACEditorRowKindNetworkMethod:
             cell.iconLabel.text = @"⇄";
@@ -1773,13 +1814,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             self.model.useMatchPoint = selected != 1;
             [self reloadForm];
             break;
-        case ACEditorRowKindOCRMode:
-            self.model.ocrMode = AnClickOCRModeAppleVision;
-            break;
         case ACEditorRowKindOCRMatchMode:
-            self.model.ocrMatchMode = selected == 1
-                ? AnClickOCRMatchModeRegex
-                : (selected == 2 ? AnClickOCRMatchModeEqual : AnClickOCRMatchModeContains);
+            self.model.ocrMatchMode = selected == 1 ? AnClickOCRMatchModeRegex : AnClickOCRMatchModeContains;
             break;
         case ACEditorRowKindNetworkMethod:
             self.model.networkMethod = selected == 1 ? @"POST" : @"GET";

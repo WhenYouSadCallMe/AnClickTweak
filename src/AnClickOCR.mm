@@ -140,6 +140,20 @@
     return paddedImage;
 }
 
++ (UIImage *)imageByIncreasingPixelDensity:(UIImage *)image multiplier:(CGFloat)multiplier {
+    if (!image.CGImage || image.size.width <= 0.0 || image.size.height <= 0.0 || multiplier <= 1.0) {
+        return nil;
+    }
+
+    CGFloat baseScale = image.scale > 0.0 ? image.scale : UIScreen.mainScreen.scale;
+    CGFloat targetScale = MIN(baseScale * multiplier, 6.0);
+    UIGraphicsBeginImageContextWithOptions(image.size, NO, targetScale);
+    [image drawInRect:CGRectMake(0, 0, image.size.width, image.size.height)];
+    UIImage *denseImage = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return denseImage.CGImage ? denseImage : nil;
+}
+
 + (CGRect)imageRectForNormalizedBox:(CGRect)box image:(UIImage *)image {
     CGSize imageSize = image.size;
     CGRect rect = CGRectMake(box.origin.x * imageSize.width,
@@ -701,22 +715,31 @@
             CGPoint contentOffset = CGPointZero;
             CGSize sourceImageSize = image.size;
             UIImage *recognitionImage = [self imageByAddingRecognitionEdgePadding:image contentOffset:&contentOffset] ?: image;
-            for (NSDictionary *attempt in attempts) {
-                NSDictionary *result = [self matchNormalizedText:target
-                                                         inImage:recognitionImage
-                                                    sourceWindow:sourceWindow
-                                                 sourceImageSize:sourceImageSize
-                                                   contentOffset:contentOffset
-                                                           level:(VNRequestTextRecognitionLevel)[attempt[@"level"] integerValue]
-                                              languageCorrection:[attempt[@"correction"] boolValue]
-                                                        fallback:[attempt[@"fallback"] boolValue]
-                                                        useRegex:useRegex];
-                NSString *error = [result[@"error"] isKindOfClass:NSString.class] ? result[@"error"] : nil;
-                if (error.length == 0) {
-                    return result;
+            NSArray<UIImage *> *candidates = @[
+                recognitionImage,
+                [self imageByIncreasingPixelDensity:recognitionImage multiplier:2.0] ?: recognitionImage,
+            ];
+            for (UIImage *candidateImage in candidates) {
+                for (NSDictionary *attempt in attempts) {
+                    NSDictionary *result = [self matchNormalizedText:target
+                                                             inImage:candidateImage
+                                                        sourceWindow:sourceWindow
+                                                     sourceImageSize:sourceImageSize
+                                                       contentOffset:contentOffset
+                                                               level:(VNRequestTextRecognitionLevel)[attempt[@"level"] integerValue]
+                                                  languageCorrection:[attempt[@"correction"] boolValue]
+                                                            fallback:[attempt[@"fallback"] boolValue]
+                                                            useRegex:useRegex];
+                    NSString *error = [result[@"error"] isKindOfClass:NSString.class] ? result[@"error"] : nil;
+                    if (error.length == 0) {
+                        return result;
+                    }
+                    lastResult = result;
+                    if (![error isEqualToString:@"文字识别未找到"]) {
+                        break;
+                    }
                 }
-                lastResult = result;
-                if (![error isEqualToString:@"文字识别未找到"]) {
+                if (lastResult && ![[lastResult[@"error"] description] isEqualToString:@"文字识别未找到"]) {
                     break;
                 }
             }

@@ -230,6 +230,9 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
 
     _ocrMode = AnClickOCRModeAppleVision;
     _ocrMatchMode = [dictionary[@"ocrMatchMode"] respondsToSelector:@selector(integerValue)] ? (AnClickOCRMatchMode)[dictionary[@"ocrMatchMode"] integerValue] : AnClickOCRMatchModeContains;
+    if (_ocrMatchMode != AnClickOCRMatchModeRegex) {
+        _ocrMatchMode = AnClickOCRMatchModeContains;
+    }
     _ocrText = ACStringValue(dictionary[@"ocrText"]);
     _ocrSimilarity = ACClampedDouble(dictionary[@"ocrSimilarity"], 0.0, 1.0, 0.80);
 

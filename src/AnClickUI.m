@@ -3482,17 +3482,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     _globalSettingsButton.hidden = YES;
 
-    _toolTitleLabel.hidden = NO;
-    _toolTitleLabel.text = @"任务列表";
-    _toolTitleLabel.frame = CGRectMake(14.0, 46.0, width - 28.0, 31.0);
+    _toolTitleLabel.hidden = YES;
+    _toolTitleLabel.text = @"";
+    _toolTitleLabel.frame = CGRectMake(14.0, 46.0, width - 28.0, 0.0);
     _toolTitleLabel.textColor = [self themePrimaryTextColor];
     _toolTitleLabel.font = [UIFont systemFontOfSize:28 weight:UIFontWeightHeavy];
 
     _statusLabel.hidden = NO;
-    _statusLabel.frame = CGRectMake(16.0, 76.0, width - 32.0, 14.0);
+    _statusLabel.frame = CGRectMake(16.0, 48.0, width - 32.0, 14.0);
     _statusLabel.textColor = [self themeSecondaryTextColor];
     _statusLabel.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightMedium];
-    _taskListView.frame = CGRectMake(10.0, 92.0, width - 20.0, MAX(80.0, height - 102.0));
+    _taskListView.frame = CGRectMake(10.0, 66.0, width - 20.0, MAX(80.0, height - 76.0));
     if (_globalSettingsView) {
         _globalSettingsView.frame = _panelView.bounds;
         [_panelView bringSubviewToFront:_globalSettingsView];
@@ -3535,9 +3535,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _editingTaskIndex = -1;
     [self setTaskEditorVisible:NO];
     [self refreshTaskList];
-    _statusLabel.text = _taskItems.count == 0
-        ? @""
-        : [NSString stringWithFormat:@"任务列表 · %lu项", (unsigned long)_taskItems.count];
+    _statusLabel.text = @"";
 }
 
 - (void)handleMoreOrCloseButton {
@@ -5290,9 +5288,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (matchMode == AnClickOCRMatchModeRegex) {
         return @"先填正则表达式";
     }
-    if (matchMode == AnClickOCRMatchModeEqual) {
-        return @"先填精确文字";
-    }
     return @"先填文字";
 }
 
@@ -5301,9 +5296,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (modeNumber) {
         if (modeNumber.integerValue == AnClickOCRMatchModeRegex) {
             return AnClickOCRMatchModeRegex;
-        }
-        if (modeNumber.integerValue == AnClickOCRMatchModeEqual) {
-            return AnClickOCRMatchModeEqual;
         }
         return AnClickOCRMatchModeContains;
     }
@@ -5322,18 +5314,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_ocrMatchMode == AnClickOCRMatchModeRegex) {
         return AnClickOCRMatchModeRegex;
     }
-    if (_ocrMatchMode == AnClickOCRMatchModeEqual) {
-        return AnClickOCRMatchModeEqual;
-    }
     return AnClickOCRMatchModeContains;
 }
 
 - (NSString *)ocrMatchModeTitleForMode:(AnClickOCRMatchMode)mode {
     if (mode == AnClickOCRMatchModeRegex) {
         return @"正则匹配";
-    }
-    if (mode == AnClickOCRMatchModeEqual) {
-        return @"等于匹配";
     }
     return @"包含匹配";
 }
@@ -9526,6 +9512,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self persistCurrentTaskList];
     [self refreshTaskList];
 
+    if (mode == AnClickActionModeImage) {
+        [self beginBranchTemplateCaptureForSuccess:success];
+        return;
+    }
+    if (mode == AnClickActionModeColor) {
+        [self beginBranchColorPickingForSuccess:success];
+        return;
+    }
+
     [self beginEditingRecognitionActionConfigForSuccess:success mode:mode];
 }
 
@@ -11993,23 +11988,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 NSValue *rectValue = match[@"rect"];
                 NSNumber *scoreNumber = match[@"score"];
                 NSString *text = [match[@"text"] isKindOfClass:NSString.class] ? match[@"text"] : targetText;
-                NSString *lineText = [match[@"lineText"] isKindOfClass:NSString.class] ? match[@"lineText"] : text;
-                if (matchMode == AnClickOCRMatchModeEqual &&
-                    ![strongSelf ocrRecognizedText:lineText equalsTargetText:targetText]) {
-                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = @"识字未找到";
-                    [strongSelf showToast:@"识字未找到"];
-                    if (completion) {
-                        completion(NO);
-                    } else {
-                        [strongSelf performRecognitionBranchActionForTask:task
-                                                                  success:NO
-                                                                 inWindow:currentHostWindow
-                                                               generation:runGeneration
-                                                               completion:nil];
-                    }
-                    return;
-                }
                 double requiredSimilarity = [task[@"ocrSimilarity"] respondsToSelector:@selector(doubleValue)]
                     ? MIN(1.0, MAX(0.0, [task[@"ocrSimilarity"] doubleValue]))
                     : 0.0;
@@ -12031,7 +12009,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 NSInteger matchCount = [match[@"matchCount"] respondsToSelector:@selector(integerValue)] ? MAX(1, [match[@"matchCount"] integerValue]) : 1;
                 NSString *matchModeTitle = matchMode == AnClickOCRMatchModeRegex
                     ? @"正则"
-                    : (matchMode == AnClickOCRMatchModeEqual ? @"等于" : @"包含");
+                    : @"包含";
                 NSString *matchSummary = matchCount > 1
                     ? [NSString stringWithFormat:@"%@ 命中%ld选1", matchModeTitle, (long)matchCount]
                     : matchModeTitle;
