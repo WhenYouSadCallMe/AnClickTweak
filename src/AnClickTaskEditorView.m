@@ -81,6 +81,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         _titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
         _titleLabel.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightSemibold];
         _titleLabel.textColor = UIColor.labelColor;
+        _titleLabel.adjustsFontSizeToFitWidth = YES;
+        _titleLabel.minimumScaleFactor = 0.78;
         _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
 
         _textField = [[UITextField alloc] initWithFrame:CGRectZero];
@@ -245,6 +247,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 @property (nonatomic, strong) UIScrollView *scrollView;
 @property (nonatomic, strong) UIStackView *stackView;
 @property (nonatomic, copy) void (^selectionHandler)(AnClickActionMode mode);
+@property (nonatomic, assign) AnClickActionMode selectedMode;
 - (void)configureWithTitle:(NSString *)title
                       icon:(NSString *)icon
                      items:(NSArray<NSDictionary *> *)items
@@ -320,6 +323,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
               selectedMode:(AnClickActionMode)selectedMode {
     self.iconLabel.text = icon ?: @"";
     self.titleLabel.text = title ?: @"";
+    self.selectedMode = selectedMode;
     for (UIView *view in self.stackView.arrangedSubviews) {
         [self.stackView removeArrangedSubview:view];
         [view removeFromSuperview];
@@ -347,6 +351,33 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             [button.widthAnchor constraintGreaterThanOrEqualToConstant:58.0],
         ]];
     }
+    [self focusSelectedChoiceWithoutAnimation];
+}
+
+- (void)focusSelectedChoiceWithoutAnimation {
+    AnClickActionMode selectedMode = self.selectedMode;
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf || strongSelf.selectedMode != selectedMode) {
+            return;
+        }
+        [strongSelf.contentView layoutIfNeeded];
+        [strongSelf.scrollView layoutIfNeeded];
+        UIButton *selectedButton = nil;
+        for (UIView *view in strongSelf.stackView.arrangedSubviews) {
+            if ([view isKindOfClass:UIButton.class] && view.tag == selectedMode) {
+                selectedButton = (UIButton *)view;
+                break;
+            }
+        }
+        if (!selectedButton) {
+            return;
+        }
+        CGRect targetRect = [selectedButton convertRect:selectedButton.bounds toView:strongSelf.scrollView];
+        targetRect = CGRectInset(targetRect, -10.0, 0.0);
+        [strongSelf.scrollView scrollRectToVisible:targetRect animated:NO];
+    });
 }
 
 - (void)handleChoiceButton:(UIButton *)button {
@@ -1431,7 +1462,10 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             if (!strongSelf) return;
             [strongSelf setBranchActionMode:mode success:success];
         };
-        [cell configureWithTitle:success ? @"成功后动作" : @"失败后动作"
+        NSString *title = [NSString stringWithFormat:@"%@后动作：%@",
+                           success ? @"成功" : @"失败",
+                           [self branchActionShortTitleForMode:selectedMode]];
+        [cell configureWithTitle:title
                             icon:success ? @"✓" : @"✕"
                            items:[self branchActionItemsForSuccess:success]
                     selectedMode:selectedMode];
@@ -1451,7 +1485,10 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             [strongSelf setRecognitionResultActionMode:mode forBranchSuccess:success];
         };
         NSString *role = success ? @"成功后" : @"失败后";
-        NSString *title = [NSString stringWithFormat:@"%@%@命中动作", role, [self branchActionShortTitleForMode:ownerMode]];
+        NSString *title = [NSString stringWithFormat:@"%@%@命中动作：%@",
+                           role,
+                           [self branchActionShortTitleForMode:ownerMode],
+                           [self branchActionShortTitleForMode:selectedMode]];
         [cell configureWithTitle:title
                             icon:success ? @"↳" : @"↯"
                            items:[self recognitionResultActionItems]
