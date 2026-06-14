@@ -1664,7 +1664,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _homeCloseButton.frame = CGRectMake(panelWidth - 50, 8, 38, 38);
     [_panelView addSubview:_homeCloseButton];
 
-    _globalSettingsButton = [self panelButtonWithTitle:@"⚙" action:@selector(showGlobalSettings)];
+    _globalSettingsButton = [self panelButtonWithTitle:@"⚙" action:@selector(showHomeTimeSettings)];
     _globalSettingsButton.frame = CGRectMake(10, 8, 34, 34);
     [_panelView addSubview:_globalSettingsButton];
 
@@ -1697,7 +1697,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_homeBrandView addSubview:_toolTitleLabel];
 
     _authorFollowButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_authorFollowButton setTitle:@"点击关注up主" forState:UIControlStateNormal];
+    [_authorFollowButton setTitle:@"bilibili" forState:UIControlStateNormal];
     [_authorFollowButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     _authorFollowButton.titleLabel.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightBold];
     _authorFollowButton.backgroundColor = [self themeHighlightColor];
@@ -1706,7 +1706,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _authorFollowButton.layer.shadowOpacity = 0.20;
     _authorFollowButton.layer.shadowRadius = 5.0;
     _authorFollowButton.layer.shadowOffset = CGSizeMake(0.0, 2.0);
-    [_authorFollowButton addTarget:self action:@selector(openDooRooBilibiliProfile) forControlEvents:UIControlEventTouchUpInside];
+    [_authorFollowButton addTarget:self action:@selector(openBilibiliProfile) forControlEvents:UIControlEventTouchUpInside];
     [_homeBrandView addSubview:_authorFollowButton];
 
     _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 52, panelWidth - 16, 24)];
@@ -3257,14 +3257,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *configNameText = _configNameField.text ?: @"";
     NSInteger pendingDeleteIndex = _pendingConfigDeleteIndex;
     BOOL hadDeleteConfigPrompt = _configPromptView != nil && pendingDeleteIndex >= 0 && !hadSaveConfigPrompt;
-    CGPoint globalOffset = _globalSettingsScrollView ? _globalSettingsScrollView.contentOffset : CGPointZero;
 
     if (hadGlobalSettings && allowHeavyRefresh) {
         [self syncGlobalSettingsFromFields];
         [self hideGlobalSettings];
-        [self showGlobalSettings];
-        CGFloat maxOffsetY = MAX(0.0, _globalSettingsScrollView.contentSize.height - _globalSettingsScrollView.bounds.size.height);
-        _globalSettingsScrollView.contentOffset = CGPointMake(0.0, MIN(MAX(globalOffset.y, 0.0), maxOffsetY));
         return;
     }
 
@@ -3551,7 +3547,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _homeBrandView.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.76];
     _homeBrandView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.42].CGColor;
 
-    CGFloat followWidth = MIN(126.0, MAX(108.0, floor(width * 0.38)));
+    CGFloat followWidth = MIN(88.0, MAX(72.0, floor(width * 0.26)));
     _authorFollowButton.hidden = NO;
     _authorFollowButton.frame = CGRectMake(CGRectGetWidth(_homeBrandView.bounds) - followWidth - 7.0,
                                            6.0,
@@ -3563,13 +3559,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     _toolTitleLabel.hidden = NO;
     _toolTitleLabel.text = [self toolDisplayName];
-    _toolTitleLabel.frame = CGRectMake(11.0,
+    CGFloat titleInset = MAX(12.0, followWidth + 18.0);
+    _toolTitleLabel.frame = CGRectMake(titleInset,
                                        0.0,
-                                       CGRectGetMinX(_authorFollowButton.frame) - 18.0,
+                                       MAX(10.0, CGRectGetWidth(_homeBrandView.bounds) - titleInset * 2.0),
                                        brandHeight);
     _toolTitleLabel.textColor = [self themePrimaryTextColor];
     _toolTitleLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightHeavy];
-    _toolTitleLabel.textAlignment = NSTextAlignmentLeft;
+    _toolTitleLabel.textAlignment = NSTextAlignmentCenter;
 
     [self setCenteredIconForButton:_addTaskButton systemName:@"plus" fallbackTitle:@"+" fontSize:21];
     _addTaskButton.frame = CGRectMake(buttonX(0), topY + 1.0, smallSide, smallSide);
@@ -3817,7 +3814,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (NSDictionary *)currentGlobalSettingsDictionary {
     return @{
-        @"delayMilliseconds": @(_globalDelayMilliseconds),
+        @"delayMilliseconds": @0,
         @"runRepeatCount": @(_globalRunRepeatCount),
         @"startEnabled": @(_globalStartEnabled),
         @"stopEnabled": @(_globalStopEnabled),
@@ -3829,10 +3826,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @"stopMinute": @(_globalStopMinute),
         @"stopSecond": @(_globalStopSecond),
         @"stopMillisecond": @(_globalStopMillisecond),
-        @"networkGateEnabled": @(_globalNetworkGateEnabled),
-        @"networkURL": _globalNetworkURL ?: @"",
-        @"networkContains": _globalNetworkContainsText ?: @"",
-        @"networkFalse": _globalNetworkFalseText ?: @"",
+        @"networkGateEnabled": @NO,
+        @"networkURL": @"",
+        @"networkContains": @"",
+        @"networkFalse": @"",
     };
 }
 
@@ -3841,7 +3838,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    _globalDelayMilliseconds = MIN(3600000, MAX(0, [settings[@"delayMilliseconds"] integerValue]));
+    _globalDelayMilliseconds = 0;
     _globalRunRepeatCount = MIN(9999, MAX(0, [settings[@"runRepeatCount"] integerValue]));
     _globalStartEnabled = [settings[@"startEnabled"] boolValue];
     _globalStopEnabled = [settings[@"stopEnabled"] boolValue];
@@ -3853,13 +3850,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalStopMinute = MIN(59, MAX(0, [settings[@"stopMinute"] integerValue]));
     _globalStopSecond = MIN(59, MAX(0, [settings[@"stopSecond"] integerValue]));
     _globalStopMillisecond = MIN(999, MAX(0, [settings[@"stopMillisecond"] integerValue]));
-    _globalNetworkGateEnabled = [settings[@"networkGateEnabled"] boolValue];
-    id networkURL = settings[@"networkURL"];
-    id networkContains = settings[@"networkContains"];
-    id networkFalse = settings[@"networkFalse"];
-    _globalNetworkURL = [networkURL isKindOfClass:NSString.class] ? [self trimmedActionDescription:networkURL] : nil;
-    _globalNetworkContainsText = [networkContains isKindOfClass:NSString.class] ? [self trimmedActionDescription:networkContains] : nil;
-    _globalNetworkFalseText = [networkFalse isKindOfClass:NSString.class] ? [self trimmedActionDescription:networkFalse] : nil;
+    _globalNetworkGateEnabled = NO;
+    _globalNetworkURL = nil;
+    _globalNetworkContainsText = nil;
+    _globalNetworkFalseText = nil;
 }
 
 - (void)loadGlobalSettings {
@@ -4102,7 +4096,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalNetworkGateButton = nil;
 }
 
-- (void)openDooRooBilibiliProfile {
+- (void)openBilibiliProfile {
     NSURL *appURL = [NSURL URLWithString:@"bilibili://space/399301044"];
     NSURL *webURL = [NSURL URLWithString:@"https://b23.tv/fXw1dto"];
     if (!appURL && !webURL) {
@@ -4137,99 +4131,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 }
 
-- (void)showHomeTimeSettings {
-    [self showGlobalSettings];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self scrollGlobalSettingsToControl:self->_globalStartTimeButton focus:NO];
-    });
-}
-
-- (void)showHomeLoopSettings {
-    [self showGlobalSettings];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self scrollGlobalSettingsToControl:self->_globalRepeatField focus:YES];
-    });
-}
-
-- (void)showHomeSaveConfigMenu {
-    [self showFunctionMenu];
-}
-
-- (UIView *)doorooSettingsAuthorPanelWithWidth:(CGFloat)width {
-    CGFloat height = 250.0;
-    UIView *panel = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, height)];
-    panel.backgroundColor = [self themeSurfaceColor];
-    panel.layer.cornerRadius = 8.0;
-    panel.layer.borderWidth = 1.0;
-    panel.layer.borderColor = [self themeSeparatorColor].CGColor;
-    panel.clipsToBounds = YES;
-
-    UIView *leftLine = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 2.0, height)];
-    leftLine.backgroundColor = [self themeHighlightColor];
-    [panel addSubview:leftLine];
-
-    UIView *rightLine = [[UIView alloc] initWithFrame:CGRectMake(width - 2.0, 0, 2.0, height)];
-    rightLine.backgroundColor = leftLine.backgroundColor;
-    [panel addSubview:rightLine];
-
-    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(16.0, 18.0, width - 32.0, 34.0)];
-    titleLabel.text = [self toolDisplayName];
-    titleLabel.textAlignment = NSTextAlignmentCenter;
-    titleLabel.textColor = [self themePrimaryTextColor];
-    titleLabel.font = [UIFont systemFontOfSize:27 weight:UIFontWeightHeavy];
-    titleLabel.adjustsFontSizeToFitWidth = YES;
-    titleLabel.minimumScaleFactor = 0.64;
-    [panel addSubview:titleLabel];
-
-    UILabel *noticeLabel = [[UILabel alloc] initWithFrame:CGRectMake(18.0, 76.0, width - 36.0, 30.0)];
-    noticeLabel.text = @"此版本为公益版本禁止倒卖";
-    noticeLabel.textAlignment = NSTextAlignmentCenter;
-    noticeLabel.textColor = [self themePrimaryTextColor];
-    noticeLabel.font = [UIFont systemFontOfSize:21 weight:UIFontWeightMedium];
-    noticeLabel.numberOfLines = 1;
-    noticeLabel.adjustsFontSizeToFitWidth = YES;
-    noticeLabel.minimumScaleFactor = 0.62;
-    [panel addSubview:noticeLabel];
-
-    UILabel *authorLabel = [[UILabel alloc] initWithFrame:CGRectMake(18.0, 132.0, width - 36.0, 30.0)];
-    authorLabel.text = @"作者哔哩哔哩: DooRoo";
-    authorLabel.textAlignment = NSTextAlignmentCenter;
-    authorLabel.textColor = [self themeSecondaryTextColor];
-    authorLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightMedium];
-    authorLabel.adjustsFontSizeToFitWidth = YES;
-    authorLabel.minimumScaleFactor = 0.62;
-    [panel addSubview:authorLabel];
-
-    UILabel *uidLabel = [[UILabel alloc] initWithFrame:CGRectMake(18.0, 162.0, width - 36.0, 24.0)];
-    uidLabel.text = @"哔哩哔哩UID: 399301044";
-    uidLabel.textAlignment = NSTextAlignmentCenter;
-    uidLabel.textColor = [self themeSecondaryTextColor];
-    uidLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightMedium];
-    uidLabel.adjustsFontSizeToFitWidth = YES;
-    uidLabel.minimumScaleFactor = 0.62;
-    [panel addSubview:uidLabel];
-
-    UIButton *followButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    followButton.frame = CGRectMake(18.0, 196.0, width - 36.0, 46.0);
-    followButton.backgroundColor = [self themeHighlightColor];
-    followButton.layer.cornerRadius = 8.0;
-    followButton.layer.shadowColor = UIColor.blackColor.CGColor;
-    followButton.layer.shadowOffset = CGSizeMake(0, 3);
-    followButton.layer.shadowRadius = 8.0;
-    followButton.layer.shadowOpacity = 0.12;
-    followButton.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
-    followButton.titleLabel.adjustsFontSizeToFitWidth = YES;
-    followButton.titleLabel.minimumScaleFactor = 0.72;
-    [followButton setTitle:@"关注作者DooRoo" forState:UIControlStateNormal];
-    [followButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    [followButton addTarget:self action:@selector(openDooRooBilibiliProfile) forControlEvents:UIControlEventTouchUpInside];
-    [panel addSubview:followButton];
-    [self updateButtonShadowPath:followButton];
-
-    return panel;
-}
-
-- (void)showGlobalSettings {
+- (UIView *)showHomeOptionPanelWithTitle:(NSString *)title {
     [self dismissKeyboard];
     [self hideFunctionMenu];
     [self hideGlobalSettings];
@@ -4241,95 +4143,142 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_panelView addSubview:_globalSettingsView];
 
     CGFloat width = _globalSettingsView.bounds.size.width;
-    CGFloat height = _globalSettingsView.bounds.size.height;
-    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(18, 14, width - 76, 34)];
-    titleLabel.text = @"设置";
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(54.0, 13.0, width - 108.0, 34.0)];
+    titleLabel.text = title;
+    titleLabel.textAlignment = NSTextAlignmentCenter;
     titleLabel.textColor = [self themePrimaryTextColor];
-    titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
+    titleLabel.font = [UIFont systemFontOfSize:19.0 weight:UIFontWeightBold];
     titleLabel.adjustsFontSizeToFitWidth = YES;
     titleLabel.minimumScaleFactor = 0.68;
     [_globalSettingsView addSubview:titleLabel];
 
     UIButton *closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    closeButton.frame = CGRectMake(width - 54, 10, 40, 40);
-    closeButton.layer.cornerRadius = 20;
-    closeButton.titleLabel.font = [UIFont systemFontOfSize:27 weight:UIFontWeightBold];
+    closeButton.frame = CGRectMake(width - 52.0, 10.0, 40.0, 40.0);
+    closeButton.layer.cornerRadius = 20.0;
+    closeButton.titleLabel.font = [UIFont systemFontOfSize:27.0 weight:UIFontWeightBold];
     [closeButton setTitle:@"×" forState:UIControlStateNormal];
     [self applyFrostedRoundButtonStyle:closeButton];
     [closeButton addTarget:self action:@selector(hideGlobalSettings) forControlEvents:UIControlEventTouchUpInside];
     [_globalSettingsView addSubview:closeButton];
 
-    UIView *divider = [[UIView alloc] initWithFrame:CGRectMake(0, 60, width, 1)];
+    UIView *divider = [[UIView alloc] initWithFrame:CGRectMake(0.0, 60.0, width, 1.0)];
     divider.backgroundColor = [self themeSeparatorColor];
     [_globalSettingsView addSubview:divider];
 
-    _globalSettingsScrollView = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 61, width, height - 61)];
-    _globalSettingsScrollView.backgroundColor = UIColor.clearColor;
-    _globalSettingsScrollView.alwaysBounceVertical = YES;
-    [_globalSettingsView addSubview:_globalSettingsScrollView];
+    return _globalSettingsView;
+}
 
-    CGFloat side = 18.0;
-    CGFloat y = 18.0;
+- (UILabel *)homeOptionCaptionWithText:(NSString *)text frame:(CGRect)frame {
+    UILabel *label = [[UILabel alloc] initWithFrame:frame];
+    label.text = text;
+    label.textColor = [self themeSecondaryTextColor];
+    label.font = [UIFont systemFontOfSize:13.5 weight:UIFontWeightSemibold];
+    label.numberOfLines = 2;
+    return label;
+}
+
+- (UIView *)homeOptionCardWithFrame:(CGRect)frame {
+    UIView *card = [[UIView alloc] initWithFrame:frame];
+    card.backgroundColor = [self themeSurfaceColor];
+    card.layer.cornerRadius = 10.0;
+    card.layer.borderWidth = 1.0;
+    card.layer.borderColor = [self themeSeparatorColor].CGColor;
+    card.layer.shadowColor = UIColor.blackColor.CGColor;
+    card.layer.shadowOpacity = 0.10;
+    card.layer.shadowRadius = 8.0;
+    card.layer.shadowOffset = CGSizeMake(0.0, 4.0);
+    return card;
+}
+
+- (void)addHomeTimeRowToCard:(UIView *)card title:(NSString *)title detail:(NSString *)detail button:(UIButton *)button y:(CGFloat)y {
+    CGFloat width = card.bounds.size.width;
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, y, width - 28.0, 22.0)];
+    titleLabel.text = title;
+    titleLabel.textColor = [self themePrimaryTextColor];
+    titleLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightBold];
+    [card addSubview:titleLabel];
+
+    UILabel *detailLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, y + 23.0, width - 28.0, 18.0)];
+    detailLabel.text = detail;
+    detailLabel.textColor = [self themeSecondaryTextColor];
+    detailLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightMedium];
+    [card addSubview:detailLabel];
+
+    button.frame = CGRectMake(14.0, y + 48.0, width - 28.0, 46.0);
+    [card addSubview:button];
+}
+
+- (void)showHomeTimeSettings {
+    UIView *panel = [self showHomeOptionPanelWithTitle:@"时间设置"];
+    CGFloat width = panel.bounds.size.width;
+    CGFloat side = 14.0;
     CGFloat contentWidth = width - side * 2.0;
-    UIView *authorPanel = [self doorooSettingsAuthorPanelWithWidth:contentWidth];
-    authorPanel.frame = CGRectMake(side, y, contentWidth, authorPanel.bounds.size.height);
-    [_globalSettingsScrollView addSubview:authorPanel];
-    y += authorPanel.bounds.size.height + 18.0;
 
-    NSArray<NSString *> *captions = @[
-        @"整体延时（毫秒，0=无延时）",
-        @"整体执行次数（0=无限循环）",
-        @"定时启动（时:分:秒.毫秒）",
-        @"定时停止（时:分:秒.毫秒）",
-        @"播放前网络判断（不满足会持续监控）",
-        @"网络判断链接（GET）",
-        @"返回包含这些就运行（至少填一项）",
-        @"返回包含这些就不运行（至少填一项）",
-    ];
-    NSMutableArray<UIView *> *controls = [NSMutableArray array];
-    _globalDelayField = [self globalSettingsTextFieldWithPlaceholder:@"无延时"];
-    _globalRepeatField = [self globalSettingsTextFieldWithPlaceholder:@"无限循环"];
+    UILabel *caption = [self homeOptionCaptionWithText:@"只设置任务列表的定时运行和定时结束，精确到毫秒。"
+                                                 frame:CGRectMake(side, 75.0, contentWidth, 36.0)];
+    [panel addSubview:caption];
+
+    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 116.0, contentWidth, 226.0)];
+    [panel addSubview:card];
+
     _globalStartTimeButton = [self globalSettingsValueButtonWithAction:@selector(showGlobalStartTimePicker)];
     _globalStopTimeButton = [self globalSettingsValueButtonWithAction:@selector(showGlobalStopTimePicker)];
-    _globalNetworkGateButton = [self globalSettingsValueButtonWithAction:@selector(toggleGlobalNetworkGate)];
-    _globalNetworkURLField = [self globalSettingsTextFieldWithPlaceholder:@"https://example.com"];
-    _globalNetworkURLField.keyboardType = UIKeyboardTypeURL;
-    _globalNetworkURLField.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    _globalNetworkURLField.autocorrectionType = UITextAutocorrectionTypeNo;
-    _globalNetworkURLField.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    _globalNetworkContainsField = [self globalSettingsTextFieldWithPlaceholder:@"例：成功 / true"];
-    _globalNetworkContainsField.keyboardType = UIKeyboardTypeDefault;
-    _globalNetworkContainsField.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    _globalNetworkContainsField.autocorrectionType = UITextAutocorrectionTypeNo;
-    _globalNetworkContainsField.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    _globalNetworkFalseField = [self globalSettingsTextFieldWithPlaceholder:@"例：失败 / false"];
-    _globalNetworkFalseField.keyboardType = UIKeyboardTypeDefault;
-    _globalNetworkFalseField.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    _globalNetworkFalseField.autocorrectionType = UITextAutocorrectionTypeNo;
-    _globalNetworkFalseField.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    [controls addObjectsFromArray:@[
-        _globalDelayField,
-        _globalRepeatField,
-        _globalStartTimeButton,
-        _globalStopTimeButton,
-        _globalNetworkGateButton,
-        _globalNetworkURLField,
-        _globalNetworkContainsField,
-        _globalNetworkFalseField,
-    ]];
-
-    for (NSUInteger i = 0; i < captions.count; i++) {
-        UILabel *caption = [self configCaptionLabelWithText:captions[i]];
-        caption.frame = CGRectMake(side, y, contentWidth, 24);
-        [_globalSettingsScrollView addSubview:caption];
-
-        UIView *control = controls[i];
-        control.frame = CGRectMake(side, y + 34.0, contentWidth, 58.0);
-        [_globalSettingsScrollView addSubview:control];
-        y += 112.0;
-    }
-    _globalSettingsScrollView.contentSize = CGSizeMake(width, y + 12.0);
+    [self addHomeTimeRowToCard:card
+                         title:@"定时运行"
+                        detail:@"到达设置时间后自动开始运行任务列表"
+                        button:_globalStartTimeButton
+                             y:14.0];
+    UIView *line = [[UIView alloc] initWithFrame:CGRectMake(14.0, 114.0, contentWidth - 28.0, 1.0)];
+    line.backgroundColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72];
+    [card addSubview:line];
+    [self addHomeTimeRowToCard:card
+                         title:@"定时结束"
+                        detail:@"到达设置时间后停止当前任务运行"
+                        button:_globalStopTimeButton
+                             y:128.0];
     [self refreshGlobalSettingsControls];
+}
+
+- (void)showHomeLoopSettings {
+    UIView *panel = [self showHomeOptionPanelWithTitle:@"循环设置"];
+    CGFloat width = panel.bounds.size.width;
+    CGFloat side = 14.0;
+    CGFloat contentWidth = width - side * 2.0;
+
+    UILabel *caption = [self homeOptionCaptionWithText:@"设置整个任务列表循环次数。填 0 或留空表示无限循环。"
+                                                 frame:CGRectMake(side, 75.0, contentWidth, 36.0)];
+    [panel addSubview:caption];
+
+    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 116.0, contentWidth, 132.0)];
+    [panel addSubview:card];
+
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 16.0, contentWidth - 28.0, 22.0)];
+    titleLabel.text = @"任务列表循环次数";
+    titleLabel.textColor = [self themePrimaryTextColor];
+    titleLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightBold];
+    [card addSubview:titleLabel];
+
+    _globalRepeatField = [self globalSettingsTextFieldWithPlaceholder:@"无限循环"];
+    _globalRepeatField.frame = CGRectMake(14.0, 52.0, contentWidth - 28.0, 50.0);
+    [card addSubview:_globalRepeatField];
+
+    UIButton *doneButton = [self configPromptButtonWithTitle:@"完成" action:@selector(hideGlobalSettings) destructive:NO];
+    doneButton.frame = CGRectMake(side, CGRectGetMaxY(card.frame) + 16.0, contentWidth, 44.0);
+    [self applyObsidian3DStyleToButton:doneButton selected:YES];
+    [panel addSubview:doneButton];
+
+    [self refreshGlobalSettingsControls];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self->_globalRepeatField becomeFirstResponder];
+    });
+}
+
+- (void)showHomeSaveConfigMenu {
+    [self showFunctionMenu];
+}
+
+- (void)showGlobalSettings {
+    [self showHomeTimeSettings];
 }
 
 - (void)showGlobalStartTimePicker {
@@ -4620,8 +4569,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _functionMenuView.clipsToBounds = YES;
     [_panelView addSubview:_functionMenuView];
 
-    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(18, 14, _functionMenuView.bounds.size.width - 76, 34)];
-    titleLabel.text = [NSString stringWithFormat:@"%@ 功能", [self toolDisplayName]];
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(54, 14, _functionMenuView.bounds.size.width - 108, 34)];
+    titleLabel.text = @"任务配置";
+    titleLabel.textAlignment = NSTextAlignmentCenter;
     titleLabel.textColor = [self themePrimaryTextColor];
     titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
     titleLabel.adjustsFontSizeToFitWidth = YES;
@@ -4638,7 +4588,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_functionMenuView addSubview:closeButton];
 
     UILabel *caption = [[UILabel alloc] initWithFrame:CGRectMake(18, 70, _functionMenuView.bounds.size.width - 36, 22)];
-    caption.text = @"配置管理";
+    caption.text = @"保存 / 导入 / 删除";
     caption.textColor = [self themeSecondaryTextColor];
     caption.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
     [_functionMenuView addSubview:caption];
