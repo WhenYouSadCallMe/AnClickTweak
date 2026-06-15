@@ -252,38 +252,33 @@ static UIImage *AnClickCaptureActiveWindowImage(UIWindow **capturedWindow) {
     void (^captureBlock)(void) = ^{
         NSArray<UIWindow *> *windows = AnClickCaptureCandidateWindows(&window);
         if (window) {
-            UIImage *screenImage = AnClickCaptureHardwareScreenImage();
-            BOOL screenImageMatches = screenImage.CGImage && AnClickImageMatchesWindowPointSize(screenImage, window);
-            BOOL screenImageUsable = screenImageMatches && !AnClickImageAppearsBlankOrLowDetail(screenImage);
-            if (screenImageUsable) {
-                image = screenImage;
-                window = nil;
-                return;
-            }
-
             CGSize size = window.bounds.size;
             CGFloat scale = window.screen.scale > 0 ? window.screen.scale : UIScreen.mainScreen.scale;
             UIGraphicsBeginImageContextWithOptions(size, NO, scale);
             CGContextRef context = UIGraphicsGetCurrentContext();
-            for (UIWindow *captureWindow in windows) {
-                if (!AnClickWindowCanBeCaptured(captureWindow)) {
-                    continue;
+            if (context) {
+                for (UIWindow *captureWindow in windows) {
+                    if (!AnClickWindowCanBeCaptured(captureWindow)) {
+                        continue;
+                    }
+                    CGPoint origin = [captureWindow convertPoint:CGPointZero toWindow:window];
+                    CGContextSaveGState(context);
+                    CGContextTranslateCTM(context, origin.x, origin.y);
+                    BOOL drawn = [captureWindow drawViewHierarchyInRect:captureWindow.bounds afterScreenUpdates:YES];
+                    if (!drawn) {
+                        [captureWindow.layer renderInContext:context];
+                    }
+                    CGContextRestoreGState(context);
                 }
-                CGPoint origin = [captureWindow convertPoint:CGPointZero toWindow:window];
-                CGContextSaveGState(context);
-                CGContextTranslateCTM(context, origin.x, origin.y);
-                BOOL drawn = [captureWindow drawViewHierarchyInRect:captureWindow.bounds afterScreenUpdates:YES];
-                if (!drawn) {
-                    [captureWindow.layer renderInContext:context];
-                }
-                CGContextRestoreGState(context);
+                image = UIGraphicsGetImageFromCurrentImageContext();
             }
-            image = UIGraphicsGetImageFromCurrentImageContext();
             UIGraphicsEndImageContext();
             if (image.CGImage && !AnClickImageAppearsBlankOrLowDetail(image)) {
                 return;
             }
 
+            UIImage *screenImage = AnClickCaptureHardwareScreenImage();
+            BOOL screenImageMatches = screenImage.CGImage && AnClickImageMatchesWindowPointSize(screenImage, window);
             if (screenImageMatches && screenImage.CGImage) {
                 image = screenImage;
                 window = nil;

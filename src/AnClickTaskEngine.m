@@ -724,7 +724,7 @@
                                                    host:currentHost
                                              generation:generation
                                                 success:YES
-                                                  delay:successDelay];
+                                                  delay:0.0];
                 return;
             }
             [self scheduleRecognitionTaskModel:model
@@ -946,6 +946,13 @@
     }
     NSTimeInterval safeDelay = isfinite(delay) ? MAX(0.0, delay) : 0.0;
     NSUInteger scheduleGeneration = _scheduledCallbackGeneration;
+    if (safeDelay <= 0.0005) {
+        if (guardBlock && !guardBlock()) {
+            return;
+        }
+        block();
+        return;
+    }
     __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(safeDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         __strong typeof(weakSelf) strongSelf = weakSelf;
