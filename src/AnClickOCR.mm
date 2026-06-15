@@ -701,12 +701,11 @@
 
     NSArray<NSDictionary *> *attempts = @[
         @{@"level": @(VNRequestTextRecognitionLevelAccurate), @"correction": @YES, @"fallback": @NO},
-        @{@"level": @(VNRequestTextRecognitionLevelAccurate), @"correction": @NO, @"fallback": @YES},
         @{@"level": @(VNRequestTextRecognitionLevelFast), @"correction": @YES, @"fallback": @YES},
     ];
     NSDictionary *lastResult = nil;
 
-    for (NSUInteger frameAttempt = 0; frameAttempt < 3; frameAttempt++) {
+    for (NSUInteger frameAttempt = 0; frameAttempt < 2; frameAttempt++) {
         UIWindow *sourceWindow = nil;
         UIImage *image = [AnClickCore captureCurrentWindowImageWithWindow:&sourceWindow];
         if (!image.CGImage) {
@@ -747,10 +746,10 @@
 
         NSString *lastError = [lastResult[@"error"] isKindOfClass:NSString.class] ? lastResult[@"error"] : nil;
         BOOL retryable = [lastError isEqualToString:@"文字识别未找到"] || [lastError isEqualToString:@"截图失败"];
-        if (!retryable || frameAttempt >= 2) {
+        if (!retryable || frameAttempt >= 1) {
             break;
         }
-        [NSThread sleepForTimeInterval:0.08];
+        [NSThread sleepForTimeInterval:0.05];
     }
     return lastResult ?: @{@"error": @"文字识别未找到"};
 }

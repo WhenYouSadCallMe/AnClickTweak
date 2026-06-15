@@ -93,7 +93,7 @@ static const NSInteger AnClickHomeOptionPanelTimeTag = 54101;
 static const NSInteger AnClickHomeOptionPanelLoopTag = 54102;
 static const NSInteger AnClickHomeOptionPanelSaveTag = 54103;
 static const NSInteger AnClickHomeOptionPanelMonitorTag = 54104;
-static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.18;
+static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.10;
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
 static void (*AnClickOriginalSpringBoardHandlePhysicalButtonEvent)(id self, SEL _cmd, id event);
 
@@ -2765,7 +2765,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (BOOL)hideOwnUIForRecognitionCaptureWithHostWindow:(UIWindow *)hostWindow {
     BOOL shouldRestorePanel = _panelWindow && (!_panelWindow.hidden || _taskRunActive || _taskRunPausedForForeground);
     [self clearRecognitionBox];
-    [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
+    [self dismissConfigKeyboardAndSync];
+    [self invalidatePendingPanelRestore];
+    if (hostWindow && !hostWindow.isKeyWindow) {
+        [hostWindow makeKeyWindow];
+    }
+    if (_panelWindow) {
+        _panelWindow.alpha = 1.0;
+        _panelWindow.userInteractionEnabled = NO;
+        _panelWindow.hidden = YES;
+    }
     [self hideToastForRecognitionCapture];
     return shouldRestorePanel;
 }
