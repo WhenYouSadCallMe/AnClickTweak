@@ -1,4 +1,6 @@
 #import "AnClickTaskEditorView.h"
+
+static const NSTimeInterval ACFastDoubleTapInterval = 0.06;
 #import <math.h>
 
 static const NSUInteger ACEditorMaxMultiPoints = 32;
@@ -1350,7 +1352,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     NSMutableDictionary *config = [@{
         @"mode": @(mode),
         @"repeat": @1,
-        @"interval": @0.03,
+        @"interval": @(1.0 / 240.0),
         @"imageActionMode": @(AnClickActionModeTap),
         @"failureActionMode": @(AnClickActionModeNone),
         @"useMatchPoint": @YES,
@@ -2333,7 +2335,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindDoubleTapInterval:
             cell.iconLabel.text = @"⏱";
             cell.titleLabel.text = @"双击间隔";
-            cell.textField.text = [NSString stringWithFormat:@"%.0f", self.model.doubleTapInterval * 1000.0];
+            self.model.doubleTapInterval = ACFastDoubleTapInterval;
+            cell.textField.text = [NSString stringWithFormat:@"%.0f", ACFastDoubleTapInterval * 1000.0];
             cell.textField.keyboardType = UIKeyboardTypeNumberPad;
             cell.unitLabel.text = @"ms";
             break;
@@ -2635,7 +2638,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             self.model.repeatCount = MAX(1, text.integerValue);
             break;
         case ACEditorRowKindDoubleTapInterval:
-            self.model.doubleTapInterval = MIN(2.0, MAX(0.02, text.doubleValue / 1000.0));
+            self.model.doubleTapInterval = ACFastDoubleTapInterval;
             break;
         case ACEditorRowKindColor:
             [self updateModelColorFromHex:text];

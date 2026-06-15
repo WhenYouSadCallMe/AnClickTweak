@@ -4,10 +4,12 @@
 @interface AnClickCore : NSObject
 + (NSDictionary *)findTemplateImageMatch:(UIImage *)templateImage threshold:(double)threshold;
 + (NSDictionary *)findColorPatternMatchWithPoints:(NSArray<NSDictionary *> *)points tolerance:(double)tolerance;
++ (void)warmUpRecognition;
 @end
 
 @interface AnClickOCR : NSObject
 + (NSDictionary *)findText:(NSString *)targetText mode:(NSInteger)mode useRegex:(BOOL)useRegex;
++ (void)warmUpRecognition;
 @end
 
 @interface AnClickRecognitionService ()
@@ -21,6 +23,12 @@
     self = [super init];
     if (self) {
         _queue = dispatch_queue_create("com.anclick.recognition", DISPATCH_QUEUE_SERIAL);
+        dispatch_async(_queue, ^{
+            @autoreleasepool {
+                [AnClickCore warmUpRecognition];
+                [AnClickOCR warmUpRecognition];
+            }
+        });
     }
     return self;
 }

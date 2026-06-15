@@ -15,7 +15,7 @@
 #endif
 
 @interface AnClickFakeTouch : NSObject
-+ (void)tapAtPoint:(CGPoint)point;
++ (void)fastTapAtPoint:(CGPoint)point;
 @end
 
 @interface AnClickCore : NSObject
@@ -26,6 +26,7 @@
 + (NSDictionary *)findColorPatternMatchWithPoints:(NSArray<NSDictionary *> *)points tolerance:(double)tolerance;
 + (NSValue *)findTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
 + (BOOL)findAndTapTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
++ (void)warmUpRecognition;
 @end
 
 static UIWindow *AnClickActiveWindow(void) {
@@ -681,6 +682,28 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
 
 @implementation AnClickCore
 
++ (void)warmUpRecognition {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        cv::Mat source(24, 24, CV_8UC3, cv::Scalar(255, 255, 255));
+        cv::Mat templ(8, 8, CV_8UC3, cv::Scalar(255, 255, 255));
+        cv::rectangle(source, cv::Rect(8, 8, 8, 8), cv::Scalar(0, 0, 0), cv::FILLED);
+        cv::rectangle(templ, cv::Rect(0, 0, 8, 8), cv::Scalar(0, 0, 0), cv::FILLED);
+
+        cv::Mat result;
+        cv::matchTemplate(source, templ, result, cv::TM_CCOEFF_NORMED);
+        double maxScore = 0.0;
+        cv::Point maxLocation;
+        cv::minMaxLoc(result, NULL, &maxScore, NULL, &maxLocation);
+
+        std::vector<cv::Point> points;
+        points.reserve(1);
+        points.push_back(maxLocation);
+        (void)points;
+        (void)maxScore;
+    });
+}
+
 + (UIImage *)captureCurrentWindowImage {
     return AnClickCaptureActiveWindowImage(NULL);
 }
@@ -1027,7 +1050,7 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
 
     CGPoint point = pointValue.CGPointValue;
     dispatch_async(dispatch_get_main_queue(), ^{
-        [AnClickFakeTouch tapAtPoint:point];
+        [AnClickFakeTouch fastTapAtPoint:point];
     });
     return YES;
 }

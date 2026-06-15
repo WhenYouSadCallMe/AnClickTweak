@@ -3,6 +3,7 @@
 #import <Vision/Vision.h>
 #import <ImageIO/ImageIO.h>
 #include <math.h>
+#include <string.h>
 
 #if ANCLICK_RELEASE_SILENT
 #undef NSLog
@@ -17,6 +18,9 @@
 @interface AnClickOCR : NSObject
 + (NSDictionary *)findText:(NSString *)targetText mode:(NSInteger)mode;
 + (NSDictionary *)findText:(NSString *)targetText mode:(NSInteger)mode useRegex:(BOOL)useRegex;
++ (CGImageRef)newWarmUpImage;
++ (void)configureRecognitionLanguagesForRequest:(VNRecognizeTextRequest *)request level:(VNRequestTextRecognitionLevel)level;
++ (void)warmUpRecognition;
 + (NSString *)backendNameForMode:(NSInteger)mode;
 @end
 
@@ -24,6 +28,65 @@
 
 + (NSString *)backendNameForMode:(__unused NSInteger)mode {
     return @"文字识别";
+}
+
++ (CGImageRef)newWarmUpImage {
+    size_t width = 32;
+    size_t height = 16;
+    size_t bytesPerRow = width * 4;
+    NSMutableData *data = [NSMutableData dataWithLength:height * bytesPerRow];
+    uint8_t *bytes = (uint8_t *)data.mutableBytes;
+    memset(bytes, 255, data.length);
+
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    if (!colorSpace) {
+        return NULL;
+    }
+    CGContextRef context = CGBitmapContextCreate(bytes,
+                                                 width,
+                                                 height,
+                                                 8,
+                                                 bytesPerRow,
+                                                 colorSpace,
+                                                 kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(colorSpace);
+    if (!context) {
+        return NULL;
+    }
+
+    CGContextSetRGBFillColor(context, 0.0, 0.0, 0.0, 1.0);
+    CGContextFillRect(context, CGRectMake(4, 4, 24, 8));
+    CGImageRef imageRef = CGBitmapContextCreateImage(context);
+    CGContextRelease(context);
+    return imageRef;
+}
+
++ (void)warmUpRecognition {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        CGImageRef imageRef = [self newWarmUpImage];
+        if (!imageRef) {
+            return;
+        }
+        NSArray<NSNumber *> *levels = @[
+            @(VNRequestTextRecognitionLevelFast),
+            @(VNRequestTextRecognitionLevelAccurate),
+        ];
+        for (NSNumber *levelNumber in levels) {
+            @autoreleasepool {
+                VNRecognizeTextRequest *request = [[VNRecognizeTextRequest alloc] initWithCompletionHandler:nil];
+                VNRequestTextRecognitionLevel level = (VNRequestTextRecognitionLevel)levelNumber.integerValue;
+                request.recognitionLevel = level;
+                request.usesLanguageCorrection = NO;
+                [self configureRecognitionLanguagesForRequest:request level:level];
+                VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:imageRef
+                                                                                    orientation:kCGImagePropertyOrientationUp
+                                                                                        options:@{}];
+                [handler performRequests:@[request] error:nil];
+            }
+        }
+        CGImageRelease(imageRef);
+    });
 }
 
 + (NSString *)normalizedText:(NSString *)text {

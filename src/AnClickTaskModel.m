@@ -6,6 +6,7 @@ static NSString * const ACKeyMode = @"mode";
 static NSString * const ACKeyDelay = @"delay";
 static NSString * const ACKeyRepeat = @"repeat";
 static NSString * const ACKeyInterval = @"interval";
+static const NSTimeInterval ACFastDoubleTapInterval = 0.06;
 static NSString * const ACKeyRandomDelay = @"randomDelay";
 static NSString * const ACKeyJitterRadius = @"jitterRadius";
 static NSString * const ACKeyDescription = @"desc";
@@ -140,9 +141,9 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
         _actionMode = AnClickActionModeNone;
         _delay = 0.0;
         _repeatCount = 1;
-        _interval = 0.03;
+        _interval = 1.0 / 240.0;
         _taskDescription = @"";
-        _doubleTapInterval = 0.10;
+        _doubleTapInterval = ACFastDoubleTapInterval;
         _longPressDuration = 0.50;
         _swipeDuration = 0.30;
         _swipeStep = 12.0;
@@ -201,7 +202,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     _taskDescription = ACStringValue(dictionary[ACKeyDescription]);
     _expanded = [dictionary[ACKeyExpanded] boolValue];
 
-    _doubleTapInterval = ACClampedDouble(dictionary[@"doubleTapInterval"], 0.02, 2.0, _doubleTapInterval);
+    _doubleTapInterval = ACFastDoubleTapInterval;
     _longPressDuration = ACClampedDouble(dictionary[@"pressDuration"], 0.0, 10.0, _longPressDuration);
     if ([dictionary[@"pressDurationMs"] respondsToSelector:@selector(doubleValue)]) {
         _longPressDuration = ACClampedDouble(dictionary[@"pressDurationMs"], 0.0, 10000.0, _longPressDuration * 1000.0) / 1000.0;
@@ -349,7 +350,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     if (self.taskDescription.length > 0) {
         dictionary[ACKeyDescription] = self.taskDescription;
     }
-    dictionary[@"doubleTapInterval"] = @(MIN(2.0, MAX(0.02, self.doubleTapInterval)));
+    dictionary[@"doubleTapInterval"] = @(ACFastDoubleTapInterval);
     dictionary[@"pressDurationMs"] = @((NSInteger)llround(MIN(10.0, MAX(0.0, self.longPressDuration)) * 1000.0));
     dictionary[@"pressDuration"] = @(MIN(10.0, MAX(0.0, self.longPressDuration)));
     dictionary[@"swipeDuration"] = @(MIN(10.0, MAX(0.05, self.swipeDuration)));
