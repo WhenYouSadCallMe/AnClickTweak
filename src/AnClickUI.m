@@ -6859,7 +6859,7 @@ performRecognitionTaskModel:(AnClickTaskModel *)model
     NSMutableDictionary *task = [self taskDictionaryForModel:model];
     if (!task) {
         if (completion) {
-            completion(NO);
+            completion(NO, NO, 0.0);
         }
         return;
     }
@@ -11243,7 +11243,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 - (void)performRecognitionNetworkTask:(NSDictionary *)task
                               inWindow:(UIWindow *)hostWindow
                             generation:(NSUInteger)runGeneration
-                            completion:(void (^)(BOOL success))completion {
+                            completion:(AnClickTaskEngineRecognitionCompletion)completion {
     AnClickActionMode mode = [self modeForTask:task];
     if (mode == AnClickActionModeImage) {
         [self performImageTask:task inWindow:hostWindow runGeneration:runGeneration completion:completion];
@@ -11252,7 +11252,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     } else if (mode == AnClickActionModeColor) {
         [self performColorTask:task inWindow:hostWindow runGeneration:runGeneration completion:completion];
     } else if (completion) {
-        completion(NO);
+        completion(NO, NO, 0.0);
     }
 }
 
@@ -11271,7 +11271,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         return;
     }
 
-    [self performRecognitionNetworkTask:task inWindow:hostWindow generation:runGeneration completion:^(__unused BOOL success) {
+    [self performRecognitionNetworkTask:task inWindow:hostWindow generation:runGeneration completion:^(__unused BOOL success, __unused BOOL actionPerformed, __unused NSTimeInterval actionDelay) {
         if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
             return;
         }
@@ -11688,13 +11688,13 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 - (void)performImageTask:(NSDictionary *)task
                 inWindow:(UIWindow *)hostWindow
            runGeneration:(NSUInteger)runGeneration
-              completion:(void (^)(BOOL success))completion {
+              completion:(AnClickTaskEngineRecognitionCompletion)completion {
     NSString *templatePath = task[@"templatePath"];
     UIImage *templateImage = [self cachedTemplateImageAtPath:templatePath];
     if (!templateImage) {
         _statusLabel.text = @"识图无模板";
         if (completion) {
-            completion(NO);
+            completion(NO, NO, 0.0);
         }
         return;
     }
@@ -11746,7 +11746,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     strongSelf->_statusLabel.text = @"识图未找到";
                     [strongSelf showToast:@"识图未找到"];
                     if (completion) {
-                        completion(NO);
+                        completion(NO, NO, 0.0);
                     } else {
                         [strongSelf performRecognitionBranchActionForTask:task
                                                                   success:NO
@@ -11764,7 +11764,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     strongSelf->_statusLabel.text = @"识图异常";
                     [strongSelf showToast:@"识图异常"];
                     if (completion) {
-                        completion(NO);
+                        completion(NO, NO, 0.0);
                     }
                     return;
                 }
@@ -11781,7 +11781,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                         : @"识图成功后跳转未选任务";
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     if (completion) {
-                        completion(YES);
+                        completion(YES, NO, 0.0);
                     }
                     return;
                 }
@@ -11806,7 +11806,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     }
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     if (completion) {
-                        completion(YES);
+                        completion(YES, NO, 0.0);
                         return;
                     }
                     if ([strongSelf modeIsRecognitionTask:imageActionMode]) {
@@ -11836,7 +11836,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                         : [NSString stringWithFormat:@"识图成功后%@未设置动作", [strongSelf actionNameForMode:imageActionMode]];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     if (completion) {
-                        completion(YES);
+                        completion(YES, NO, 0.0);
                     }
                     return;
                 }
@@ -11844,7 +11844,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:^{
                         if (completion) {
-                            completion(YES);
+                            completion(YES, YES, 0.0);
                         }
                     }];
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f 网络请求",
@@ -11863,7 +11863,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     strongSelf->_statusLabel.text = @"识图成功动作未取点";
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     if (completion) {
-                        completion(YES);
+                        completion(YES, YES, 0.0);
                     }
                     return;
                 }
@@ -11893,7 +11893,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
                                                                    delay:actionDuration + 0.03];
                 if (completion) {
-                    completion(YES);
+                    completion(YES, YES, actionDuration + 0.03);
                 }
         }];
     }];
@@ -11910,7 +11910,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 - (void)performOCRTask:(NSDictionary *)task
               inWindow:(UIWindow *)hostWindow
          runGeneration:(NSUInteger)runGeneration
-            completion:(void (^)(BOOL success))completion {
+            completion:(AnClickTaskEngineRecognitionCompletion)completion {
     NSString *targetText = [self trimmedActionDescription:task[@"ocrText"]];
     AnClickOCRMatchMode matchMode = [self ocrMatchModeForTask:task];
     BOOL useRegex = matchMode == AnClickOCRMatchModeRegex;
@@ -11918,7 +11918,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         _statusLabel.text = useRegex ? @"正则表达式未填写" : @"识字未填写";
         [self showToast:_statusLabel.text];
         if (completion) {
-            completion(NO);
+            completion(NO, NO, 0.0);
         }
         return;
     }
@@ -11928,7 +11928,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         _statusLabel.text = @"正则表达式无效";
         [self showToast:_statusLabel.text];
         if (completion) {
-            completion(NO);
+            completion(NO, NO, 0.0);
         }
         return;
     }
@@ -11941,7 +11941,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         !task[@"successPoint"]) {
         _statusLabel.text = @"识字未取点";
         if (completion) {
-            completion(NO);
+            completion(NO, NO, 0.0);
         }
         return;
     }
@@ -11992,7 +11992,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     strongSelf->_statusLabel.text = error;
                     [strongSelf showToast:error];
                     if (completion) {
-                        completion(NO);
+                        completion(NO, NO, 0.0);
                     }
                     return;
                 }
@@ -12008,7 +12008,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     strongSelf->_statusLabel.text = @"识字相似度不足";
                     [strongSelf showToast:@"识字相似度不足"];
                     if (completion) {
-                        completion(NO);
+                        completion(NO, NO, 0.0);
                     } else {
                         [strongSelf performRecognitionBranchActionForTask:task
                                                                   success:NO
@@ -12030,7 +12030,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     strongSelf->_statusLabel.text = @"识字未找到";
                     [strongSelf showToast:@"识字未找到"];
                     if (completion) {
-                        completion(NO);
+                        completion(NO, NO, 0.0);
                     } else {
                         [strongSelf performRecognitionBranchActionForTask:task
                                                                   success:NO
@@ -12052,7 +12052,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                         : @"识字成功后跳转未选任务";
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     if (completion) {
-                        completion(YES);
+                        completion(YES, NO, 0.0);
                     }
                     return;
                 }
@@ -12081,7 +12081,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     }
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     if (completion) {
-                        completion(YES);
+                        completion(YES, NO, 0.0);
                         return;
                     }
                     if ([strongSelf modeIsRecognitionTask:actionMode]) {
@@ -12113,7 +12113,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                         : [NSString stringWithFormat:@"识字成功后%@未设置动作", [strongSelf actionNameForMode:actionMode]];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     if (completion) {
-                        completion(YES);
+                        completion(YES, NO, 0.0);
                     }
                     return;
                 }
@@ -12121,7 +12121,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     [strongSelf performRecognitionNetworkActionForTask:task recognitionText:text runGeneration:runGeneration completion:^{
                         if (completion) {
-                            completion(YES);
+                            completion(YES, YES, 0.0);
                         }
                     }];
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ 网络请求", matchSummary, text];
@@ -12139,7 +12139,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     strongSelf->_statusLabel.text = @"识字成功动作未取点";
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     if (completion) {
-                        completion(YES);
+                        completion(YES, YES, 0.0);
                     }
                     return;
                 }
@@ -12172,7 +12172,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
                                                                    delay:actionDuration + 0.03];
                 if (completion) {
-                    completion(YES);
+                    completion(YES, YES, actionDuration + 0.03);
                 }
         }];
     }];
@@ -12189,12 +12189,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 - (void)performColorTask:(NSDictionary *)task
                 inWindow:(UIWindow *)hostWindow
            runGeneration:(NSUInteger)runGeneration
-              completion:(void (^)(BOOL success))completion {
+              completion:(AnClickTaskEngineRecognitionCompletion)completion {
     NSArray<NSDictionary *> *colorPoints = [self normalizedColorPatternPointsForTask:task];
     if (colorPoints.count == 0) {
         _statusLabel.text = @"识色未取色";
         if (completion) {
-            completion(NO);
+            completion(NO, NO, 0.0);
         }
         return;
     }
@@ -12250,7 +12250,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     strongSelf->_statusLabel.text = @"颜色仍存在";
                     [strongSelf showToast:@"颜色仍存在"];
                     if (completion) {
-                        completion(NO);
+                        completion(NO, NO, 0.0);
                     } else {
                         [strongSelf performRecognitionBranchActionForTask:task
                                                                   success:NO
@@ -12265,7 +12265,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     strongSelf->_statusLabel.text = @"颜色未找到";
                     [strongSelf showToast:@"颜色未找到"];
                     if (completion) {
-                        completion(NO);
+                        completion(NO, NO, 0.0);
                     } else {
                         [strongSelf performRecognitionBranchActionForTask:task
                                                                   success:NO
@@ -12296,7 +12296,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     strongSelf->_statusLabel.text = @"识色异常";
                     [strongSelf showToast:@"识色异常"];
                     if (completion) {
-                        completion(NO);
+                        completion(NO, NO, 0.0);
                     }
                     return;
                 }
@@ -12312,7 +12312,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                         : @"识色成功后跳转未选任务";
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     if (completion) {
-                        completion(YES);
+                        completion(YES, NO, 0.0);
                     }
                     return;
                 }
@@ -12340,7 +12340,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     }
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     if (completion) {
-                        completion(YES);
+                        completion(YES, NO, 0.0);
                         return;
                     }
                     if ([strongSelf modeIsRecognitionTask:actionMode]) {
@@ -12370,7 +12370,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                         : [NSString stringWithFormat:@"识色成功后%@未设置动作", [strongSelf actionNameForMode:actionMode]];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     if (completion) {
-                        completion(YES);
+                        completion(YES, NO, 0.0);
                     }
                     return;
                 }
@@ -12378,7 +12378,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:^{
                         if (completion) {
-                            completion(YES);
+                            completion(YES, YES, 0.0);
                         }
                     }];
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ 网络请求", patternSummary];
@@ -12396,7 +12396,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     strongSelf->_statusLabel.text = @"识色成功动作未取点";
                     [strongSelf showToast:strongSelf->_statusLabel.text];
                     if (completion) {
-                        completion(YES);
+                        completion(YES, YES, 0.0);
                     }
                     return;
                 }
@@ -12428,7 +12428,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
                                                                    delay:actionDuration + 0.03];
                 if (completion) {
-                    completion(YES);
+                    completion(YES, YES, actionDuration + 0.03);
                 }
         }];
     }];

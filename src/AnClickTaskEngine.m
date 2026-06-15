@@ -278,8 +278,19 @@
             return;
         }
         case AnClickTaskEngineCursorDecisionListFinished:
-            [delegate taskEngine:self finishWithStatus:@"任务完成" showToast:YES restorePanel:YES];
+        {
+            NSString *currentStatus = [delegate taskEngineCurrentStatus:self] ?: @"";
+            BOOL preservesRecognitionStatus = [currentStatus containsString:@"识图"] ||
+                [currentStatus containsString:@"识字"] ||
+                [currentStatus containsString:@"识色"] ||
+                [currentStatus containsString:@"识别"] ||
+                [currentStatus containsString:@"文字识别"];
+            NSString *finishStatus = preservesRecognitionStatus
+                ? [NSString stringWithFormat:@"%@ · 完成", currentStatus]
+                : @"任务完成";
+            [delegate taskEngine:self finishWithStatus:finishStatus showToast:YES restorePanel:YES];
             return;
+        }
         case AnClickTaskEngineCursorDecisionRunTask:
             break;
     }
@@ -707,7 +718,7 @@
         return;
     }
 
-    [delegate taskEngine:self performRecognitionTaskModel:model host:host generation:generation completion:^(BOOL success) {
+    [delegate taskEngine:self performRecognitionTaskModel:model host:host generation:generation completion:^(BOOL success, BOOL actionPerformed, NSTimeInterval actionDelay) {
         id<AnClickTaskEngineDelegate> callbackDelegate = self.delegate;
         if (!callbackDelegate) {
             return;
@@ -718,6 +729,38 @@
         id currentHost = [callbackDelegate taskEngine:self currentHostWithFallback:host];
         if (success) {
             NSTimeInterval successDelay = [callbackDelegate taskEngine:self postSuccessDelayForRecognitionTaskModel:model];
+            if (actionPerformed) {
+                NSTimeInterval nextDelay = MAX(0.0, actionDelay);
+                if (retryUntilFound || attempt >= repeatCount) {
+                    [self scheduleAfter:nextDelay guard:^BOOL{
+                        id<AnClickTaskEngineDelegate> guardDelegate = self.delegate;
+                        return guardDelegate &&
+                            [guardDelegate taskEngine:self
+                            canContinueWithGeneration:generation
+                                         fallbackHost:currentHost
+                                               status:@"窗口变化停止"];
+                    } block:^{
+                        id<AnClickTaskEngineDelegate> finishDelegate = self.delegate;
+                        if (!finishDelegate) {
+                            return;
+                        }
+                        id nextHost = [finishDelegate taskEngine:self currentHostWithFallback:currentHost];
+                        NSUInteger nextIndex = [finishDelegate taskEngine:self
+                                      nextIndexAfterRecognitionTaskModel:model
+                                                            currentIndex:index
+                                                                 success:YES];
+                        [self continueTaskRunToIndex:nextIndex host:nextHost generation:generation];
+                    }];
+                    return;
+                }
+                [self scheduleRecognitionTaskModel:model
+                                           atIndex:index
+                                              host:currentHost
+                                        generation:generation
+                                           attempt:attempt + 1
+                                             delay:MAX(nextDelay, successDelay)];
+                return;
+            }
             if (retryUntilFound || attempt >= repeatCount) {
                 [self continueAfterRecognitionTaskModel:model
                                                 atIndex:index

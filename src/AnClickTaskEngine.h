@@ -11,7 +11,7 @@ typedef void (^AnClickTaskEngineScheduleBlock)(void);
 typedef void (^AnClickTaskEngineRuntimeHandler)(NSTimeInterval runtime);
 typedef void (^AnClickTaskEngineNetworkCompletion)(BOOL matched, BOOL requestSucceeded, BOOL blocked);
 typedef void (^AnClickTaskEngineGlobalNetworkCompletion)(BOOL shouldRun, NSString *status);
-typedef void (^AnClickTaskEngineRecognitionCompletion)(BOOL success);
+typedef void (^AnClickTaskEngineRecognitionCompletion)(BOOL success, BOOL actionPerformed, NSTimeInterval actionDelay);
 typedef void (^AnClickTaskEngineRecognitionCaptureBlock)(void);
 typedef void (^AnClickTaskEngineActionDelayCompletion)(NSTimeInterval actionDelay);
 
