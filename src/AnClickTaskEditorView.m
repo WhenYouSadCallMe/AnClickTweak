@@ -22,8 +22,10 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindOCRSimilarity,
     ACEditorRowKindNetworkURL,
     ACEditorRowKindNetworkMethod,
+    ACEditorRowKindNetworkRequestMode,
     ACEditorRowKindNetworkHeaders,
     ACEditorRowKindNetworkBody,
+    ACEditorRowKindNetworkAddPostPair,
     ACEditorRowKindNetworkRetryMode,
     ACEditorRowKindNetworkRetryLimit,
     ACEditorRowKindNetworkTimeout,
@@ -58,6 +60,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindFailureBranch,
     ACEditorRowKindSingleStep,
     ACEditorRowKindDelete,
+    ACEditorRowKindNetworkPostPairBase = 1000,
 };
 
 @interface ACEditorInputCell : UITableViewCell
@@ -801,8 +804,10 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @(ACEditorRowKindOCRSimilarity),
         @(ACEditorRowKindNetworkURL),
         @(ACEditorRowKindNetworkMethod),
+        @(ACEditorRowKindNetworkRequestMode),
         @(ACEditorRowKindNetworkHeaders),
         @(ACEditorRowKindNetworkBody),
+        @(ACEditorRowKindNetworkAddPostPair),
         @(ACEditorRowKindNetworkContains),
         @(ACEditorRowKindNetworkFalse),
         @(ACEditorRowKindJumpTarget),
@@ -813,6 +818,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     for (NSNumber *row in candidates) {
         if ([self shouldShowRowForKind:(ACEditorRowKind)row.integerValue]) {
             [rows addObject:row];
+            if (row.integerValue == ACEditorRowKindNetworkBody) {
+                [rows addObjectsFromArray:[self networkPostPairRows]];
+            }
         }
     }
     return rows;
@@ -848,6 +856,28 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     return self.branchTitle.length > 0;
 }
 
+- (BOOL)isNetworkPostPairRow:(ACEditorRowKind)row {
+    return row >= ACEditorRowKindNetworkPostPairBase &&
+        row < ACEditorRowKindNetworkPostPairBase + 100;
+}
+
+- (NSUInteger)networkPostPairIndexForRow:(ACEditorRowKind)row {
+    return (NSUInteger)(row - ACEditorRowKindNetworkPostPairBase);
+}
+
+- (NSArray<NSNumber *> *)networkPostPairRows {
+    if (self.model.actionMode != AnClickActionModeNetwork ||
+        ![[self.model.networkMethod uppercaseString] isEqualToString:@"POST"]) {
+        return @[];
+    }
+    NSMutableArray<NSNumber *> *rows = [NSMutableArray array];
+    NSUInteger count = MIN((NSUInteger)8, self.model.networkPostPairs.count);
+    for (NSUInteger index = 0; index < count; index++) {
+        [rows addObject:@(ACEditorRowKindNetworkPostPairBase + (NSInteger)index)];
+    }
+    return rows;
+}
+
 - (BOOL)branchActionModeCanUseRecognitionPoint:(AnClickActionMode)mode {
     return mode == AnClickActionModeTap ||
         mode == AnClickActionModeDoubleTap ||
@@ -857,7 +887,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 
 - (NSArray<NSNumber *> *)branchActionModesForSuccess:(BOOL)success {
     NSMutableArray<NSNumber *> *modes = [NSMutableArray array];
-    if (!success) {
+    if (!success || self.model.actionMode == AnClickActionModeNetwork) {
         [modes addObject:@(AnClickActionModeNone)];
     }
     if ([self isEditingBranchActionConfig]) {
@@ -907,6 +937,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         mode == AnClickActionModeNone ||
         mode == AnClickActionModeJump) {
         return NO;
+    }
+    if (self.model.actionMode == AnClickActionModeNetwork) {
+        return YES;
     }
     return ![self branchActionModeCanUseRecognitionPoint:mode];
 }
@@ -1158,6 +1191,10 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         }
         if (previous != mode) {
             NSMutableDictionary *config = [[self draftBranchConfigForMode:mode] mutableCopy];
+            if (self.model.actionMode == AnClickActionModeNetwork &&
+                [self branchActionModeCanUseRecognitionPoint:mode]) {
+                config[@"useMatchPoint"] = @NO;
+            }
             self.model.successActionConfig = config;
             self.model.successRecognitionActionConfig = (mode == AnClickActionModeImage ||
                 mode == AnClickActionModeOCR ||
@@ -1196,21 +1233,20 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     BOOL recognitionMode = mode == AnClickActionModeImage ||
         mode == AnClickActionModeOCR ||
         mode == AnClickActionModeColor;
-    BOOL recognitionPointMode = recognitionMode && [self branchActionModeCanUseRecognitionPoint:self.model.successActionMode];
-    BOOL customRecognitionPointMode = recognitionPointMode && !self.model.useMatchPoint;
+    BOOL judgementMode = recognitionMode || mode == AnClickActionModeNetwork;
 
     switch (kind) {
         case ACEditorRowKindActionGrid:
             return YES;
         case ACEditorRowKindCoordinate:
-            return basicPointMode || customRecognitionPointMode;
+            return basicPointMode;
         case ACEditorRowKindSwipeStart:
         case ACEditorRowKindSwipeEnd:
             return mode == AnClickActionModeSwipe;
         case ACEditorRowKindRecognitionClickTargetMode:
-            return recognitionPointMode;
+            return NO;
         case ACEditorRowKindPointPick:
-            return basicPointMode || mode == AnClickActionModeSwipe || customRecognitionPointMode;
+            return basicPointMode || mode == AnClickActionModeSwipe;
         case ACEditorRowKindColorPick:
             return mode == AnClickActionModeColor;
         case ACEditorRowKindJitter:
@@ -1244,14 +1280,19 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             return mode == AnClickActionModeOCR;
         case ACEditorRowKindNetworkURL:
         case ACEditorRowKindNetworkMethod:
+        case ACEditorRowKindNetworkRequestMode:
         case ACEditorRowKindNetworkHeaders:
-        case ACEditorRowKindNetworkBody:
+        case ACEditorRowKindNetworkTimeout:
+            return mode == AnClickActionModeNetwork;
         case ACEditorRowKindNetworkRetryMode:
         case ACEditorRowKindNetworkRetryLimit:
-        case ACEditorRowKindNetworkTimeout:
         case ACEditorRowKindNetworkContains:
         case ACEditorRowKindNetworkFalse:
-            return mode == AnClickActionModeNetwork;
+            return mode == AnClickActionModeNetwork && !self.model.networkRequestOnly;
+        case ACEditorRowKindNetworkBody:
+        case ACEditorRowKindNetworkAddPostPair:
+            return mode == AnClickActionModeNetwork &&
+                [[self.model.networkMethod uppercaseString] isEqualToString:@"POST"];
         case ACEditorRowKindJumpTarget:
             return mode == AnClickActionModeJump;
         case ACEditorRowKindMacroRecord:
@@ -1265,13 +1306,14 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
                 self.model.repeatCount > 1;
         case ACEditorRowKindRecognitionRetryMode:
         case ACEditorRowKindRecognitionRetryInterval:
+            return recognitionMode;
         case ACEditorRowKindSuccessActionMode:
         case ACEditorRowKindFailureActionMode:
-            return recognitionMode;
+            return judgementMode;
         case ACEditorRowKindSuccessActionConfig:
-            return recognitionMode && [self branchActionModeNeedsFullConfig:self.model.successActionMode success:YES];
+            return judgementMode && [self branchActionModeNeedsFullConfig:self.model.successActionMode success:YES];
         case ACEditorRowKindFailureActionConfig:
-            return recognitionMode && [self branchActionModeNeedsFullConfig:self.model.failureActionMode success:NO];
+            return judgementMode && [self branchActionModeNeedsFullConfig:self.model.failureActionMode success:NO];
         case ACEditorRowKindSuccessRecognitionResultActionMode:
             return recognitionMode && [self branchSelectedActionIsRecognitionForSuccess:YES];
         case ACEditorRowKindFailureRecognitionResultActionMode:
@@ -1297,9 +1339,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             return [self branchPointRowsAvailableForSuccess:NO recognitionMode:recognitionMode] &&
                 [self branchPointActionModeForSuccess:NO] == AnClickActionModeLongPress;
         case ACEditorRowKindSuccessBranch:
-            return recognitionMode && self.model.successActionMode == AnClickActionModeJump;
+            return judgementMode && self.model.successActionMode == AnClickActionModeJump;
         case ACEditorRowKindFailureBranch:
-            return recognitionMode && self.model.failureActionMode == AnClickActionModeJump;
+            return judgementMode && self.model.failureActionMode == AnClickActionModeJump;
         case ACEditorRowKindSingleStep:
         case ACEditorRowKindDelete:
             return mode != AnClickActionModeNone;
@@ -1310,7 +1352,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 - (NSArray<NSNumber *> *)logicRows {
     if (self.model.actionMode == AnClickActionModeImage ||
         self.model.actionMode == AnClickActionModeOCR ||
-        self.model.actionMode == AnClickActionModeColor) {
+        self.model.actionMode == AnClickActionModeColor ||
+        self.model.actionMode == AnClickActionModeNetwork) {
         NSMutableArray<NSNumber *> *rows = [NSMutableArray arrayWithObject:@(ACEditorRowKindSuccessActionMode)];
         if ([self shouldShowRowForKind:ACEditorRowKindSuccessActionConfig]) {
             [rows addObject:@(ACEditorRowKindSuccessActionConfig)];
@@ -1427,7 +1470,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     }
     if (mode != AnClickActionModeImage &&
         mode != AnClickActionModeOCR &&
-        mode != AnClickActionModeColor) {
+        mode != AnClickActionModeColor &&
+        mode != AnClickActionModeNetwork) {
         self.model.successBranchIndex = -1;
         self.model.failureBranchIndex = -1;
         self.model.successActionMode = AnClickActionModeTap;
@@ -1435,7 +1479,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         self.model.recognitionRetryUntilFound = NO;
     } else {
         if (![self branchActionMode:self.model.successActionMode isAllowedForSuccess:YES]) {
-            self.model.successActionMode = AnClickActionModeTap;
+            self.model.successActionMode = mode == AnClickActionModeNetwork ? AnClickActionModeNone : AnClickActionModeTap;
             self.model.successActionConfig = @{};
             self.model.successRecognitionActionConfig = @{};
         }
@@ -1455,6 +1499,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     ACEditorRowKind row = [self rowsForSection:indexPath.section][(NSUInteger)indexPath.row].integerValue;
+    if ([self isNetworkPostPairRow:row]) {
+        ACEditorInputCell *cell = [tableView dequeueReusableCellWithIdentifier:@"Input" forIndexPath:indexPath];
+        [self configureInputCell:cell row:row];
+        return cell;
+    }
     if (row == ACEditorRowKindActionGrid) {
         ACEditorActionGridCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ActionGrid" forIndexPath:indexPath];
         __weak typeof(self) weakSelf = self;
@@ -1468,6 +1517,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             strongSelf.model.actionMode = mode;
             if (recognitionMode) {
                 strongSelf.model.useMatchPoint = YES;
+            } else if (mode == AnClickActionModeNetwork) {
+                strongSelf.model.successActionMode = AnClickActionModeNone;
+                strongSelf.model.failureActionMode = AnClickActionModeNone;
+                strongSelf.model.successActionConfig = @{};
+                strongSelf.model.failureActionConfig = @{};
             }
             [strongSelf normalizeModelForCurrentActionMode];
             [strongSelf notifyModelChanged];
@@ -1549,6 +1603,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     }
     if (row == ACEditorRowKindPointPick ||
         row == ACEditorRowKindColorPick ||
+        row == ACEditorRowKindNetworkAddPostPair ||
         row == ACEditorRowKindTemplate ||
         row == ACEditorRowKindMacroRecord ||
         row == ACEditorRowKindSuccessActionConfig ||
@@ -1578,6 +1633,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             }
         } else if (row == ACEditorRowKindColorPick) {
             title = @"⌖ 在屏幕上拾取颜色及坐标";
+        } else if (row == ACEditorRowKindNetworkAddPostPair) {
+            title = self.model.networkPostPairs.count >= 8 ? @"POST 键值最多 8 组" : @"+ 添加 POST 键值";
+            titleColor = self.model.networkPostPairs.count >= 8 ? UIColor.secondaryLabelColor : UIColor.systemBlueColor;
         } else if (row == ACEditorRowKindTemplate) {
             title = self.model.templatePath.length > 0 ? @"🖼 重新截图选择识别图像" : @"🖼 截图选择识别图像";
         } else if (row == ACEditorRowKindMacroRecord) {
@@ -1660,6 +1718,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         row == ACEditorRowKindFailureRecognitionResultClickTargetMode ||
         row == ACEditorRowKindOCRMatchMode ||
         row == ACEditorRowKindNetworkMethod ||
+        row == ACEditorRowKindNetworkRequestMode ||
         row == ACEditorRowKindNetworkRetryMode ||
         row == ACEditorRowKindRecognitionRetryMode;
 }
@@ -1705,6 +1764,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             items = @[@"GET", @"POST"];
             selectedIndex = [[self.model.networkMethod uppercaseString] isEqualToString:@"POST"] || self.model.networkUsesPost ? 1 : 0;
             break;
+        case ACEditorRowKindNetworkRequestMode:
+            cell.iconLabel.text = @"☑";
+            cell.titleLabel.text = @"执行模式";
+            items = @[@"判断返回", @"仅请求"];
+            selectedIndex = self.model.networkRequestOnly ? 1 : 0;
+            break;
         case ACEditorRowKindNetworkRetryMode:
             cell.iconLabel.text = @"↻";
             cell.titleLabel.text = @"重试模式";
@@ -1740,6 +1805,16 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     cell.textField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     cell.textField.autocorrectionType = UITextAutocorrectionTypeNo;
     cell.textField.enabled = YES;
+    if ([self isNetworkPostPairRow:row]) {
+        NSUInteger index = [self networkPostPairIndexForRow:row];
+        cell.iconLabel.text = @"＋";
+        cell.iconLabel.textColor = UIColor.systemBlueColor;
+        cell.titleLabel.text = [NSString stringWithFormat:@"POST 键值 #%lu", (unsigned long)index + 1];
+        cell.textField.text = [self networkPostPairTextAtIndex:index];
+        cell.textField.placeholder = @"key=value，值可填 {识字结果}";
+        cell.textField.keyboardType = UIKeyboardTypeDefault;
+        return;
+    }
     switch (row) {
         case ACEditorRowKindCoordinate: {
             CGPoint point = self.model.point ? self.model.point.CGPointValue : CGPointZero;
@@ -1966,7 +2041,13 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 
 - (void)handleTextFieldChanged:(UITextField *)textField {
     NSString *text = textField.text ?: @"";
-    switch ((ACEditorRowKind)textField.tag) {
+    ACEditorRowKind rowKind = (ACEditorRowKind)textField.tag;
+    if ([self isNetworkPostPairRow:rowKind]) {
+        [self updateNetworkPostPairAtIndex:[self networkPostPairIndexForRow:rowKind] text:text];
+        [self notifyModelChanged];
+        return;
+    }
+    switch (rowKind) {
         case ACEditorRowKindCoordinate:
             [self updateModelPointFromText:text];
             break;
@@ -2176,6 +2257,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindNetworkMethod:
             self.model.networkMethod = selected == 1 ? @"POST" : @"GET";
             self.model.networkUsesPost = selected == 1;
+            [self reloadForm];
+            break;
+        case ACEditorRowKindNetworkRequestMode:
+            self.model.networkRequestOnly = selected == 1;
+            [self reloadForm];
             break;
         case ACEditorRowKindNetworkRetryMode:
             self.model.networkRetryForever = selected == 1;
@@ -2196,6 +2282,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             break;
         case ACEditorRowKindColorPick:
             [self.delegate taskEditorViewDidRequestColorPick:self];
+            break;
+        case ACEditorRowKindNetworkAddPostPair:
+            [self addNetworkPostPairRow];
             break;
         case ACEditorRowKindTemplate:
             [self.delegate taskEditorViewDidRequestTemplateCapture:self];
@@ -2349,6 +2438,63 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         }
     }
     return headers;
+}
+
+- (NSString *)networkPostPairTextAtIndex:(NSUInteger)index {
+    if (index >= self.model.networkPostPairs.count) {
+        return @"";
+    }
+    NSDictionary *pair = [self.model.networkPostPairs[index] isKindOfClass:NSDictionary.class] ? self.model.networkPostPairs[index] : nil;
+    NSString *key = [pair[@"key"] isKindOfClass:NSString.class] ? pair[@"key"] : @"";
+    BOOL useResult = [pair[@"useResult"] boolValue];
+    NSString *value = useResult ? @"{识字结果}" : ([pair[@"value"] isKindOfClass:NSString.class] ? pair[@"value"] : @"");
+    if (key.length == 0 && value.length == 0) {
+        return @"";
+    }
+    return [NSString stringWithFormat:@"%@=%@", key, value];
+}
+
+- (void)updateNetworkPostPairAtIndex:(NSUInteger)index text:(NSString *)text {
+    if (index >= 8) {
+        return;
+    }
+    NSMutableArray *pairs = [self.model.networkPostPairs mutableCopy] ?: [NSMutableArray array];
+    while (pairs.count <= index) {
+        [pairs addObject:@{}];
+    }
+    NSString *raw = [text ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSRange separator = [raw rangeOfString:@"="];
+    if (separator.location == NSNotFound) {
+        separator = [raw rangeOfString:@":"];
+    }
+    NSString *key = separator.location == NSNotFound
+        ? raw
+        : [[raw substringToIndex:separator.location] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *value = separator.location == NSNotFound
+        ? @""
+        : [[raw substringFromIndex:NSMaxRange(separator)] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *lowerValue = value.lowercaseString;
+    BOOL useResult = [value isEqualToString:@"{识字结果}"] ||
+        [value isEqualToString:@"{{ocr}}"] ||
+        [lowerValue isEqualToString:@"$ocr"] ||
+        [lowerValue isEqualToString:@"${ocr}"];
+    pairs[index] = @{
+        @"key": key ?: @"",
+        @"value": useResult ? @"" : (value ?: @""),
+        @"useResult": @(useResult),
+    };
+    self.model.networkPostPairs = pairs;
+}
+
+- (void)addNetworkPostPairRow {
+    NSMutableArray *pairs = [self.model.networkPostPairs mutableCopy] ?: [NSMutableArray array];
+    if (pairs.count >= 8) {
+        return;
+    }
+    [pairs addObject:@{@"key": @"", @"value": @"", @"useResult": @NO}];
+    self.model.networkPostPairs = pairs;
+    [self notifyModelChanged];
+    [self reloadForm];
 }
 
 - (NSInteger)longPressMilliseconds {

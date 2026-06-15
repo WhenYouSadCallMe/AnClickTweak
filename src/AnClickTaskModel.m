@@ -173,8 +173,6 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
         _recognitionRetryInterval = 1.0;
         _successBranchIndex = -1;
         _failureBranchIndex = -1;
-        _successActionTaskIndex = -1;
-        _failureActionTaskIndex = -1;
         _successActionConfig = @{};
         _failureActionConfig = @{};
         _successRecognitionActionConfig = @{};
@@ -216,7 +214,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     BOOL hasExplicitSuccessActionMode = dictionary[@"imageActionMode"] != nil;
     BOOL hasExplicitFailureActionMode = dictionary[@"failureActionMode"] != nil;
     _successActionMode = ACSupportedActionMode(dictionary[@"imageActionMode"]);
-    if (_successActionMode == AnClickActionModeNone) {
+    if (_successActionMode == AnClickActionModeNone && _actionMode != AnClickActionModeNetwork) {
         _successActionMode = AnClickActionModeTap;
     }
     _failureActionMode = ACSupportedActionMode(dictionary[@"failureActionMode"]);
@@ -271,8 +269,6 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     if (!hasExplicitFailureActionMode && _failureBranchIndex >= 0) {
         _failureActionMode = AnClickActionModeJump;
     }
-    _successActionTaskIndex = ACClampedInteger(dictionary[@"successActionTaskIndex"], -1, NSIntegerMax, -1);
-    _failureActionTaskIndex = ACClampedInteger(dictionary[@"failureActionTaskIndex"], -1, NSIntegerMax, -1);
     _successActionConfig = ACDictionaryValue(dictionary[@"successActionConfig"]);
     _failureActionConfig = ACDictionaryValue(dictionary[@"failureActionConfig"]);
     _successRecognitionActionConfig = ACDictionaryValue(dictionary[@"successRecognitionActionConfig"]);
@@ -334,7 +330,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     AnClickActionMode actionMode = ACSupportedActionMode(@(self.actionMode));
     AnClickActionMode successActionMode = ACSupportedActionMode(@(self.successActionMode));
     AnClickActionMode failureActionMode = ACSupportedActionMode(@(self.failureActionMode));
-    if (successActionMode == AnClickActionModeNone) {
+    if (successActionMode == AnClickActionModeNone && actionMode != AnClickActionModeNetwork) {
         successActionMode = AnClickActionModeTap;
     }
     dictionary[ACKeyMode] = @(actionMode);
@@ -435,8 +431,6 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     dictionary[@"recognitionRetryInterval"] = @(MIN(30.0, MAX(0.2, self.recognitionRetryInterval)));
     if (self.successBranchIndex >= 0) dictionary[@"successBranchIndex"] = @(self.successBranchIndex);
     if (self.failureBranchIndex >= 0) dictionary[@"failureBranchIndex"] = @(self.failureBranchIndex);
-    if (self.successActionTaskIndex >= 0) dictionary[@"successActionTaskIndex"] = @(self.successActionTaskIndex);
-    if (self.failureActionTaskIndex >= 0) dictionary[@"failureActionTaskIndex"] = @(self.failureActionTaskIndex);
     if (self.successActionConfig.count > 0) dictionary[@"successActionConfig"] = self.successActionConfig;
     if (self.failureActionConfig.count > 0) dictionary[@"failureActionConfig"] = self.failureActionConfig;
     if (self.successRecognitionActionConfig.count > 0) dictionary[@"successRecognitionActionConfig"] = self.successRecognitionActionConfig;

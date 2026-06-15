@@ -10,21 +10,19 @@
 #import <math.h>
 #import "AnClickTypes.h"
 #import "AnClickTaskModel.h"
+#import "AnClickTaskEngine.h"
+#import "AnClickNetworkService.h"
+#import "AnClickRecognitionService.h"
+#import "AnClickPickerService.h"
+#import "AnClickTemplateCaptureView.h"
+#import "AnClickPointPickerView.h"
+#import "AnClickColorPickerView.h"
 #import "AnClickTaskEditorView.h"
 
 #if ANCLICK_RELEASE_SILENT
 #undef NSLog
 #define NSLog(...) do {} while (0)
 #endif
-
-typedef NS_OPTIONS(NSInteger, AnClickCaptureSelectionEditMode) {
-    AnClickCaptureSelectionEditModeNone = 0,
-    AnClickCaptureSelectionEditModeMove = 1 << 0,
-    AnClickCaptureSelectionEditModeLeft = 1 << 1,
-    AnClickCaptureSelectionEditModeRight = 1 << 2,
-    AnClickCaptureSelectionEditModeTop = 1 << 3,
-    AnClickCaptureSelectionEditModeBottom = 1 << 4,
-};
 
 typedef struct __IOHIDEvent *IOHIDEventRef;
 typedef struct __IOHIDServiceClient *IOHIDServiceClientRef;
@@ -52,6 +50,12 @@ static const NSTimeInterval AnClickDefaultSwipeDuration = 0.300;
 static const NSTimeInterval AnClickDefaultLongPressDuration = 0.500;
 static const NSTimeInterval AnClickMinLongPressDuration = 0.500;
 static const NSTimeInterval AnClickMaxLongPressDuration = 10.000;
+static const NSTimeInterval AnClickMinInfiniteLoopInterval = 0.100;
+static const NSTimeInterval AnClickRunProgressToastMinInterval = 1.200;
+static const NSTimeInterval AnClickRunTraceMinInterval = 0.300;
+static const NSTimeInterval AnClickMinJumpContinuationInterval = 0.030;
+static const NSUInteger AnClickMaxJumpVisitsPerRun = 96;
+static const CFTimeInterval AnClickRunListRefreshMinInterval = 0.75;
 static const NSInteger AnClickBranchSuccessSuccessActionTagBase = 21000;
 static const NSInteger AnClickBranchSuccessFailureActionTagBase = 22000;
 static const NSInteger AnClickBranchFailureSuccessActionTagBase = 23000;
@@ -68,8 +72,6 @@ static const NSInteger AnClickHIDUsageConsumerVolumeIncrement = 0xE9;
 static const NSInteger AnClickHIDUsageConsumerVolumeDecrement = 0xEA;
 static const NSInteger AnClickSpringBoardVolumeUpButtonType = 102;
 static const NSInteger AnClickSpringBoardVolumeDownButtonType = 103;
-static const NSInteger AnClickColorPickMarkerTagBase = 43100;
-static const NSInteger AnClickColorPickRowTagBase = 43200;
 static const NSUInteger AnClickColorPickMaxSamples = 32;
 static const NSUInteger AnClickMultiTapMaxPoints = 32;
 static const NSUInteger ACPostPairLimit = 8;
@@ -86,9 +88,11 @@ static const NSInteger AnClickHomeDeleteLabelTag = 54005;
 static const NSInteger AnClickHomeTimeLabelTag = 54006;
 static const NSInteger AnClickHomeLoopLabelTag = 54007;
 static const NSInteger AnClickHomeSaveLabelTag = 54008;
+static const NSInteger AnClickHomeMonitorLabelTag = 54009;
 static const NSInteger AnClickHomeOptionPanelTimeTag = 54101;
 static const NSInteger AnClickHomeOptionPanelLoopTag = 54102;
 static const NSInteger AnClickHomeOptionPanelSaveTag = 54103;
+static const NSInteger AnClickHomeOptionPanelMonitorTag = 54104;
 static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.18;
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
 static void (*AnClickOriginalSpringBoardHandlePhysicalButtonEvent)(id self, SEL _cmd, id event);
@@ -200,22 +204,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (NSSet<UIPress *> *)allPresses;
 @end
 
-@interface AnClickCore : NSObject
-+ (UIImage *)captureCurrentWindowImage;
-+ (UIImage *)captureCurrentWindowImageWithWindow:(UIWindow **)capturedWindow;
-+ (NSDictionary *)findTemplateImageMatch:(UIImage *)templateImage threshold:(double)threshold;
-+ (NSDictionary *)findColorMatchWithRed:(NSInteger)red green:(NSInteger)green blue:(NSInteger)blue tolerance:(double)tolerance;
-+ (NSDictionary *)findColorPatternMatchWithPoints:(NSArray<NSDictionary *> *)points tolerance:(double)tolerance;
-+ (NSValue *)findTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
-+ (BOOL)findAndTapTemplateImage:(UIImage *)templateImage threshold:(double)threshold;
-@end
-
-@interface AnClickOCR : NSObject
-+ (NSDictionary *)findText:(NSString *)targetText mode:(NSInteger)mode;
-+ (NSDictionary *)findText:(NSString *)targetText mode:(NSInteger)mode useRegex:(BOOL)useRegex;
-+ (NSString *)backendNameForMode:(NSInteger)mode;
-@end
-
 @interface AnClickFakeTouch : NSObject
 + (void)fastTapAtPoint:(CGPoint)point;
 + (void)fastDoubleTapAtPoint:(CGPoint)point;
@@ -242,7 +230,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 @property (nonatomic, assign, getter=isRecording) BOOL recording;
 @end
 
-@interface AnClickUI : NSObject <UITextFieldDelegate, UIGestureRecognizerDelegate, UIPickerViewDataSource, UIPickerViewDelegate, UIScrollViewDelegate, UITableViewDataSource, UITableViewDelegate, AnClickTaskEditorViewDelegate>
+@interface AnClickUI : NSObject <UITextFieldDelegate, UIGestureRecognizerDelegate, UIPickerViewDataSource, UIPickerViewDelegate, UITableViewDataSource, UITableViewDelegate, AnClickTaskEditorViewDelegate, AnClickTaskEngineDelegate, AnClickTemplateCaptureViewDelegate, AnClickPointPickerViewDelegate, AnClickColorPickerViewDelegate>
 + (instancetype)shared;
 - (void)show;
 - (void)handleScreenGeometryChanged;
@@ -276,8 +264,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (BOOL)panelCanUseCurrentScene;
 - (void)clearTaskRunPauseState;
 - (void)cancelRunningTaskSideEffects;
-- (void)trackNetworkTask:(NSURLSessionDataTask *)task;
-- (void)untrackNetworkTask:(NSURLSessionDataTask *)task;
 - (void)cancelActiveNetworkTasks;
 - (void)stopTaskRunWithStatus:(NSString *)status showToast:(BOOL)showToast;
 - (NSMutableDictionary *)taskDictionaryForModel:(AnClickTaskModel *)model;
@@ -286,8 +272,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (NSTimeInterval)estimatedActionDurationForTaskModel:(AnClickTaskModel *)model success:(BOOL)success actionMode:(AnClickActionMode)actionMode depth:(NSUInteger)depth;
 - (NSTimeInterval)estimatedTaskDurationForTask:(NSDictionary *)task depth:(NSUInteger)depth;
 - (NSTimeInterval)estimatedTaskDurationForTaskModel:(AnClickTaskModel *)model depth:(NSUInteger)depth;
-- (void)runNetworkTaskModel:(AnClickTaskModel *)model atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration;
-- (void)runRecognitionTaskModel:(AnClickTaskModel *)model atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration;
 @end
 
 @implementation AnClickUI {
@@ -306,6 +290,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_homeCloseButton;
     UIButton *_homeTimeButton;
     UIButton *_homeLoopButton;
+    UIButton *_homeMonitorButton;
     UIButton *_homeSaveConfigButton;
     UIButton *_authorFollowButton;
     UIButton *_globalSettingsButton;
@@ -317,26 +302,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UILabel *_hostToastLabel;
     UILabel *_toolTitleLabel;
     UILabel *_collapsedRuntimeLabel;
-    UIView *_captureOverlay;
-    UIScrollView *_captureScrollView;
-    UIImageView *_captureImageView;
-    UIView *_selectionView;
-    UIView *_pointPickOverlay;
+    NSString *_lastRunProgressToastText;
+    CFTimeInterval _lastRunProgressToastTime;
+    CFTimeInterval _lastRunTraceTime;
+    AnClickTemplateCaptureView *_captureOverlay;
+    AnClickPointPickerView *_pointPickOverlay;
     UIWindow *_pointPickWindow;
-    UIScrollView *_pointPickScrollView;
-    UIImageView *_pointPickImageView;
-    UIView *_pointCursorView;
-    UIView *_pointPickToolbar;
-    UILabel *_pointCoordinateLabel;
     UIWindow *_colorPickWindow;
-    UIScrollView *_colorPickScrollView;
-    UIImageView *_colorPickImageView;
-    UIView *_colorPickCursorView;
-    UIView *_colorPickToolbar;
-    UIScrollView *_colorPickListView;
-    UILabel *_colorPickInfoLabel;
-    UIView *_colorPickSwatchView;
-    UIButton *_colorPickDeleteButton;
+    AnClickColorPickerView *_colorPickOverlay;
     UIImage *_captureSnapshot;
     UIImage *_pointPickSnapshot;
     UIImage *_colorPickImage;
@@ -391,7 +364,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _hasManualCoordinateScreenSize;
     BOOL _pickingSwipeEndPoint;
     BOOL _pickingFailureActionPoint;
-    BOOL _pointPickPanStartedOnToolbar;
     CGPoint _pendingPointPickPoint;
     BOOL _hasPendingPointPickPoint;
     BOOL _longPressHolding;
@@ -399,10 +371,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _templateSearchInProgress;
     BOOL _branchTemplateCaptureActive;
     BOOL _branchTemplateCaptureSuccess;
-    BOOL _captureDrawingSelection;
-    CGPoint _captureDragStartPoint;
-    AnClickCaptureSelectionEditMode _captureSelectionEditMode;
-    CGRect _captureSelectionStartFrame;
     CGRect _collapsedPanelFrame;
     CGPoint _collapsedPanelOriginRatio;
     CGSize _collapsedPanelScreenSize;
@@ -455,6 +423,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CFTimeInterval _ignoreVolumeEventsUntil;
     NSInteger _globalDelayMilliseconds;
     NSInteger _globalRunRepeatCount;
+    NSInteger _globalLoopIntervalSeconds;
     NSInteger _globalStartHour;
     NSInteger _globalStartMinute;
     NSInteger _globalStartSecond;
@@ -467,6 +436,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSInteger _taskRunSingleStepStopIndex;
     NSInteger _taskRunResumeCycle;
     NSUInteger _taskRunResumeIndex;
+    AnClickTaskEngine *_taskEngine;
     NSInteger _targetColorRed;
     NSInteger _targetColorGreen;
     NSInteger _targetColorBlue;
@@ -491,9 +461,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     double _colorTolerance;
     NSTimer *_globalStartTimer;
     NSTimer *_globalStopTimer;
-    NSTimer *_taskRunRuntimeTimer;
-    CFTimeInterval _taskRunStartTime;
-    NSTimeInterval _taskRunAccumulatedRuntime;
     IOHIDEventSystemClientRef _hardwareVolumeButtonClient;
     MPVolumeView *_volumeView;
     UISlider *_volumeSlider;
@@ -502,11 +469,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSInteger _actionRepeatCount;
     NSInteger _recognitionSuccessBranchIndex;
     NSInteger _recognitionFailureBranchIndex;
-    NSInteger _recognitionSuccessActionTaskIndex;
-    NSInteger _recognitionFailureActionTaskIndex;
     NSInteger _editingBranchOwnerTaskIndex;
     AnClickTaskModel *_editingNestedBranchParentModel;
     NSString *_currentTemplatePath;
+    NSCache<NSString *, UIImage *> *_templateImageCache;
+    NSMutableDictionary<NSString *, NSDate *> *_templateImageModificationDates;
     NSString *_actionDescription;
     NSString *_ocrTargetText;
     NSString *_networkURL;
@@ -516,7 +483,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *_globalNetworkURL;
     NSString *_globalNetworkContainsText;
     NSString *_globalNetworkFalseText;
-    NSMutableSet<NSURLSessionDataTask *> *_activeNetworkTasks;
+    AnClickNetworkService *_networkService;
+    AnClickRecognitionService *_recognitionService;
+    AnClickPickerService *_pickerService;
     UITextField *_activeConfigTextField;
     CGRect _keyboardFrameInScreen;
     NSMutableArray<NSDictionary *> *_targetColorSamples;
@@ -728,6 +697,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self clearTaskRunPauseState];
         _currentGlobalRunCycle = 0;
         _taskRunGeneration++;
+        [self resetTaskRunJumpGuard];
+        [self stopTaskRunRuntimeTimerReset:YES];
     }
     _panelWindow.hidden = YES;
     _toastWindow.hidden = YES;
@@ -1525,14 +1496,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _actionInterval = AnClickDefaultTapPressDuration;
     _recognitionSuccessBranchIndex = -1;
     _recognitionFailureBranchIndex = -1;
-    _recognitionSuccessActionTaskIndex = -1;
-    _recognitionFailureActionTaskIndex = -1;
     _editingBranchOwnerTaskIndex = -1;
     _editingNestedBranchActionMode = AnClickActionModeNone;
     _editingBranchActionMode = AnClickActionModeNone;
     _taskRunSingleStepStopIndex = -1;
     _globalDelayMilliseconds = 0;
     _globalRunRepeatCount = 1;
+    _globalLoopIntervalSeconds = 0;
     _globalStartEnabled = NO;
     _globalStopEnabled = NO;
     _globalNetworkGateEnabled = NO;
@@ -1561,9 +1531,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _taskRunResumeScheduled = NO;
     _taskRunResumeCycle = 0;
     _taskRunResumeIndex = 0;
-    _taskRunStartTime = 0;
-    _taskRunAccumulatedRuntime = 0.0;
-    _activeNetworkTasks = [NSMutableSet set];
+    _taskEngine = [[AnClickTaskEngine alloc] init];
+    _taskEngine.minInfiniteLoopInterval = AnClickMinInfiniteLoopInterval;
+    _taskEngine.minJumpContinuationInterval = AnClickMinJumpContinuationInterval;
+    _taskEngine.maxJumpVisitsPerRun = AnClickMaxJumpVisitsPerRun;
+    _taskEngine.listRefreshMinInterval = AnClickRunListRefreshMinInterval;
+    _taskEngine.delegate = self;
+    __weak typeof(self) weakSelf = self;
+    _taskEngine.runtimeHandler = ^(__unused NSTimeInterval runtime) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        [strongSelf refreshTaskRunRuntimeLabel];
+    };
+    _networkService = [[AnClickNetworkService alloc] init];
+    _recognitionService = [[AnClickRecognitionService alloc] init];
+    _pickerService = [[AnClickPickerService alloc] init];
+    _templateImageCache = [[NSCache alloc] init];
+    _templateImageCache.countLimit = 12;
+    _templateImageModificationDates = [NSMutableDictionary dictionary];
     _volumeShortcutRegistered = NO;
     _hasObservedSystemVolume = NO;
     _volumeShortcutRunSuppressToasts = NO;
@@ -1668,14 +1652,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _homeCloseButton.frame = CGRectMake(panelWidth - 50, 8, 38, 38);
     [_panelView addSubview:_homeCloseButton];
 
-    _globalSettingsButton = [self panelButtonWithTitle:@"⚙" action:@selector(showHomeTimeSettings)];
+    _globalSettingsButton = [self panelButtonWithTitle:@"⚙" action:@selector(showHomeMonitorSettings)];
     _globalSettingsButton.frame = CGRectMake(10, 8, 34, 34);
     [_panelView addSubview:_globalSettingsButton];
 
-    _homeTimeButton = [self panelButtonWithTitle:@"时间" action:@selector(showHomeTimeSettings)];
+    _homeTimeButton = [self panelButtonWithTitle:@"定时" action:@selector(showHomeTimeSettings)];
     [_panelView addSubview:_homeTimeButton];
     _homeLoopButton = [self panelButtonWithTitle:@"循环" action:@selector(showHomeLoopSettings)];
     [_panelView addSubview:_homeLoopButton];
+    _homeMonitorButton = [self panelButtonWithTitle:@"监控" action:@selector(showHomeMonitorSettings)];
+    [_panelView addSubview:_homeMonitorButton];
     _homeSaveConfigButton = [self panelButtonWithTitle:@"保存" action:@selector(showHomeSaveConfigMenu)];
     [_panelView addSubview:_homeSaveConfigButton];
     _networkPostPairs = [NSMutableArray array];
@@ -2139,33 +2125,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (BOOL)screenGeometrySize:(CGSize)lhs isCloseToSize:(CGSize)rhs {
     return fabs(lhs.width - rhs.width) < 0.5 && fabs(lhs.height - rhs.height) < 0.5;
-}
-
-- (BOOL)capturedImage:(UIImage *)image matchesWindow:(UIWindow *)window {
-    if (!image.CGImage) {
-        return NO;
-    }
-    if (!window || CGRectIsEmpty(window.bounds)) {
-        return YES;
-    }
-
-    CGSize windowSize = [self screenBoundsForWindow:window].size;
-    CGSize imageSize = image.size;
-    CGFloat scale = image.scale > 0.0 ? image.scale : (window.screen.scale > 0.0 ? window.screen.scale : UIScreen.mainScreen.scale);
-    CGSize pixelPointSize = CGSizeMake((CGFloat)CGImageGetWidth(image.CGImage) / MAX(scale, 0.01),
-                                       (CGFloat)CGImageGetHeight(image.CGImage) / MAX(scale, 0.01));
-    BOOL directMatch = [self screenGeometrySize:imageSize isCloseToSize:windowSize] ||
-        [self screenGeometrySize:pixelPointSize isCloseToSize:windowSize];
-    if (!directMatch) {
-        NSLog(@"[AnClick] Capture size mismatch image=(%.1f, %.1f) pixelPoint=(%.1f, %.1f) window=(%.1f, %.1f)",
-              imageSize.width,
-              imageSize.height,
-              pixelPointSize.width,
-              pixelPointSize.height,
-              windowSize.width,
-              windowSize.height);
-    }
-    return directMatch;
 }
 
 - (BOOL)screenCoordinateSizeIsValid:(CGSize)size {
@@ -2760,34 +2719,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _recognitionBoxView = nil;
 }
 
-- (void)trackNetworkTask:(NSURLSessionDataTask *)task {
-    if (!task) {
-        return;
-    }
-    if (!_activeNetworkTasks) {
-        _activeNetworkTasks = [NSMutableSet set];
-    }
-    [_activeNetworkTasks addObject:task];
-}
-
-- (void)untrackNetworkTask:(NSURLSessionDataTask *)task {
-    if (!task) {
-        return;
-    }
-    [_activeNetworkTasks removeObject:task];
-}
-
 - (void)cancelActiveNetworkTasks {
-    NSSet<NSURLSessionDataTask *> *tasks = [_activeNetworkTasks copy];
-    [_activeNetworkTasks removeAllObjects];
-    for (NSURLSessionDataTask *task in tasks) {
-        [task cancel];
-    }
+    [_networkService cancelActiveTasks];
 }
 
 - (void)cancelRunningTaskSideEffects {
+    [_taskEngine invalidateScheduledCallbacks];
     [AnClickFakeTouch cancelAll];
     [self cancelActiveNetworkTasks];
+    [_recognitionService cancelPendingRequests];
     [self invalidatePendingPanelRestore];
     [self clearRecognitionBox];
 
@@ -2883,10 +2823,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (CGSize)expandedPanelSizeForEditorVisible:(BOOL)editorVisible {
     CGSize screenSize = [self currentScreenBounds].size;
     BOOL landscape = screenSize.width > screenSize.height;
-    CGFloat widthLimit = landscape ? (editorVisible ? 460.0 : 380.0) : (editorVisible ? 380.0 : 340.0);
-    CGFloat width = MIN(widthLimit, screenSize.width - 10.0);
+    CGFloat widthLimit = editorVisible ? 380.0 : 340.0;
+    CGFloat width = floor(MIN(widthLimit, MAX(220.0, screenSize.width - 10.0)));
     CGFloat verticalPadding = landscape ? 52.0 : 60.0;
-    CGFloat availableHeight = screenSize.height - verticalPadding;
+    CGFloat availableHeight = MAX(260.0, screenSize.height - verticalPadding);
     CGFloat editorPreferredHeight = landscape ? availableHeight : 760.0;
     CGFloat editorMinHeight = landscape ? 320.0 : 660.0;
     CGFloat preferredHeight = MIN(editorVisible ? editorPreferredHeight : 420.0, availableHeight);
@@ -2894,7 +2834,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat totalHeight = MAX(minHeight, preferredHeight) +
         [self homeBrandHeaderTotalHeightForEditorVisible:editorVisible] +
         [self homeOutputFooterTotalHeightForEditorVisible:editorVisible];
-    return CGSizeMake(width, MIN(availableHeight, totalHeight));
+    return CGSizeMake(width, floor(MIN(availableHeight, totalHeight)));
 }
 
 - (CGRect)clampedPanelFrame:(CGRect)frame {
@@ -2903,6 +2843,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL landscape = bounds.size.width > bounds.size.height;
     CGFloat minX = MAX(4.0, safeInsets.left + 4.0);
     CGFloat minY = landscape ? MAX(4.0, safeInsets.top + 4.0) : MAX(24.0, safeInsets.top + 4.0);
+    CGFloat maxWidth = MAX(180.0, bounds.size.width - minX - MAX(4.0, safeInsets.right + 4.0));
+    CGFloat maxHeight = MAX(180.0, bounds.size.height - minY - MAX(4.0, safeInsets.bottom + 4.0));
+    frame.size.width = floor(MIN(MAX(1.0, frame.size.width), maxWidth));
+    frame.size.height = floor(MIN(MAX(1.0, frame.size.height), maxHeight));
     CGFloat maxX = bounds.size.width - frame.size.width - MAX(4.0, safeInsets.right + 4.0);
     CGFloat maxY = bounds.size.height - frame.size.height - MAX(4.0, safeInsets.bottom + 4.0);
     frame.origin.x = MIN(MAX(frame.origin.x, minX), MAX(minX, maxX));
@@ -2916,6 +2860,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL landscape = bounds.size.width > bounds.size.height;
     CGFloat minX = MAX(6.0, safeInsets.left + 6.0);
     CGFloat minY = landscape ? MAX(4.0, safeInsets.top + 4.0) : MAX(6.0, safeInsets.top + 8.0);
+    CGFloat maxWidth = MAX(44.0, bounds.size.width - minX - MAX(6.0, safeInsets.right + 6.0));
+    CGFloat maxHeight = MAX(44.0, bounds.size.height - minY - MAX(6.0, safeInsets.bottom + 8.0));
+    frame.size.width = floor(MIN(MAX(1.0, frame.size.width), maxWidth));
+    frame.size.height = floor(MIN(MAX(1.0, frame.size.height), maxHeight));
     CGFloat maxX = bounds.size.width - frame.size.width - MAX(6.0, safeInsets.right + 6.0);
     CGFloat maxY = bounds.size.height - frame.size.height - MAX(6.0, safeInsets.bottom + 8.0);
     frame.origin.x = MIN(MAX(frame.origin.x, minX), MAX(minX, maxX));
@@ -3034,25 +2982,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGRect frame = _hasCollapsedPanelFrame ? _collapsedPanelFrame : (_panelWindow ? _panelWindow.frame : [self defaultCollapsedPanelFrame]);
     if (_hasCollapsedPanelOriginRatio &&
         (![self screenGeometrySize:currentSize isCloseToSize:_collapsedPanelScreenSize] || !_hasCollapsedPanelFrame)) {
-        BOOL rotated = [self screenCoordinateSizeIsValid:_collapsedPanelScreenSize] &&
-            fabs(currentSize.width - _collapsedPanelScreenSize.height) < 2.0 &&
-            fabs(currentSize.height - _collapsedPanelScreenSize.width) < 2.0;
-        if (rotated) {
-            UIEdgeInsets insets = [self panelSafeAreaInsets];
-            CGSize size = [self collapsedPanelSize];
-            CGFloat margin = 12.0;
-            CGFloat oldCenterX = CGRectGetMidX(frame);
-            CGFloat oldWidth = MAX(1.0, _collapsedPanelScreenSize.width);
-            BOOL wasRight = oldCenterX >= oldWidth * 0.5;
-            CGFloat minX = MAX(margin, insets.left + margin);
-            CGFloat maxX = MAX(minX, currentSize.width - insets.right - margin - size.width);
-            CGFloat minY = MAX(margin, insets.top + margin);
-            CGFloat maxY = MAX(minY, currentSize.height - insets.bottom - margin - size.height);
-            CGFloat y = minY + (maxY - minY) * [self clampedUnitValue:_collapsedPanelOriginRatio.y];
-            frame = CGRectMake(wasRight ? maxX : minX, y, size.width, size.height);
-        } else {
-            frame = [self windowFrameWithSize:[self collapsedPanelSize] originRatio:_collapsedPanelOriginRatio floating:YES];
+        CGSize size = [self collapsedPanelSize];
+        CGFloat xRatio = [self clampedUnitValue:_collapsedPanelOriginRatio.x];
+        if (xRatio <= 0.08) {
+            xRatio = 0.0;
+        } else if (xRatio >= 0.92) {
+            xRatio = 1.0;
         }
+        CGPoint ratio = CGPointMake(xRatio, [self clampedUnitValue:_collapsedPanelOriginRatio.y]);
+        frame = [self windowFrameWithSize:size originRatio:ratio floating:YES];
     }
     [self rememberCollapsedPanelFrame:frame];
     return _collapsedPanelFrame;
@@ -3072,7 +3010,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     frame.size = size;
     if (_hasExpandedPanelOriginRatio &&
         (![self screenGeometrySize:currentSize isCloseToSize:_expandedPanelScreenSize] || !_hasExpandedPanelFrame)) {
-        frame = [self windowFrameWithSize:size originRatio:_expandedPanelOriginRatio floating:NO];
+        frame = [self windowFrameWithSize:size
+                              originRatio:CGPointMake([self clampedUnitValue:_expandedPanelOriginRatio.x],
+                                                      [self clampedUnitValue:_expandedPanelOriginRatio.y])
+                                  floating:NO];
     } else {
         frame = [self clampedPanelFrame:frame];
     }
@@ -3180,88 +3121,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return insets;
 }
 
-- (CGFloat)minimumZoomScaleForImageSize:(CGSize)imageSize inBoundsSize:(CGSize)boundsSize {
-    CGFloat width = MAX(1.0, imageSize.width);
-    CGFloat height = MAX(1.0, imageSize.height);
-    CGFloat boundWidth = MAX(1.0, boundsSize.width);
-    CGFloat boundHeight = MAX(1.0, boundsSize.height);
-    CGFloat minZoom = MIN(boundWidth / width, boundHeight / height);
-    return MIN(MAX(minZoom, 0.25), 1.0);
-}
-
-- (void)centerCaptureImageContent {
-    if (!_captureScrollView || !_captureImageView) {
-        return;
-    }
-    CGSize boundsSize = _captureScrollView.bounds.size;
-    CGRect frame = _captureImageView.frame;
-    frame.origin.x = frame.size.width < boundsSize.width ? (boundsSize.width - frame.size.width) * 0.5 : 0.0;
-    frame.origin.y = frame.size.height < boundsSize.height ? (boundsSize.height - frame.size.height) * 0.5 : 0.0;
-    _captureImageView.frame = frame;
-}
-
-- (void)updateCaptureZoomForCurrentBounds {
-    if (!_captureScrollView || !_captureSnapshot) {
-        return;
-    }
-    CGFloat minZoom = [self minimumZoomScaleForImageSize:_captureSnapshot.size inBoundsSize:_captureScrollView.bounds.size];
-    _captureScrollView.minimumZoomScale = minZoom;
-    if (_captureScrollView.zoomScale < minZoom) {
-        _captureScrollView.zoomScale = minZoom;
-    }
-    [self centerCaptureImageContent];
-}
-
-- (void)centerPointPickImageContent {
-    if (!_pointPickScrollView || !_pointPickImageView) {
-        return;
-    }
-    CGSize boundsSize = _pointPickScrollView.bounds.size;
-    CGRect frame = _pointPickImageView.frame;
-    frame.origin.x = frame.size.width < boundsSize.width ? (boundsSize.width - frame.size.width) * 0.5 : 0.0;
-    frame.origin.y = frame.size.height < boundsSize.height ? (boundsSize.height - frame.size.height) * 0.5 : 0.0;
-    _pointPickImageView.frame = frame;
-}
-
-- (void)updatePointPickZoomForCurrentBounds {
-    if (!_pointPickScrollView || !_pointPickSnapshot) {
-        return;
-    }
-    CGFloat minZoom = [self minimumZoomScaleForImageSize:_pointPickSnapshot.size inBoundsSize:_pointPickScrollView.bounds.size];
-    _pointPickScrollView.minimumZoomScale = minZoom;
-    if (_pointPickScrollView.zoomScale < minZoom) {
-        _pointPickScrollView.zoomScale = minZoom;
-    }
-    [self centerPointPickImageContent];
-}
-
-- (void)updateColorPickZoomForCurrentBounds {
-    if (!_colorPickScrollView || !_colorPickImage) {
-        return;
-    }
-
-    CGFloat minZoom = [self minimumZoomScaleForImageSize:_colorPickImage.size inBoundsSize:_colorPickScrollView.bounds.size];
-    _colorPickScrollView.minimumZoomScale = minZoom;
-    if (_colorPickScrollView.zoomScale < minZoom) {
-        _colorPickScrollView.zoomScale = minZoom;
-    }
-    [self centerColorPickImageContent];
-}
-
 - (void)relayoutScreenInteractionOverlays {
     CGRect screenBounds = [self currentScreenBounds];
     if (_captureOverlay) {
         _captureOverlay.frame = screenBounds;
-        _captureScrollView.frame = _captureOverlay.bounds;
-        [self updateCaptureZoomForCurrentBounds];
-        [self layoutCaptureActionButtonsAvoidingSelection];
+        [_captureOverlay setNeedsLayout];
     }
     if (_pointPickWindow) {
         _pointPickWindow.frame = screenBounds;
         _pointPickWindow.rootViewController.view.frame = _pointPickWindow.bounds;
         _pointPickOverlay.frame = _pointPickWindow.rootViewController.view.bounds;
-        _pointPickScrollView.frame = _pointPickOverlay.bounds;
-        [self updatePointPickZoomForCurrentBounds];
         [self updatePointPickCursor];
         if (_actionMode == AnClickActionModeSwipe && _hasManualSwipeAnchor) {
             [self showPointPickSwipeStartMarker];
@@ -3271,9 +3140,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _colorPickWindow.frame = screenBounds;
         UIView *root = _colorPickWindow.rootViewController.view;
         root.frame = _colorPickWindow.bounds;
-        _colorPickScrollView.frame = root.bounds;
-        [self updateColorPickZoomForCurrentBounds];
-        [self layoutColorPickToolbar];
+        _colorPickOverlay.frame = root.bounds;
+        [_colorPickOverlay setNeedsLayout];
     }
 }
 
@@ -3433,15 +3301,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)formattedTaskRunDuration {
-    NSTimeInterval duration = MAX(0.0, _taskRunAccumulatedRuntime);
-    if (_taskRunActive && _taskRunStartTime > 0.0) {
-        duration += MAX(0.0, CACurrentMediaTime() - _taskRunStartTime);
-    }
-    NSInteger totalSeconds = MAX(0, (NSInteger)floor(duration));
-    NSInteger hours = totalSeconds / 3600;
-    NSInteger minutes = (totalSeconds / 60) % 60;
-    NSInteger seconds = totalSeconds % 60;
-    return [NSString stringWithFormat:@"%02ld:%02ld:%02ld", (long)hours, (long)minutes, (long)seconds];
+    return [_taskEngine formattedRuntime];
 }
 
 - (void)refreshTaskRunRuntimeLabel {
@@ -3452,35 +3312,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _collapsedRuntimeLabel.hidden = !(_taskRunActive || _taskRunPausedForForeground);
 }
 
-- (void)handleTaskRunRuntimeTimer:(__unused NSTimer *)timer {
-    [self refreshTaskRunRuntimeLabel];
-}
-
 - (void)startTaskRunRuntimeTimerReset:(BOOL)reset {
-    if (reset) {
-        _taskRunAccumulatedRuntime = 0.0;
-    }
-    [_taskRunRuntimeTimer invalidate];
-    _taskRunStartTime = CACurrentMediaTime();
-    _taskRunRuntimeTimer = [NSTimer timerWithTimeInterval:1.0
-                                                   target:self
-                                                 selector:@selector(handleTaskRunRuntimeTimer:)
-                                                 userInfo:nil
-                                                  repeats:YES];
-    [NSRunLoop.mainRunLoop addTimer:_taskRunRuntimeTimer forMode:NSRunLoopCommonModes];
+    [_taskEngine startRuntimeReset:reset];
     [self refreshTaskRunRuntimeLabel];
 }
 
 - (void)stopTaskRunRuntimeTimerReset:(BOOL)reset {
-    if (_taskRunStartTime > 0.0) {
-        _taskRunAccumulatedRuntime += MAX(0.0, CACurrentMediaTime() - _taskRunStartTime);
-    }
-    _taskRunStartTime = 0.0;
-    [_taskRunRuntimeTimer invalidate];
-    _taskRunRuntimeTimer = nil;
-    if (reset) {
-        _taskRunAccumulatedRuntime = 0.0;
-    }
+    [_taskEngine stopRuntimeReset:reset];
     [self refreshTaskRunRuntimeLabel];
 }
 
@@ -3509,9 +3347,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_panelView viewWithTag:AnClickHomeRecordLabelTag].hidden = visible;
     _homeTimeButton.hidden = visible;
     _homeLoopButton.hidden = visible;
+    _homeMonitorButton.hidden = visible;
     _homeSaveConfigButton.hidden = visible;
     [_panelView viewWithTag:AnClickHomeTimeLabelTag].hidden = visible;
     [_panelView viewWithTag:AnClickHomeLoopLabelTag].hidden = visible;
+    [_panelView viewWithTag:AnClickHomeMonitorLabelTag].hidden = visible;
     [_panelView viewWithTag:AnClickHomeSaveLabelTag].hidden = visible;
     _collapseButton.hidden = visible;
     _taskListView.hidden = visible;
@@ -3574,8 +3414,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat topY = 9.0;
     CGFloat smallSide = 25.0;
     CGFloat brandY = 0.0;
-    CGFloat actionLabelWidth = MIN(34.0, floor((width - 18.0) / 8.0));
-    CGFloat actionGap = MAX(2.0, floor((width - actionLabelWidth * 8.0 - 19.0) / 7.0));
+    CGFloat actionLabelWidth = MIN(31.0, floor((width - 18.0) / 9.0));
+    CGFloat actionGap = MAX(1.0, floor((width - actionLabelWidth * 9.0 - 19.0) / 8.0));
     CGFloat startX = 9.5;
     CGFloat (^slotX)(NSUInteger) = ^CGFloat(NSUInteger index) {
         return startX + (actionLabelWidth + actionGap) * index;
@@ -3649,7 +3489,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self setCenteredIconForButton:_homeTimeButton systemName:@"clock.fill" fallbackTitle:@"时" fontSize:13];
     _homeTimeButton.frame = CGRectMake(buttonX(2), topY + 1.0, smallSide, smallSide);
     [self styleHomeTopIconButton:_homeTimeButton blueCircle:NO];
-    UILabel *timeLabel = [self homeToolbarLabelWithTag:AnClickHomeTimeLabelTag text:@"时间"];
+    UILabel *timeLabel = [self homeToolbarLabelWithTag:AnClickHomeTimeLabelTag text:@"定时"];
     timeLabel.frame = CGRectMake(slotX(2), topY + smallSide + 3.0, actionLabelWidth, 13.0);
 
     [self setCenteredIconForButton:_homeLoopButton systemName:@"repeat" fallbackTitle:@"循" fontSize:13];
@@ -3658,29 +3498,35 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UILabel *loopLabel = [self homeToolbarLabelWithTag:AnClickHomeLoopLabelTag text:@"循环"];
     loopLabel.frame = CGRectMake(slotX(3), topY + smallSide + 3.0, actionLabelWidth, 13.0);
 
+    [self setCenteredIconForButton:_homeMonitorButton systemName:@"antenna.radiowaves.left.and.right" fallbackTitle:@"监" fontSize:12];
+    _homeMonitorButton.frame = CGRectMake(buttonX(4), topY + 1.0, smallSide, smallSide);
+    [self styleHomeTopIconButton:_homeMonitorButton blueCircle:NO];
+    UILabel *monitorLabel = [self homeToolbarLabelWithTag:AnClickHomeMonitorLabelTag text:@"监控"];
+    monitorLabel.frame = CGRectMake(slotX(4), topY + smallSide + 3.0, actionLabelWidth, 13.0);
+
     [self setCenteredIconForButton:_homeSaveConfigButton systemName:@"tray.and.arrow.down.fill" fallbackTitle:@"存" fontSize:12];
-    _homeSaveConfigButton.frame = CGRectMake(buttonX(4), topY + 1.0, smallSide, smallSide);
+    _homeSaveConfigButton.frame = CGRectMake(buttonX(5), topY + 1.0, smallSide, smallSide);
     [self styleHomeTopIconButton:_homeSaveConfigButton blueCircle:NO];
     UILabel *saveLabel = [self homeToolbarLabelWithTag:AnClickHomeSaveLabelTag text:@"保存"];
-    saveLabel.frame = CGRectMake(slotX(4), topY + smallSide + 3.0, actionLabelWidth, 13.0);
+    saveLabel.frame = CGRectMake(slotX(5), topY + smallSide + 3.0, actionLabelWidth, 13.0);
 
     [self setCenteredIconForButton:_runTasksButton systemName:@"play.fill" fallbackTitle:@"▶" fontSize:13];
-    _runTasksButton.frame = CGRectMake(buttonX(5), topY + 1.0, smallSide, smallSide);
+    _runTasksButton.frame = CGRectMake(buttonX(6), topY + 1.0, smallSide, smallSide);
     [self styleHomeTopIconButton:_runTasksButton blueCircle:YES];
     UILabel *runLabel = [self homeToolbarLabelWithTag:AnClickHomeRunLabelTag text:@"运行"];
-    runLabel.frame = CGRectMake(slotX(5), topY + smallSide + 3.0, actionLabelWidth, 13.0);
+    runLabel.frame = CGRectMake(slotX(6), topY + smallSide + 3.0, actionLabelWidth, 13.0);
 
     [self setCenteredIconForButton:_collapseButton systemName:@"stop.fill" fallbackTitle:@"■" fontSize:11];
-    _collapseButton.frame = CGRectMake(buttonX(6), topY + 1.0, smallSide, smallSide);
+    _collapseButton.frame = CGRectMake(buttonX(7), topY + 1.0, smallSide, smallSide);
     [self styleHomeTopIconButton:_collapseButton blueCircle:YES];
     UILabel *stopLabel = [self homeToolbarLabelWithTag:AnClickHomeStopLabelTag text:@"停止"];
-    stopLabel.frame = CGRectMake(slotX(6), topY + smallSide + 3.0, actionLabelWidth, 13.0);
+    stopLabel.frame = CGRectMake(slotX(7), topY + smallSide + 3.0, actionLabelWidth, 13.0);
 
     [self setCenteredIconForButton:_homeCloseButton systemName:@"xmark" fallbackTitle:@"×" fontSize:13];
-    _homeCloseButton.frame = CGRectMake(buttonX(7), topY + 1.0, smallSide, smallSide);
+    _homeCloseButton.frame = CGRectMake(buttonX(8), topY + 1.0, smallSide, smallSide);
     [self styleHomeTopIconButton:_homeCloseButton blueCircle:YES];
     UILabel *recordLabel = [self homeToolbarLabelWithTag:AnClickHomeRecordLabelTag text:@"关闭"];
-    recordLabel.frame = CGRectMake(slotX(7), topY + smallSide + 3.0, actionLabelWidth, 13.0);
+    recordLabel.frame = CGRectMake(slotX(8), topY + smallSide + 3.0, actionLabelWidth, 13.0);
 
     _globalSettingsButton.hidden = YES;
 
@@ -3702,6 +3548,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [_panelView bringSubviewToFront:_deleteTaskButton];
         [_panelView bringSubviewToFront:_homeTimeButton];
         [_panelView bringSubviewToFront:_homeLoopButton];
+        [_panelView bringSubviewToFront:_homeMonitorButton];
         [_panelView bringSubviewToFront:_homeSaveConfigButton];
         [_panelView bringSubviewToFront:_runTasksButton];
         [_panelView bringSubviewToFront:_collapseButton];
@@ -3879,6 +3726,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return @{
         @"delayMilliseconds": @0,
         @"runRepeatCount": @(_globalRunRepeatCount),
+        @"loopIntervalSeconds": @(_globalLoopIntervalSeconds),
         @"startEnabled": @(_globalStartEnabled),
         @"stopEnabled": @(_globalStopEnabled),
         @"startHour": @(_globalStartHour),
@@ -3903,6 +3751,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     _globalDelayMilliseconds = 0;
     _globalRunRepeatCount = MIN(9999, MAX(0, [settings[@"runRepeatCount"] integerValue]));
+    id loopIntervalValue = settings[@"loopIntervalSeconds"];
+    if (![loopIntervalValue respondsToSelector:@selector(integerValue)]) {
+        loopIntervalValue = settings[@"delayMilliseconds"];
+        _globalLoopIntervalSeconds = [loopIntervalValue respondsToSelector:@selector(integerValue)]
+            ? MIN(86400, MAX(0, [loopIntervalValue integerValue] / 1000))
+            : 0;
+    } else {
+        _globalLoopIntervalSeconds = MIN(86400, MAX(0, [loopIntervalValue integerValue]));
+    }
     _globalStartEnabled = [settings[@"startEnabled"] boolValue];
     _globalStopEnabled = [settings[@"stopEnabled"] boolValue];
     _globalStartHour = MIN(23, MAX(0, [settings[@"startHour"] integerValue]));
@@ -4014,7 +3871,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)globalDelayFieldText {
-    return _globalDelayMilliseconds > 0 ? [NSString stringWithFormat:@"%ld", (long)_globalDelayMilliseconds] : @"";
+    return _globalLoopIntervalSeconds > 0 ? [NSString stringWithFormat:@"%ld", (long)_globalLoopIntervalSeconds] : @"";
 }
 
 - (NSString *)globalRepeatFieldText {
@@ -4042,7 +3899,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
     button.titleLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
     button.titleLabel.adjustsFontSizeToFitWidth = YES;
-    button.titleLabel.minimumScaleFactor = 0.72;
+    button.titleLabel.minimumScaleFactor = 0.55;
+    button.titleLabel.lineBreakMode = NSLineBreakByClipping;
     button.titleEdgeInsets = UIEdgeInsetsMake(0, 22, 0, 22);
     button.backgroundColor = [self themeControlFillColor];
     button.layer.cornerRadius = 8;
@@ -4051,6 +3909,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [button setTitleColor:[self themePrimaryTextColor] forState:UIControlStateNormal];
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
+}
+
+- (UITextField *)globalSettingsNetworkTextFieldWithPlaceholder:(NSString *)placeholder {
+    UITextField *field = [self configTextFieldWithPlaceholder:placeholder];
+    field.keyboardType = UIKeyboardTypeURL;
+    field.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    field.autocorrectionType = UITextAutocorrectionTypeNo;
+    field.clearButtonMode = UITextFieldViewModeWhileEditing;
+    field.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightSemibold];
+    field.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 14, 1)];
+    field.leftViewMode = UITextFieldViewModeAlways;
+    [self setStyledPlaceholder:placeholder forField:field alpha:0.72];
+    [field addTarget:self action:@selector(globalSettingsFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+    [field addTarget:self action:@selector(globalSettingsFieldEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+    return field;
 }
 
 - (void)refreshGlobalSettingsControls {
@@ -4080,7 +3953,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)syncGlobalSettingsFromFields {
     if (_globalDelayField) {
         NSString *delayText = [_globalDelayField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-        _globalDelayMilliseconds = delayText.length > 0 ? MIN(3600000, MAX(0, delayText.integerValue)) : 0;
+        _globalLoopIntervalSeconds = delayText.length > 0 ? MIN(86400, MAX(0, delayText.integerValue)) : 0;
     }
     if (_globalRepeatField) {
         NSString *repeatText = [_globalRepeatField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
@@ -4140,7 +4013,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)hideGlobalSettings {
-    if (_globalDelayField || _globalRepeatField) {
+    if (_globalDelayField || _globalRepeatField || _globalNetworkURLField || _globalNetworkContainsField || _globalNetworkFalseField) {
         [self syncGlobalSettingsFromFields];
         [self persistGlobalSettings];
     }
@@ -4208,13 +4081,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (CGFloat)homeFloatingPanelPreferredHeightForTag:(NSInteger)tag fallback:(CGFloat)fallback {
     if (tag == AnClickHomeOptionPanelTimeTag) {
-        return 332.0;
+        return 352.0;
     }
     if (tag == AnClickHomeOptionPanelLoopTag) {
-        return 284.0;
+        return 344.0;
     }
     if (tag == AnClickHomeOptionPanelSaveTag) {
         return 336.0;
+    }
+    if (tag == AnClickHomeOptionPanelMonitorTag) {
+        return 392.0;
     }
     return fallback;
 }
@@ -4264,7 +4140,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     label.text = text;
     label.textColor = [self themeSecondaryTextColor];
     label.font = [UIFont systemFontOfSize:13.5 weight:UIFontWeightSemibold];
-    label.numberOfLines = 2;
+    label.numberOfLines = 0;
+    label.lineBreakMode = NSLineBreakByWordWrapping;
     return label;
 }
 
@@ -4287,20 +4164,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     titleLabel.text = title;
     titleLabel.textColor = [self themePrimaryTextColor];
     titleLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightBold];
+    titleLabel.numberOfLines = 1;
     [card addSubview:titleLabel];
 
-    UILabel *detailLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, y + 23.0, width - 28.0, 18.0)];
+    UILabel *detailLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, y + 24.0, width - 28.0, 34.0)];
     detailLabel.text = detail;
     detailLabel.textColor = [self themeSecondaryTextColor];
     detailLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightMedium];
+    detailLabel.numberOfLines = 0;
+    detailLabel.lineBreakMode = NSLineBreakByWordWrapping;
     [card addSubview:detailLabel];
 
-    button.frame = CGRectMake(14.0, y + 48.0, width - 28.0, 46.0);
+    button.frame = CGRectMake(14.0, y + 62.0, width - 28.0, 46.0);
     [card addSubview:button];
 }
 
 - (void)showHomeTimeSettings {
-    UIView *panel = [self showHomeOptionPanelWithTitle:@"时间设置" preferredHeight:332.0 tag:AnClickHomeOptionPanelTimeTag];
+    UIView *panel = [self showHomeOptionPanelWithTitle:@"定时设置" preferredHeight:352.0 tag:AnClickHomeOptionPanelTimeTag];
     CGFloat width = panel.bounds.size.width;
     CGFloat side = 14.0;
     CGFloat contentWidth = width - side * 2.0;
@@ -4309,7 +4189,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                  frame:CGRectMake(side, 62.0, contentWidth, 30.0)];
     [panel addSubview:caption];
 
-    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 98.0, contentWidth, 220.0)];
+    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 98.0, contentWidth, 248.0)];
     [panel addSubview:card];
 
     _globalStartTimeButton = [self globalSettingsValueButtonWithAction:@selector(showGlobalStartTimePicker)];
@@ -4319,28 +4199,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                         detail:@"到达设置时间后自动开始运行任务列表"
                         button:_globalStartTimeButton
                              y:14.0];
-    UIView *line = [[UIView alloc] initWithFrame:CGRectMake(14.0, 111.0, contentWidth - 28.0, 1.0)];
+    UIView *line = [[UIView alloc] initWithFrame:CGRectMake(14.0, 125.0, contentWidth - 28.0, 1.0)];
     line.backgroundColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72];
     [card addSubview:line];
     [self addHomeTimeRowToCard:card
                         title:@"定时结束"
                         detail:@"到达设置时间后停止当前任务运行"
                         button:_globalStopTimeButton
-                             y:124.0];
+                             y:138.0];
     [self refreshGlobalSettingsControls];
 }
 
 - (void)showHomeLoopSettings {
-    UIView *panel = [self showHomeOptionPanelWithTitle:@"循环设置" preferredHeight:284.0 tag:AnClickHomeOptionPanelLoopTag];
+    UIView *panel = [self showHomeOptionPanelWithTitle:@"循环设置" preferredHeight:344.0 tag:AnClickHomeOptionPanelLoopTag];
     CGFloat width = panel.bounds.size.width;
     CGFloat side = 14.0;
     CGFloat contentWidth = width - side * 2.0;
 
-    UILabel *caption = [self homeOptionCaptionWithText:@"设置整个任务列表循环次数。填 0 或留空表示无限循环。"
-                                                 frame:CGRectMake(side, 62.0, contentWidth, 32.0)];
+    UILabel *caption = [self homeOptionCaptionWithText:@"设置整个任务列表循环次数和每轮循环之间的等待时间。次数填 0 或留空表示无限循环。"
+                                                 frame:CGRectMake(side, 62.0, contentWidth, 48.0)];
     [panel addSubview:caption];
 
-    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 100.0, contentWidth, 118.0)];
+    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 116.0, contentWidth, 168.0)];
     [panel addSubview:card];
 
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 16.0, contentWidth - 28.0, 22.0)];
@@ -4353,6 +4233,31 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalRepeatField.frame = CGRectMake(14.0, 52.0, contentWidth - 28.0, 50.0);
     [card addSubview:_globalRepeatField];
 
+    UIView *line = [[UIView alloc] initWithFrame:CGRectMake(14.0, 116.0, contentWidth - 28.0, 1.0)];
+    line.backgroundColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72];
+    [card addSubview:line];
+
+    UILabel *intervalLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 128.0, floor((contentWidth - 42.0) * 0.46), 28.0)];
+    intervalLabel.text = @"循环间隔";
+    intervalLabel.textColor = [self themePrimaryTextColor];
+    intervalLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightBold];
+    [card addSubview:intervalLabel];
+
+    _globalDelayField = [self globalSettingsTextFieldWithPlaceholder:@"0"];
+    _globalDelayField.frame = CGRectMake(CGRectGetMaxX(intervalLabel.frame) + 8.0,
+                                         124.0,
+                                         contentWidth - CGRectGetMaxX(intervalLabel.frame) - 30.0,
+                                         36.0);
+    _globalDelayField.font = [UIFont systemFontOfSize:18.0 weight:UIFontWeightBold];
+    _globalDelayField.textAlignment = NSTextAlignmentRight;
+    [card addSubview:_globalDelayField];
+
+    UILabel *unitLabel = [[UILabel alloc] initWithFrame:CGRectMake(CGRectGetMaxX(_globalDelayField.frame) + 4.0, 128.0, 18.0, 28.0)];
+    unitLabel.text = @"秒";
+    unitLabel.textColor = [self themeSecondaryTextColor];
+    unitLabel.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightSemibold];
+    [card addSubview:unitLabel];
+
     UIButton *doneButton = [self configPromptButtonWithTitle:@"完成" action:@selector(hideGlobalSettings) destructive:NO];
     doneButton.frame = CGRectMake(side, CGRectGetMaxY(card.frame) + 14.0, contentWidth, 42.0);
     [self applyObsidian3DStyleToButton:doneButton selected:YES];
@@ -4364,12 +4269,81 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     });
 }
 
+- (void)showHomeMonitorSettings {
+    UIView *panel = [self showHomeOptionPanelWithTitle:@"网络监控" preferredHeight:392.0 tag:AnClickHomeOptionPanelMonitorTag];
+    CGFloat width = panel.bounds.size.width;
+    CGFloat side = 14.0;
+    CGFloat contentWidth = width - side * 2.0;
+
+    UILabel *caption = [self homeOptionCaptionWithText:@"运行前先监控接口。命中运行条件后开始任务列表，命中不运行条件则继续等待。"
+                                                 frame:CGRectMake(side, 62.0, contentWidth, 46.0)];
+    [panel addSubview:caption];
+
+    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 112.0, contentWidth, 214.0)];
+    [panel addSubview:card];
+
+    UILabel *gateLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 14.0, floor((contentWidth - 42.0) * 0.52), 36.0)];
+    gateLabel.text = @"全局网络监控";
+    gateLabel.textColor = [self themePrimaryTextColor];
+    gateLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightBold];
+    [card addSubview:gateLabel];
+
+    _globalNetworkGateButton = [self globalSettingsValueButtonWithAction:@selector(toggleGlobalNetworkGate)];
+    _globalNetworkGateButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
+    _globalNetworkGateButton.titleEdgeInsets = UIEdgeInsetsZero;
+    _globalNetworkGateButton.frame = CGRectMake(CGRectGetMaxX(gateLabel.frame) + 8.0,
+                                                10.0,
+                                                contentWidth - CGRectGetMaxX(gateLabel.frame) - 30.0,
+                                                42.0);
+    [card addSubview:_globalNetworkGateButton];
+
+    UIView *line0 = [[UIView alloc] initWithFrame:CGRectMake(14.0, 62.0, contentWidth - 28.0, 1.0)];
+    line0.backgroundColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72];
+    [card addSubview:line0];
+
+    _globalNetworkURLField = [self globalSettingsNetworkTextFieldWithPlaceholder:@"https://example.com/check"];
+    _globalNetworkURLField.frame = CGRectMake(14.0, 76.0, contentWidth - 28.0, 40.0);
+    [card addSubview:_globalNetworkURLField];
+
+    _globalNetworkContainsField = [self globalSettingsNetworkTextFieldWithPlaceholder:@"命中运行内容，可留空"];
+    _globalNetworkContainsField.keyboardType = UIKeyboardTypeDefault;
+    _globalNetworkContainsField.frame = CGRectMake(14.0, 126.0, floor((contentWidth - 36.0) * 0.5), 40.0);
+    [card addSubview:_globalNetworkContainsField];
+
+    _globalNetworkFalseField = [self globalSettingsNetworkTextFieldWithPlaceholder:@"命中不运行内容"];
+    _globalNetworkFalseField.keyboardType = UIKeyboardTypeDefault;
+    _globalNetworkFalseField.frame = CGRectMake(CGRectGetMaxX(_globalNetworkContainsField.frame) + 8.0,
+                                                126.0,
+                                                contentWidth - CGRectGetMaxX(_globalNetworkContainsField.frame) - 30.0,
+                                                40.0);
+    [card addSubview:_globalNetworkFalseField];
+
+    UILabel *hintLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 174.0, contentWidth - 28.0, 28.0)];
+    hintLabel.text = @"运行内容为空时，请求成功且未命中不运行内容也会启动任务。";
+    hintLabel.textColor = [self themeSecondaryTextColor];
+    hintLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightMedium];
+    hintLabel.numberOfLines = 2;
+    [card addSubview:hintLabel];
+
+    UIButton *doneButton = [self configPromptButtonWithTitle:@"完成" action:@selector(hideGlobalSettings) destructive:NO];
+    doneButton.frame = CGRectMake(side, CGRectGetMaxY(card.frame) + 14.0, contentWidth, 42.0);
+    [self applyObsidian3DStyleToButton:doneButton selected:YES];
+    [panel addSubview:doneButton];
+
+    [self refreshGlobalSettingsControls];
+    if (_globalNetworkURL.length == 0) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self->_globalNetworkURLField becomeFirstResponder];
+        });
+    }
+}
+
 - (void)showHomeSaveConfigMenu {
     [self showFunctionMenu];
 }
 
 - (void)showGlobalSettings {
-    [self showHomeTimeSettings];
+    [self showHomeMonitorSettings];
 }
 
 - (void)showGlobalStartTimePicker {
@@ -4478,7 +4452,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     CGFloat width = overlay.bounds.size.width;
     CGFloat height = overlay.bounds.size.height;
-    CGFloat cardHeight = MIN(380.0, height - 48.0);
+    CGFloat cardHeight = MIN(396.0, height - 32.0);
     UIView *card = [[UIView alloc] initWithFrame:CGRectMake(0, MAX(40.0, (height - cardHeight) * 0.5), width, cardHeight)];
     card.backgroundColor = [self themeSurfaceColor];
     card.layer.cornerRadius = 22;
@@ -4499,9 +4473,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     titleLabel.minimumScaleFactor = 0.68;
     [card addSubview:titleLabel];
 
-    CGFloat buttonY = cardHeight - 60.0;
+    CGFloat buttonY = cardHeight - 66.0;
     CGFloat pickerY = 68.0;
-    CGFloat pickerHeight = MAX(150.0, buttonY - pickerY - 10.0);
+    CGFloat pickerHeight = MAX(150.0, buttonY - pickerY - 18.0);
     _globalTimePicker = [[UIPickerView alloc] initWithFrame:CGRectMake(10.0, pickerY, width - 20.0, pickerHeight)];
     _globalTimePicker.dataSource = self;
     _globalTimePicker.delegate = self;
@@ -4532,14 +4506,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSArray<NSString *> *selectors = @[@"disableGlobalPickedTime", @"cancelGlobalTimePicker", @"confirmGlobalTimePicker"];
     for (NSUInteger i = 0; i < titles.count; i++) {
         UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-        button.frame = CGRectMake(buttonWidth * i, buttonY, buttonWidth, 60.0);
+        button.frame = CGRectMake(buttonWidth * i, buttonY, buttonWidth, 66.0);
         button.titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
         [button setTitle:titles[i] forState:UIControlStateNormal];
         [button setTitleColor:(i == 2 ? [self themeHighlightColor] : [self themeSecondaryTextColor]) forState:UIControlStateNormal];
         [button addTarget:self action:NSSelectorFromString(selectors[i]) forControlEvents:UIControlEventTouchUpInside];
         [card addSubview:button];
         if (i > 0) {
-            UIView *line = [[UIView alloc] initWithFrame:CGRectMake(buttonWidth * i, buttonY, 1, 60.0)];
+            UIView *line = [[UIView alloc] initWithFrame:CGRectMake(buttonWidth * i, buttonY, 1, 66.0)];
             line.backgroundColor = [self themeSeparatorColor];
             [card addSubview:line];
         }
@@ -5062,8 +5036,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _actionInterval = AnClickDefaultTapPressDuration;
     _recognitionSuccessBranchIndex = -1;
     _recognitionFailureBranchIndex = -1;
-    _recognitionSuccessActionTaskIndex = -1;
-    _recognitionFailureActionTaskIndex = -1;
 }
 
 - (void)resetCurrentActionConfiguration {
@@ -5127,9 +5099,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self rememberCollapsedPanelFrame:frame];
     }
     _panelExpanded = YES;
-    frame.size = [self expandedPanelSize];
-    _panelWindow.frame = [self clampedPanelFrame:frame];
-    [self rememberExpandedPanelFrame:_panelWindow.frame];
+    frame = [self rememberedExpandedPanelFrameWithSize:[self expandedPanelSize] fallbackFrame:frame];
+    _panelWindow.frame = frame;
     _panelWindow.rootViewController.view.frame = _panelWindow.bounds;
     _panelView.frame = [self panelContentFrameForBounds:_panelWindow.bounds editorVisible:_taskEditorVisible];
     _collapsedButton.hidden = YES;
@@ -5204,14 +5175,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)clearSuccessBranchTargetSelection {
     _recognitionSuccessBranchIndex = -1;
-    _recognitionSuccessActionTaskIndex = -1;
     _successActionPoint = CGPointZero;
     _hasSuccessActionPoint = NO;
 }
 
 - (void)clearFailureBranchTargetSelection {
     _recognitionFailureBranchIndex = -1;
-    _recognitionFailureActionTaskIndex = -1;
     _failureActionPoint = CGPointZero;
     _hasFailureActionPoint = NO;
 }
@@ -5333,8 +5302,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     model.longPressDuration = [self normalizedLongPressDuration:_longPressDuration];
     model.successBranchIndex = _recognitionSuccessBranchIndex;
     model.failureBranchIndex = _recognitionFailureBranchIndex;
-    model.successActionTaskIndex = _recognitionSuccessActionTaskIndex;
-    model.failureActionTaskIndex = _recognitionFailureActionTaskIndex;
     return model;
 }
 
@@ -5421,8 +5388,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _recognitionRetryInterval = MIN(30.0, MAX(0.2, model.recognitionRetryInterval));
     _recognitionSuccessBranchIndex = model.successBranchIndex;
     _recognitionFailureBranchIndex = model.failureBranchIndex;
-    _recognitionSuccessActionTaskIndex = model.successActionTaskIndex;
-    _recognitionFailureActionTaskIndex = model.failureActionTaskIndex;
     if (_recognitionSuccessBranchIndex >= 0 &&
         (_actionMode == AnClickActionModeImage || _actionMode == AnClickActionModeOCR || _actionMode == AnClickActionModeColor)) {
         _imageActionMode = AnClickActionModeJump;
@@ -6568,6 +6533,366 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _taskRunResumeScheduled = scheduled;
 }
 
+- (void)resetTaskRunJumpGuard {
+    [_taskEngine resetJumpGuard];
+}
+
+- (void)resetRunProgressToastThrottle {
+    _lastRunProgressToastText = nil;
+    _lastRunProgressToastTime = 0.0;
+    _lastRunTraceTime = 0.0;
+}
+
+- (BOOL)shouldShowRunProgressToastText:(NSString *)text {
+    if (!_taskRunActive || _taskRunSingleStepStopIndex >= 0) {
+        return YES;
+    }
+    CFTimeInterval now = CACurrentMediaTime();
+    NSString *safeText = text ?: @"";
+    BOOL sameText = _lastRunProgressToastText && [_lastRunProgressToastText isEqualToString:safeText];
+    if (sameText && now - _lastRunProgressToastTime < AnClickRunProgressToastMinInterval) {
+        return NO;
+    }
+    if (!sameText && now - _lastRunProgressToastTime < AnClickRunProgressToastMinInterval) {
+        return NO;
+    }
+    _lastRunProgressToastText = [safeText copy];
+    _lastRunProgressToastTime = now;
+    return YES;
+}
+
+- (BOOL)shouldShowRunTraceNow {
+    if (!_taskRunActive || _taskRunSingleStepStopIndex >= 0) {
+        return YES;
+    }
+    CFTimeInterval now = CACurrentMediaTime();
+    if (now - _lastRunTraceTime < AnClickRunTraceMinInterval) {
+        return NO;
+    }
+    _lastRunTraceTime = now;
+    return YES;
+}
+
+- (void)clearTemplateImageCache {
+    [_templateImageCache removeAllObjects];
+    [_templateImageModificationDates removeAllObjects];
+}
+
+- (UIImage *)cachedTemplateImageAtPath:(NSString *)path {
+    NSString *templatePath = [self trimmedActionDescription:path];
+    if (templatePath.length == 0) {
+        return nil;
+    }
+
+    NSDictionary<NSFileAttributeKey, id> *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:templatePath error:nil];
+    NSDate *modificationDate = attributes[NSFileModificationDate];
+    if (!modificationDate) {
+        [_templateImageCache removeObjectForKey:templatePath];
+        [_templateImageModificationDates removeObjectForKey:templatePath];
+        return nil;
+    }
+
+    NSDate *cachedDate = _templateImageModificationDates[templatePath];
+    UIImage *cachedImage = [_templateImageCache objectForKey:templatePath];
+    if (cachedImage && cachedDate && [cachedDate isEqualToDate:modificationDate]) {
+        return cachedImage;
+    }
+
+    UIImage *image = [UIImage imageWithContentsOfFile:templatePath];
+    if (!image) {
+        [_templateImageCache removeObjectForKey:templatePath];
+        [_templateImageModificationDates removeObjectForKey:templatePath];
+        return nil;
+    }
+
+    [_templateImageCache setObject:image forKey:templatePath];
+    _templateImageModificationDates[templatePath] = modificationDate;
+    return image;
+}
+
+- (void)refreshTaskListDuringRunIfNeeded {
+    if (![_taskEngine shouldRefreshListNow]) {
+        return;
+    }
+    [self refreshTaskList];
+}
+
+- (BOOL)taskEngine:(__unused AnClickTaskEngine *)engine canContinueWithGeneration:(NSUInteger)generation fallbackHost:(id)host status:(NSString *)status {
+    return [self taskRunIsStillValidWithGeneration:generation fallbackWindow:(UIWindow *)host status:status];
+}
+
+- (BOOL)taskEngineCanUseCurrentScene:(__unused AnClickTaskEngine *)engine {
+    return [self panelCanUseCurrentScene];
+}
+
+- (id)taskEngine:(__unused AnClickTaskEngine *)engine currentHostWithFallback:(id)host {
+    return [self currentUsableHostWindowForTaskRunFallback:(UIWindow *)host];
+}
+
+- (void)taskEngine:(__unused AnClickTaskEngine *)engine rememberResumeIndex:(NSUInteger)index globalNetworkGate:(BOOL)globalNetworkGate scheduled:(BOOL)scheduled {
+    [self rememberTaskRunResumePointAtIndex:index inGlobalNetworkGate:globalNetworkGate scheduled:scheduled];
+}
+
+- (BOOL)taskEngineResumeScheduled:(__unused AnClickTaskEngine *)engine {
+    return _taskRunResumeScheduled;
+}
+
+- (NSInteger)taskEngineSingleStepStopIndex:(__unused AnClickTaskEngine *)engine {
+    return _taskRunSingleStepStopIndex;
+}
+
+- (NSInteger)taskEngineRepeatLimit:(__unused AnClickTaskEngine *)engine {
+    return MAX(0, _globalRunRepeatCount);
+}
+
+- (NSInteger *)taskEngineCurrentCyclePointer:(__unused AnClickTaskEngine *)engine {
+    return &_currentGlobalRunCycle;
+}
+
+- (NSTimeInterval)taskEngineLoopInterval:(__unused AnClickTaskEngine *)engine {
+    return (NSTimeInterval)_globalLoopIntervalSeconds;
+}
+
+- (NSTimeInterval)taskEngineGlobalDelay:(__unused AnClickTaskEngine *)engine {
+    return MAX(0.0, _globalDelayMilliseconds / 1000.0);
+}
+
+- (NSUInteger)taskEngineTaskCount:(__unused AnClickTaskEngine *)engine {
+    return _taskItems.count;
+}
+
+- (AnClickTaskModel *)taskEngine:(__unused AnClickTaskEngine *)engine taskModelAtIndex:(NSUInteger)index {
+    return [self taskModelAtIndex:index];
+}
+
+- (NSMutableDictionary *)taskEngine:(__unused AnClickTaskEngine *)engine dictionaryForModel:(AnClickTaskModel *)model {
+    return [self taskDictionaryForModel:model];
+}
+
+- (BOOL)taskEngine:(__unused AnClickTaskEngine *)engine taskModelIsComplete:(AnClickTaskModel *)model {
+    return [self taskModelIsComplete:model];
+}
+
+- (BOOL)taskEngine:(__unused AnClickTaskEngine *)engine modeIsRecognitionTask:(AnClickActionMode)mode {
+    return [self modeIsRecognitionTask:mode];
+}
+
+- (void)taskEngine:(__unused AnClickTaskEngine *)engine showToastForTask:(NSDictionary *)task index:(NSUInteger)index {
+    NSString *text = [self toastTextForTask:task index:index];
+    _statusLabel.text = text;
+    if ([self shouldShowRunProgressToastText:text]) {
+        [self showToast:text];
+    }
+}
+
+- (void)taskEngine:(__unused AnClickTaskEngine *)engine setStatus:(NSString *)status {
+    _statusLabel.text = status ?: @"";
+}
+
+- (void)taskEngine:(__unused AnClickTaskEngine *)engine showRunStatus:(NSString *)status {
+    _statusLabel.text = status ?: @"";
+    [self showToast:_statusLabel.text];
+    [self refreshCollapsedButtonTitle];
+}
+
+- (NSString *)taskEngineCurrentStatus:(__unused AnClickTaskEngine *)engine {
+    return _statusLabel.text;
+}
+
+- (void)taskEngine:(__unused AnClickTaskEngine *)engine finishWithStatus:(NSString *)status showToast:(BOOL)showToast restorePanel:(BOOL)restorePanel {
+    [self finishTaskRunWithStatus:status showToast:showToast restorePanel:restorePanel];
+}
+
+- (void)taskEngineFinishSingleStep:(__unused AnClickTaskEngine *)engine status:(NSString *)status {
+    [self finishSingleStepTaskRunWithStatus:status];
+}
+
+- (void)taskEngineExpandPanel:(__unused AnClickTaskEngine *)engine {
+    [self expandPanel];
+}
+
+- (NSTimeInterval)taskEngine:(__unused AnClickTaskEngine *)engine performTaskModel:(AnClickTaskModel *)model host:(id)host generation:(NSUInteger)generation {
+    return [self performTaskModel:model inWindow:(UIWindow *)host runGeneration:generation];
+}
+
+- (void)taskEngine:(__unused AnClickTaskEngine *)engine
+performGlobalNetworkGateRequestWithGeneration:(NSUInteger)generation
+        completion:(AnClickTaskEngineGlobalNetworkCompletion)completion {
+    NSString *url = _globalNetworkURL;
+    NSString *contains = _globalNetworkContainsText;
+    NSString *falseText = _globalNetworkFalseText;
+    __weak typeof(self) weakSelf = self;
+    [self performNetworkRequestWithURLString:url
+                                      method:@"GET"
+                                     headers:nil
+                                    postBody:nil
+                                    trueText:contains
+                                   falseText:falseText
+                         defaultExpectedTrue:NO
+                                     timeout:8.0
+                                  completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf || !completion) {
+            return;
+        }
+        if (![strongSelf taskRunIsStillValidWithGeneration:generation fallbackWindow:nil status:@"窗口变化停止"]) {
+            return;
+        }
+        NSString *runRule = [strongSelf trimmedActionDescription:contains];
+        BOOL blocked = requestSucceeded && [strongSelf networkBody:body matchesBlockText:falseText defaultExpectedTrue:NO];
+        BOOL shouldRun = runRule.length > 0 ? matched : (requestSucceeded && !blocked);
+        NSString *status = blocked
+            ? @"命中不运行 继续监控"
+            : (requestSucceeded
+                ? @"未命中运行 继续监控"
+                : [strongSelf networkStatusTextWithMatched:NO requestSucceeded:requestSucceeded statusCode:statusCode error:error]);
+        completion(shouldRun, status);
+    }];
+}
+
+- (void)taskEngine:(__unused AnClickTaskEngine *)engine
+performNetworkRequestForModel:(AnClickTaskModel *)model
+        generation:(NSUInteger)generation
+        completion:(AnClickTaskEngineNetworkCompletion)completion {
+    NSMutableDictionary *task = [self taskDictionaryForModel:model];
+    if (!task) {
+        if (completion) {
+            completion(NO, NO, NO);
+        }
+        return;
+    }
+    [self performNetworkRequestTask:task runGeneration:generation completion:completion];
+}
+
+- (BOOL)taskEngine:(__unused AnClickTaskEngine *)engine networkTaskModelHasFailurePath:(AnClickTaskModel *)model {
+    NSMutableDictionary *task = [self taskDictionaryForModel:model];
+    if (!task) {
+        return NO;
+    }
+    return [self failureActionModeForTask:task] != AnClickActionModeNone ||
+        [self validRecognitionJumpIndexForTask:task success:NO] >= 0;
+}
+
+- (void)taskEngine:(__unused AnClickTaskEngine *)engine
+continueAfterNetworkTaskModel:(AnClickTaskModel *)model
+           atIndex:(NSUInteger)index
+              host:(id)host
+        generation:(NSUInteger)generation
+           success:(BOOL)success {
+    NSMutableDictionary *task = [self taskDictionaryForModel:model];
+    if (!task) {
+        [self stopTaskRunWithStatus:@"任务数据无效" showToast:YES];
+        return;
+    }
+    [self scheduleTaskContinuationAfterRecognitionTask:task
+                                               atIndex:index
+                                              inWindow:(UIWindow *)host
+                                            generation:generation
+                                               success:success
+                                                 delay:0.0];
+}
+
+- (void)taskEngine:(__unused AnClickTaskEngine *)engine
+performRecognitionTaskModel:(AnClickTaskModel *)model
+              host:(id)host
+        generation:(NSUInteger)generation
+        completion:(AnClickTaskEngineRecognitionCompletion)completion {
+    NSMutableDictionary *task = [self taskDictionaryForModel:model];
+    if (!task) {
+        if (completion) {
+            completion(NO);
+        }
+        return;
+    }
+    [self performRecognitionNetworkTask:task inWindow:(UIWindow *)host generation:generation completion:completion];
+}
+
+- (void)taskEngine:(__unused AnClickTaskEngine *)engine
+performRecognitionBranchActionForModel:(AnClickTaskModel *)model
+           success:(BOOL)success
+              host:(id)host
+        generation:(NSUInteger)generation
+        completion:(AnClickTaskEngineActionDelayCompletion)completion {
+    NSMutableDictionary *task = [self taskDictionaryForModel:model];
+    if (!task) {
+        if (completion) {
+            completion(0.0);
+        }
+        return;
+    }
+    [self performRecognitionBranchActionForTask:task
+                                        success:success
+                                       inWindow:(UIWindow *)host
+                                     generation:generation
+                                     completion:completion];
+}
+
+- (void)taskEngine:(__unused AnClickTaskEngine *)engine
+performRecognitionFailureActionForModel:(AnClickTaskModel *)model
+              host:(id)host
+        generation:(NSUInteger)generation
+        completion:(AnClickTaskEngineActionDelayCompletion)completion {
+    NSMutableDictionary *task = [self taskDictionaryForModel:model];
+    if (!task) {
+        if (completion) {
+            completion(0.0);
+        }
+        return;
+    }
+    [self performRecognitionFailureActionForTask:task
+                                        inWindow:(UIWindow *)host
+                                      generation:generation
+                                      completion:completion];
+}
+
+- (NSTimeInterval)taskEngine:(__unused AnClickTaskEngine *)engine delayForRecognitionTaskModel:(AnClickTaskModel *)model {
+    return [self delayForTask:[self taskDictionaryForModel:model]];
+}
+
+- (NSTimeInterval)taskEngine:(__unused AnClickTaskEngine *)engine actionIntervalForRecognitionTaskModel:(AnClickTaskModel *)model {
+    return [self actionIntervalForTask:[self taskDictionaryForModel:model]];
+}
+
+- (NSTimeInterval)taskEngine:(__unused AnClickTaskEngine *)engine retryIntervalForRecognitionTaskModel:(AnClickTaskModel *)model {
+    return [self recognitionRetryIntervalForTask:[self taskDictionaryForModel:model]];
+}
+
+- (NSTimeInterval)taskEngine:(__unused AnClickTaskEngine *)engine postSuccessDelayForRecognitionTaskModel:(AnClickTaskModel *)model {
+    return [self postRecognitionSuccessDelayForTask:[self taskDictionaryForModel:model]];
+}
+
+- (NSInteger)taskEngine:(__unused AnClickTaskEngine *)engine repeatCountForRecognitionTaskModel:(AnClickTaskModel *)model {
+    return [self repeatCountForTask:[self taskDictionaryForModel:model]];
+}
+
+- (BOOL)taskEngine:(__unused AnClickTaskEngine *)engine retryUntilFoundForRecognitionTaskModel:(AnClickTaskModel *)model {
+    return [self recognitionRetryUntilFoundForTask:[self taskDictionaryForModel:model]];
+}
+
+- (AnClickActionMode)taskEngine:(__unused AnClickTaskEngine *)engine failureActionModeForRecognitionTaskModel:(AnClickTaskModel *)model {
+    return [self failureActionModeForTask:[self taskDictionaryForModel:model]];
+}
+
+- (NSInteger)taskEngine:(__unused AnClickTaskEngine *)engine failureJumpIndexForRecognitionTaskModel:(AnClickTaskModel *)model {
+    return [self validRecognitionJumpIndexForTask:[self taskDictionaryForModel:model] success:NO];
+}
+
+- (NSUInteger)taskEngine:(__unused AnClickTaskEngine *)engine
+nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
+            currentIndex:(NSUInteger)index
+                 success:(BOOL)success {
+    return [self nextTaskIndexAfterRecognitionTask:[self taskDictionaryForModel:model] currentIndex:index success:success];
+}
+
+- (NSString *)taskEngine:(__unused AnClickTaskEngine *)engine displayNameForRecognitionTaskModel:(AnClickTaskModel *)model {
+    NSMutableDictionary *task = [self taskDictionaryForModel:model];
+    return [self actionNameForMode:[self modeForTask:task]];
+}
+
+- (NSString *)taskEngine:(__unused AnClickTaskEngine *)engine durationTextForRecognitionDelay:(NSTimeInterval)delay {
+    return [self millisecondsSummaryTextForDuration:delay];
+}
+
 - (void)pauseTaskRunForForegroundLoss {
     if (!_taskRunActive) {
         return;
@@ -6577,6 +6902,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _taskRunPausedForForeground = YES;
     _taskRunResumeCycle = _currentGlobalRunCycle;
     _taskRunGeneration++;
+    [self resetRunProgressToastThrottle];
     [self cancelRunningTaskSideEffects];
     [self stopTaskRunRuntimeTimerReset:NO];
     _statusLabel.text = @"应用切出暂停";
@@ -6586,41 +6912,32 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)cleanupScreenInteractionStateRestoringPanel:(BOOL)restorePanel {
+    [_taskEngine invalidateScheduledCallbacks];
+    [_recognitionService cancelPendingRequests];
+    [self cancelActiveNetworkTasks];
     [self invalidatePendingPanelRestore];
+    [_pickerService cancelPendingCaptures];
 
+    _captureOverlay.delegate = nil;
     [_captureOverlay removeFromSuperview];
     _captureOverlay = nil;
-    _captureScrollView = nil;
-    _captureImageView = nil;
-    _selectionView = nil;
     _captureSnapshot = nil;
-    _captureDrawingSelection = NO;
 
+    _pointPickOverlay.delegate = nil;
     [_pointPickOverlay removeFromSuperview];
     _pointPickOverlay = nil;
-    _pointPickWindow.hidden = YES;
+    [_pickerService dismissOverlayWindow:_pointPickWindow];
     _pointPickWindow = nil;
-    _pointPickScrollView = nil;
-    _pointPickImageView = nil;
-    _pointCursorView = nil;
-    _pointPickToolbar = nil;
-    _pointCoordinateLabel = nil;
     _pointPickSnapshot = nil;
     _pointPickHostWindow = nil;
     _hasPendingPointPickPoint = NO;
     _pickingSwipeEndPoint = NO;
-    _pointPickPanStartedOnToolbar = NO;
 
-    _colorPickWindow.hidden = YES;
+    _colorPickOverlay.delegate = nil;
+    [_colorPickOverlay removeFromSuperview];
+    _colorPickOverlay = nil;
+    [_pickerService dismissOverlayWindow:_colorPickWindow];
     _colorPickWindow = nil;
-    _colorPickScrollView = nil;
-    _colorPickImageView = nil;
-    _colorPickCursorView = nil;
-    _colorPickToolbar = nil;
-    _colorPickListView = nil;
-    _colorPickInfoLabel = nil;
-    _colorPickSwatchView = nil;
-    _colorPickDeleteButton = nil;
     _colorPickImage = nil;
     _pendingColorPickSamples = [NSMutableArray array];
     _selectedColorPickSampleIndex = -1;
@@ -6796,6 +7113,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _taskRunActive = YES;
     _currentGlobalRunCycle = resumeCycle;
     NSUInteger runGeneration = ++_taskRunGeneration;
+    [self resetRunProgressToastThrottle];
     [self startTaskRunRuntimeTimerReset:NO];
     _statusLabel.text = resumeInGlobalNetworkGate ? @"恢复网络监控" : @"恢复播放";
     [self showToast:_statusLabel.text];
@@ -6804,7 +7122,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     if (resumeInGlobalNetworkGate) {
         [self rememberTaskRunResumePointAtIndex:0 inGlobalNetworkGate:YES scheduled:scheduled];
-        [self monitorGlobalNetworkGateWithHostWindow:hostWindow scheduled:scheduled generation:runGeneration];
+        [_taskEngine monitorGlobalNetworkGateWithHost:hostWindow scheduled:scheduled generation:runGeneration];
         return;
     }
 
@@ -6871,15 +7189,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     _statusLabel.text = @"截图中";
+    [_pickerService cancelPendingCaptures];
     [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
     __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.16 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [_pickerService captureAfterDelay:0.16 completion:^(UIImage *image, UIWindow *capturedWindow) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) {
             return;
         }
-        UIWindow *capturedWindow = nil;
-        strongSelf->_captureSnapshot = [AnClickCore captureCurrentWindowImageWithWindow:&capturedWindow];
+        strongSelf->_captureSnapshot = image;
         if (!strongSelf->_captureSnapshot.CGImage) {
             strongSelf->_branchTemplateCaptureActive = NO;
             strongSelf->_branchTemplateCaptureMode = AnClickActionModeNone;
@@ -6888,7 +7206,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return;
         }
         UIWindow *overlayWindow = capturedWindow ?: hostWindow;
-        if (![strongSelf capturedImage:strongSelf->_captureSnapshot matchesWindow:overlayWindow]) {
+        if (![strongSelf->_pickerService capturedImage:strongSelf->_captureSnapshot matchesWindow:overlayWindow]) {
             strongSelf->_branchTemplateCaptureActive = NO;
             strongSelf->_branchTemplateCaptureMode = AnClickActionModeNone;
             [strongSelf restorePanelAfterExternalTap];
@@ -6898,414 +7216,38 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return;
         }
         [strongSelf showCaptureOverlayInWindow:overlayWindow];
-    });
+    }];
 }
 
 - (void)showCaptureOverlayInWindow:(UIWindow *)hostWindow {
+    _captureOverlay.delegate = nil;
     [_captureOverlay removeFromSuperview];
-
-    _captureOverlay = [[UIView alloc] initWithFrame:hostWindow.bounds];
-    _captureOverlay.backgroundColor = UIColor.blackColor;
-    _captureOverlay.userInteractionEnabled = YES;
-    _captureDrawingSelection = NO;
-    _captureSelectionEditMode = AnClickCaptureSelectionEditModeNone;
-    _captureSelectionStartFrame = CGRectZero;
-
-    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:_captureOverlay.bounds];
-    scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    scrollView.delegate = self;
-    scrollView.backgroundColor = UIColor.blackColor;
-    scrollView.minimumZoomScale = 1.0;
-    scrollView.maximumZoomScale = 8.0;
-    scrollView.showsHorizontalScrollIndicator = NO;
-    scrollView.showsVerticalScrollIndicator = NO;
-    scrollView.panGestureRecognizer.minimumNumberOfTouches = 2;
-    [_captureOverlay addSubview:scrollView];
-    _captureScrollView = scrollView;
-
-    UIImageView *imageView = [[UIImageView alloc] initWithImage:_captureSnapshot];
-    imageView.frame = CGRectMake(0, 0, _captureSnapshot.size.width, _captureSnapshot.size.height);
-    imageView.userInteractionEnabled = YES;
-    [scrollView addSubview:imageView];
-    _captureImageView = imageView;
-    scrollView.contentSize = imageView.bounds.size;
-    [self updateCaptureZoomForCurrentBounds];
-    scrollView.zoomScale = scrollView.minimumZoomScale;
-    [self centerCaptureImageContent];
-
-    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(12, 54, hostWindow.bounds.size.width - 24, 42)];
-    hint.text = @"双指缩放移动，单指框选/拖边调整";
-    hint.textColor = UIColor.whiteColor;
-    hint.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    hint.adjustsFontSizeToFitWidth = YES;
-    hint.textAlignment = NSTextAlignmentCenter;
-    [_captureOverlay addSubview:hint];
-
-    _selectionView = [[UIView alloc] initWithFrame:CGRectZero];
-    _selectionView.backgroundColor = UIColor.clearColor;
-    _selectionView.layer.borderColor = UIColor.systemYellowColor.CGColor;
-    _selectionView.layer.borderWidth = 2.0;
-    _selectionView.userInteractionEnabled = NO;
-    _selectionView.hidden = YES;
-    [imageView addSubview:_selectionView];
-
-    UIPanGestureRecognizer *drawPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleCaptureDrawPan:)];
-    drawPan.maximumNumberOfTouches = 1;
-    drawPan.cancelsTouchesInView = NO;
-    [imageView addGestureRecognizer:drawPan];
-
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleCaptureOverlayTap:)];
-    tap.cancelsTouchesInView = NO;
-    [_captureOverlay addGestureRecognizer:tap];
-
-    UIButton *saveButton = [self overlayButtonWithTitle:@"保存" action:@selector(saveSelectedTemplate)];
-    saveButton.tag = 3001;
-    saveButton.frame = CGRectMake(16, hostWindow.bounds.size.height - 70, 86, 44);
-    saveButton.hidden = YES;
-    [_captureOverlay addSubview:saveButton];
-
-    UIButton *cancelButton = [self overlayButtonWithTitle:@"取消" action:@selector(cancelTemplateCapture)];
-    cancelButton.tag = 3002;
-    cancelButton.frame = CGRectMake(hostWindow.bounds.size.width - 102, hostWindow.bounds.size.height - 70, 86, 44);
-    cancelButton.hidden = NO;
-    [_captureOverlay addSubview:cancelButton];
-
+    _captureOverlay = [[AnClickTemplateCaptureView alloc] initWithFrame:hostWindow.bounds image:_captureSnapshot];
+    _captureOverlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    _captureOverlay.delegate = self;
     [hostWindow addSubview:_captureOverlay];
-    [self layoutCaptureActionButtonsAvoidingSelection];
-}
-
-- (UIButton *)overlayButtonWithTitle:(NSString *)title action:(SEL)action {
-    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-    [button setTitle:title forState:UIControlStateNormal];
-    BOOL primary = [title isEqualToString:@"保存"] || [title isEqualToString:@"确定"];
-    [button setTitleColor:(primary ? UIColor.whiteColor : [self themePrimaryTextColor]) forState:UIControlStateNormal];
-    button.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    button.backgroundColor = primary
-        ? [self themeHighlightColor]
-        : [[self themeSurfaceColor] colorWithAlphaComponent:0.92];
-    button.layer.cornerRadius = 8.0;
-    button.layer.borderColor = (primary
-        ? [[self themeHighlightColor] colorWithAlphaComponent:0.86]
-        : [[self themeSeparatorColor] colorWithAlphaComponent:0.82]).CGColor;
-    button.layer.borderWidth = 1.0;
-    button.layer.shadowColor = UIColor.blackColor.CGColor;
-    button.layer.shadowOffset = CGSizeMake(0, 2);
-    button.layer.shadowRadius = 4.0;
-    button.layer.shadowOpacity = 0.12;
-    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
-    return button;
-}
-
-- (CGRect)clampedSelectionFrame:(CGRect)frame {
-    CGRect bounds = _captureImageView ? _captureImageView.bounds : _captureOverlay.bounds;
-    CGFloat minSide = 8.0;
-    CGFloat maxWidth = MAX(minSide, bounds.size.width);
-    CGFloat maxHeight = MAX(minSide, bounds.size.height);
-    frame.size.width = MIN(MAX(frame.size.width, minSide), maxWidth);
-    frame.size.height = MIN(MAX(frame.size.height, minSide), maxHeight);
-    frame.origin.x = MIN(MAX(frame.origin.x, 0.0), bounds.size.width - frame.size.width);
-    frame.origin.y = MIN(MAX(frame.origin.y, 0.0), bounds.size.height - frame.size.height);
-    return frame;
-}
-
-- (CGRect)selectionFrameFromPoint:(CGPoint)startPoint toPoint:(CGPoint)endPoint {
-    CGRect rawFrame = CGRectStandardize(CGRectMake(startPoint.x,
-                                                   startPoint.y,
-                                                   endPoint.x - startPoint.x,
-                                                   endPoint.y - startPoint.y));
-    return [self clampedSelectionFrame:rawFrame];
-}
-
-- (CGFloat)captureSelectionHitOutset {
-    CGFloat zoomScale = MAX(_captureScrollView ? _captureScrollView.zoomScale : 1.0, 0.01);
-    return MAX(10.0, 24.0 / zoomScale);
-}
-
-- (CGPoint)clampedCaptureImagePoint:(CGPoint)point {
-    CGRect bounds = _captureImageView ? _captureImageView.bounds : _captureOverlay.bounds;
-    point.x = MIN(MAX(point.x, 0.0), bounds.size.width);
-    point.y = MIN(MAX(point.y, 0.0), bounds.size.height);
-    return point;
-}
-
-- (AnClickCaptureSelectionEditMode)captureSelectionEditModeAtImagePoint:(CGPoint)point {
-    if (!_selectionView || _selectionView.hidden || CGRectIsEmpty(_selectionView.frame)) {
-        return AnClickCaptureSelectionEditModeNone;
-    }
-
-    CGRect frame = _selectionView.frame;
-    CGFloat hitOutset = [self captureSelectionHitOutset];
-    CGRect hitFrame = CGRectInset(frame, -hitOutset, -hitOutset);
-    if (!CGRectContainsPoint(hitFrame, point)) {
-        return AnClickCaptureSelectionEditModeNone;
-    }
-
-    AnClickCaptureSelectionEditMode mode = AnClickCaptureSelectionEditModeNone;
-    CGFloat leftDistance = fabs(point.x - CGRectGetMinX(frame));
-    CGFloat rightDistance = fabs(point.x - CGRectGetMaxX(frame));
-    CGFloat topDistance = fabs(point.y - CGRectGetMinY(frame));
-    CGFloat bottomDistance = fabs(point.y - CGRectGetMaxY(frame));
-    if (MIN(leftDistance, rightDistance) <= hitOutset) {
-        mode |= leftDistance <= rightDistance
-            ? AnClickCaptureSelectionEditModeLeft
-            : AnClickCaptureSelectionEditModeRight;
-    }
-    if (MIN(topDistance, bottomDistance) <= hitOutset) {
-        mode |= topDistance <= bottomDistance
-            ? AnClickCaptureSelectionEditModeTop
-            : AnClickCaptureSelectionEditModeBottom;
-    }
-    if (mode != AnClickCaptureSelectionEditModeNone) {
-        return mode;
-    }
-    return CGRectContainsPoint(frame, point)
-        ? AnClickCaptureSelectionEditModeMove
-        : AnClickCaptureSelectionEditModeNone;
-}
-
-- (CGRect)selectionFrameByEditingFrame:(CGRect)baseFrame
-                                  mode:(AnClickCaptureSelectionEditMode)mode
-                           translation:(CGPoint)translation {
-    CGRect bounds = _captureImageView ? _captureImageView.bounds : _captureOverlay.bounds;
-    CGFloat minSide = 8.0;
-    if (mode == AnClickCaptureSelectionEditModeMove) {
-        CGRect movedFrame = baseFrame;
-        movedFrame.origin.x += translation.x;
-        movedFrame.origin.y += translation.y;
-        return [self clampedSelectionFrame:movedFrame];
-    }
-
-    CGFloat minX = CGRectGetMinX(baseFrame);
-    CGFloat maxX = CGRectGetMaxX(baseFrame);
-    CGFloat minY = CGRectGetMinY(baseFrame);
-    CGFloat maxY = CGRectGetMaxY(baseFrame);
-    CGFloat boundsMaxX = MAX(0.0, bounds.size.width);
-    CGFloat boundsMaxY = MAX(0.0, bounds.size.height);
-
-    if (mode & AnClickCaptureSelectionEditModeLeft) {
-        minX = MIN(maxX - minSide, MAX(0.0, minX + translation.x));
-    }
-    if (mode & AnClickCaptureSelectionEditModeRight) {
-        maxX = MAX(minX + minSide, MIN(boundsMaxX, maxX + translation.x));
-    }
-    if (mode & AnClickCaptureSelectionEditModeTop) {
-        minY = MIN(maxY - minSide, MAX(0.0, minY + translation.y));
-    }
-    if (mode & AnClickCaptureSelectionEditModeBottom) {
-        maxY = MAX(minY + minSide, MIN(boundsMaxY, maxY + translation.y));
-    }
-
-    return [self clampedSelectionFrame:CGRectMake(minX, minY, maxX - minX, maxY - minY)];
-}
-
-- (void)finishCaptureSelectionInteraction {
-    _captureDrawingSelection = NO;
-    _captureSelectionEditMode = AnClickCaptureSelectionEditModeNone;
-    _captureSelectionStartFrame = CGRectZero;
-    if (_selectionView.frame.size.width < 8.0 || _selectionView.frame.size.height < 8.0) {
-        _selectionView.hidden = YES;
-        _selectionView.frame = CGRectZero;
-        [self setCaptureActionButtonsHidden:YES];
-    } else {
-        _selectionView.hidden = NO;
-        [self layoutCaptureActionButtonsAvoidingSelection];
-    }
-}
-
-- (void)setCaptureActionButtonsHidden:(BOOL)hidden {
-    UIView *saveButton = [_captureOverlay viewWithTag:3001];
-    UIView *cancelButton = [_captureOverlay viewWithTag:3002];
-    saveButton.hidden = hidden;
-    cancelButton.hidden = hidden;
-}
-
-- (void)layoutCaptureActionButtonsAvoidingSelection {
-    if (!_captureOverlay) {
-        return;
-    }
-
-    UIView *saveButton = [_captureOverlay viewWithTag:3001];
-    UIView *cancelButton = [_captureOverlay viewWithTag:3002];
-    if (!saveButton || !cancelButton) {
-        return;
-    }
-
-    UIEdgeInsets safeInsets = [self overlaySafeAreaInsetsForView:_captureOverlay window:_captureOverlay.window];
-    CGFloat margin = 14.0;
-    CGFloat gap = 12.0;
-    CGFloat buttonWidth = 86.0;
-    CGFloat buttonHeight = 44.0;
-    CGFloat bottomY = _captureOverlay.bounds.size.height - buttonHeight - MAX(margin, safeInsets.bottom + margin);
-    CGFloat cancelX = _captureOverlay.bounds.size.width - safeInsets.right - margin - buttonWidth;
-    cancelButton.frame = CGRectMake(cancelX, bottomY, buttonWidth, buttonHeight);
-
-    if (!_selectionView || _selectionView.hidden) {
-        saveButton.hidden = YES;
-        cancelButton.hidden = NO;
-        return;
-    }
-
-    CGRect selectionFrame = [_selectionView.superview convertRect:_selectionView.frame toView:_captureOverlay];
-    CGFloat totalWidth = buttonWidth * 2.0 + gap;
-    CGFloat minX = safeInsets.left + margin;
-    CGFloat maxX = _captureOverlay.bounds.size.width - safeInsets.right - totalWidth - margin;
-    CGFloat x = MIN(MAX(CGRectGetMidX(selectionFrame) - totalWidth * 0.5, minX), maxX);
-
-    CGFloat belowY = CGRectGetMaxY(selectionFrame) + margin;
-    CGFloat aboveY = CGRectGetMinY(selectionFrame) - buttonHeight - margin;
-    CGFloat y = 0.0;
-    CGFloat minY = MAX(margin, safeInsets.top + margin);
-    CGFloat maxY = _captureOverlay.bounds.size.height - buttonHeight - MAX(margin, safeInsets.bottom + margin);
-    if (belowY <= maxY) {
-        y = belowY;
-    } else if (aboveY >= minY) {
-        y = aboveY;
-    } else {
-        y = maxY;
-    }
-
-    saveButton.frame = CGRectMake(x, y, buttonWidth, buttonHeight);
-    cancelButton.frame = CGRectMake(x + buttonWidth + gap, y, buttonWidth, buttonHeight);
-    saveButton.hidden = NO;
-    cancelButton.hidden = NO;
-}
-
-- (void)handleCaptureOverlayTap:(UITapGestureRecognizer *)recognizer {
-    if (recognizer.state != UIGestureRecognizerStateEnded || !_captureOverlay) {
-        return;
-    }
-
-    CGPoint point = [recognizer locationInView:_captureOverlay];
-    UIView *saveButton = [_captureOverlay viewWithTag:3001];
-    UIView *cancelButton = [_captureOverlay viewWithTag:3002];
-    if (saveButton && !saveButton.hidden && CGRectContainsPoint(CGRectInset(saveButton.frame, -8.0, -8.0), point)) {
-        [self saveSelectedTemplate];
-    } else if (cancelButton && !cancelButton.hidden && CGRectContainsPoint(CGRectInset(cancelButton.frame, -8.0, -8.0), point)) {
-        [self cancelTemplateCapture];
-    }
-}
-
-- (void)handleCaptureDrawPan:(UIPanGestureRecognizer *)recognizer {
-    if (!_captureOverlay || !_selectionView) {
-        return;
-    }
-
-    CGPoint point = [self clampedCaptureImagePoint:[recognizer locationInView:_captureImageView]];
-    if (recognizer.state == UIGestureRecognizerStateBegan) {
-        _captureSelectionEditMode = [self captureSelectionEditModeAtImagePoint:point];
-        if (_captureSelectionEditMode != AnClickCaptureSelectionEditModeNone) {
-            _captureDrawingSelection = NO;
-            _captureSelectionStartFrame = _selectionView.frame;
-            [recognizer setTranslation:CGPointZero inView:_captureImageView];
-            [self setCaptureActionButtonsHidden:YES];
-            return;
-        }
-
-        _captureDrawingSelection = YES;
-        _captureSelectionStartFrame = CGRectZero;
-        _captureDragStartPoint = point;
-        [self setCaptureActionButtonsHidden:YES];
-        _selectionView.hidden = NO;
-        _selectionView.frame = CGRectMake(point.x, point.y, 1.0, 1.0);
-        return;
-    }
-
-    if (_captureSelectionEditMode != AnClickCaptureSelectionEditModeNone) {
-        if (recognizer.state == UIGestureRecognizerStateChanged ||
-            recognizer.state == UIGestureRecognizerStateEnded) {
-            CGPoint translation = [recognizer translationInView:_captureImageView];
-            _selectionView.frame = [self selectionFrameByEditingFrame:_captureSelectionStartFrame
-                                                                 mode:_captureSelectionEditMode
-                                                          translation:translation];
-        }
-        if (recognizer.state == UIGestureRecognizerStateEnded ||
-            recognizer.state == UIGestureRecognizerStateCancelled ||
-            recognizer.state == UIGestureRecognizerStateFailed) {
-            [self finishCaptureSelectionInteraction];
-        }
-        return;
-    }
-
-    if (_captureDrawingSelection &&
-        (recognizer.state == UIGestureRecognizerStateChanged ||
-         recognizer.state == UIGestureRecognizerStateEnded)) {
-        CGRect frame = [self selectionFrameFromPoint:_captureDragStartPoint toPoint:point];
-        _selectionView.frame = frame;
-        _selectionView.hidden = CGRectGetWidth(frame) < 2.0 || CGRectGetHeight(frame) < 2.0;
-    }
-
-    if (_captureDrawingSelection &&
-        (recognizer.state == UIGestureRecognizerStateEnded ||
-         recognizer.state == UIGestureRecognizerStateCancelled ||
-         recognizer.state == UIGestureRecognizerStateFailed)) {
-        [self finishCaptureSelectionInteraction];
-    }
-}
-
-- (void)handleSelectionPan:(UIPanGestureRecognizer *)recognizer {
-    if (recognizer.view != _selectionView || !_selectionView) {
-        return;
-    }
-    if (recognizer.state == UIGestureRecognizerStateBegan) {
-        CGPoint point = [recognizer locationInView:_captureImageView];
-        _captureSelectionEditMode = [self captureSelectionEditModeAtImagePoint:point];
-        if (_captureSelectionEditMode == AnClickCaptureSelectionEditModeNone) {
-            _captureSelectionEditMode = AnClickCaptureSelectionEditModeMove;
-        }
-        _captureSelectionStartFrame = _selectionView.frame;
-        [self setCaptureActionButtonsHidden:YES];
-    }
-    if (recognizer.state == UIGestureRecognizerStateChanged ||
-        recognizer.state == UIGestureRecognizerStateEnded) {
-        CGPoint translation = [recognizer translationInView:_captureImageView];
-        _selectionView.frame = [self selectionFrameByEditingFrame:_captureSelectionStartFrame
-                                                             mode:_captureSelectionEditMode
-                                                      translation:translation];
-    }
-    if (recognizer.state == UIGestureRecognizerStateEnded ||
-        recognizer.state == UIGestureRecognizerStateCancelled ||
-        recognizer.state == UIGestureRecognizerStateFailed) {
-        [self finishCaptureSelectionInteraction];
-    }
 }
 
 - (void)saveSelectedTemplate {
-    if (!_captureSnapshot.CGImage || !_selectionView || _selectionView.hidden || CGRectIsEmpty(_selectionView.frame)) {
+    if (!_captureSnapshot.CGImage || !_captureOverlay || CGRectIsEmpty(_captureOverlay.selectionFrame)) {
         [self cancelTemplateCapture];
         _statusLabel.text = @"先框选区域";
         return;
     }
 
-    CGRect selectionFrame = _selectionView.frame;
-    CGFloat scale = _captureSnapshot.scale;
-    CGRect cropRect = CGRectMake(selectionFrame.origin.x * scale,
-                                 selectionFrame.origin.y * scale,
-                                 selectionFrame.size.width * scale,
-                                 selectionFrame.size.height * scale);
-    CGRect imageBounds = CGRectMake(0, 0, CGImageGetWidth(_captureSnapshot.CGImage), CGImageGetHeight(_captureSnapshot.CGImage));
-    cropRect = CGRectIntersection(cropRect, imageBounds);
-    if (CGRectIsEmpty(cropRect)) {
+    UIImage *templateImage = [_pickerService croppedImageFromImage:_captureSnapshot selectionFrame:_captureOverlay.selectionFrame];
+    if (!templateImage.CGImage) {
         [self cancelTemplateCapture];
         _statusLabel.text = @"区域错误";
         return;
     }
-
-    CGImageRef croppedRef = CGImageCreateWithImageInRect(_captureSnapshot.CGImage, cropRect);
-    if (!croppedRef) {
-        [self cancelTemplateCapture];
-        _statusLabel.text = @"保存失败";
-        return;
-    }
-
-    UIImage *templateImage = [UIImage imageWithCGImage:croppedRef scale:scale orientation:_captureSnapshot.imageOrientation];
-    CGImageRelease(croppedRef);
-    NSData *pngData = UIImagePNGRepresentation(templateImage);
     if (_branchTemplateCaptureActive) {
         BOOL success = _branchTemplateCaptureSuccess;
         AnClickActionMode mode = _branchTemplateCaptureMode;
         NSString *path = [self newTemplatePath];
-        BOOL saved = [pngData writeToFile:path atomically:YES];
+        BOOL saved = [_pickerService saveImage:templateImage toPath:path];
         if (saved) {
+            [self clearTemplateImageCache];
             NSMutableDictionary *config = [self ensureMutableBranchActionConfigForSuccess:success mode:mode];
             if (config) {
                 config[@"templatePath"] = path;
@@ -7314,6 +7256,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     config[@"threshold"] = @0.80;
                 }
                 [self storeBranchActionConfig:config success:success mode:mode];
+            } else {
+                saved = NO;
             }
         }
         [self finishTemplateCapture];
@@ -7326,7 +7270,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         }
         return;
     }
-    BOOL saved = [pngData writeToFile:[self writableTemplatePath] atomically:YES];
+    BOOL saved = [_pickerService saveImage:templateImage toPath:[self writableTemplatePath]];
+    if (saved) {
+        [self clearTemplateImageCache];
+    }
     [self finishTemplateCapture];
     [self refreshTaskEditorAfterExternalResult];
     [self autosaveSelectedTaskIfPossible];
@@ -7343,16 +7290,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)finishTemplateCapture {
+    _captureOverlay.delegate = nil;
     [_captureOverlay removeFromSuperview];
     _captureOverlay = nil;
-    _captureScrollView = nil;
-    _captureImageView = nil;
-    _selectionView = nil;
     _captureSnapshot = nil;
-    _captureDrawingSelection = NO;
     _branchTemplateCaptureActive = NO;
     _branchTemplateCaptureMode = AnClickActionModeNone;
     [self restorePanelAfterExternalTap];
+}
+
+- (void)templateCaptureView:(__unused AnClickTemplateCaptureView *)view didSelectFrame:(__unused CGRect)selectionFrame {
+    [self saveSelectedTemplate];
+}
+
+- (void)templateCaptureViewDidCancel:(__unused AnClickTemplateCaptureView *)view {
+    [self cancelTemplateCapture];
 }
 
 - (void)refreshTemplatePreview {
@@ -7446,6 +7398,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)showTapMarkerAtScreenPoint:(CGPoint)screenPoint inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
+    if (![self shouldShowRunTraceNow]) {
+        return;
+    }
     [_tapMarkerView removeFromSuperview];
     if (!hostWindow) {
         return;
@@ -7483,6 +7438,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)showRecognitionBoxForScreenRect:(CGRect)screenRect score:(double)score inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
+    if (![self shouldShowRunTraceNow]) {
+        return;
+    }
     [_recognitionBoxView removeFromSuperview];
     if (!hostWindow || CGRectIsEmpty(screenRect)) {
         return;
@@ -7566,6 +7524,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)showMultiTapMarkersForScreenPoints:(NSArray<NSValue *> *)points inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
+    if (![self shouldShowRunTraceNow]) {
+        return;
+    }
     [_operationTraceView removeFromSuperview];
     if (points.count == 0 || !hostWindow) {
         return;
@@ -7617,7 +7578,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)showOperationTraceForMode:(AnClickActionMode)mode atPoint:(CGPoint)screenPoint inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
-    [_operationTraceView removeFromSuperview];
     if (!hostWindow) {
         return;
     }
@@ -7629,6 +7589,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self showTapMarkerAtScreenPoint:screenPoint inWindow:hostWindow duration:duration];
         return;
     }
+
+    if (![self shouldShowRunTraceNow]) {
+        return;
+    }
+    [_operationTraceView removeFromSuperview];
 
     UIView *overlay = [[UIView alloc] initWithFrame:hostWindow.bounds];
     overlay.userInteractionEnabled = NO;
@@ -7695,6 +7660,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)showTrajectoryForScreenPoints:(NSArray<NSValue *> *)points inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
+    if (![self shouldShowRunTraceNow]) {
+        return;
+    }
     [_trajectoryView removeFromSuperview];
     if (points.count < 2 || !hostWindow) {
         return;
@@ -7951,8 +7919,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (BOOL)networkHasJudgementConditionWithTrueText:(NSString *)trueText falseText:(NSString *)falseText {
-    return [self trimmedActionDescription:trueText].length > 0 ||
-        [self trimmedActionDescription:falseText].length > 0;
+    return [_networkService hasJudgementConditionWithTrueText:trueText falseText:falseText];
 }
 
 - (BOOL)currentNetworkJudgementHasCondition {
@@ -7978,6 +7945,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                           success:(BOOL)success {
     if (![self recognitionActionModeNeedsPoint:actionMode]) {
         return nil;
+    }
+
+    NSDictionary *branchConfig = [self branchActionConfigForTask:task success:success expectedMode:actionMode];
+    if (branchConfig) {
+        return [self taskListPointSummaryForTask:branchConfig];
     }
 
     if (success) {
@@ -8096,7 +8068,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                             success:(BOOL)success
                                       includePrefix:(BOOL)includePrefix
                                               depth:(NSUInteger)depth {
-    if (![self modeIsRecognitionTask:[self modeForTask:task]]) {
+    if (![self modeIsJudgementTask:[self modeForTask:task]]) {
         return nil;
     }
 
@@ -8174,7 +8146,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } else {
         NSInteger repeat = MAX(1, [self repeatCountForTask:task]);
         [parts addObject:repeat > 1 ? [NSString stringWithFormat:@"尝试%ld次", (long)repeat] : @"识别一次"];
-        NSTimeInterval interval = [self actionIntervalForTask:task];
+        NSTimeInterval interval = MAX([self actionIntervalForTask:task], AnClickRecognitionCaptureDelay);
         if (repeat > 1 && interval > 0.001) {
             [parts addObject:[NSString stringWithFormat:@"识别间隔%@", [self millisecondsSummaryTextForDuration:interval]]];
         }
@@ -8943,8 +8915,25 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [self addTaskListDetailRowWithTitle:@"请求方法" value:[self networkMethodForTask:task] tint:tint rows:rows];
             BOOL oneShot = [self networkTaskIsOneShot:task];
             [self addTaskListDetailRowWithTitle:@"执行模式" value:oneShot ? @"仅请求一次" : @"判断返回" tint:tint rows:rows];
+            NSString *contains = [self trimmedActionDescription:task[@"networkContains"]];
+            NSString *falseText = [self trimmedActionDescription:task[@"networkFalse"]];
+            if (contains.length > 0) {
+                [self addTaskListDetailRowWithTitle:@"成功匹配" value:contains tint:tint rows:rows];
+            }
+            if (falseText.length > 0) {
+                [self addTaskListDetailRowWithTitle:@"失败匹配" value:falseText tint:tint rows:rows];
+            }
+            if ([[self networkMethodForTask:task] isEqualToString:@"POST"]) {
+                NSUInteger pairCount = [task[@"networkPostPairs"] isKindOfClass:NSArray.class] ? [(NSArray *)task[@"networkPostPairs"] count] : 0;
+                NSString *postSummary = pairCount > 0
+                    ? [NSString stringWithFormat:@"%lu组键值", (unsigned long)pairCount]
+                    : ([self networkPostBodyForTask:task].length > 0 ? @"自定义请求体" : @"未设置");
+                [self addTaskListDetailRowWithTitle:@"POST参数" value:postSummary tint:tint rows:rows];
+            }
             [self addTaskListDetailRowWithTitle:@"重试" value:[self networkRetryForeverForTask:task] ? @"一直判断" : [NSString stringWithFormat:@"%ld次", (long)[self networkRetryLimitForTask:task]] tint:tint rows:rows];
             [self addTaskListDetailRowWithTitle:@"超时" value:[NSString stringWithFormat:@"%.0f秒", [self networkTimeoutForTask:task]] tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"成功后" value:[self recognitionBranchActionSummaryForTask:task success:YES includePrefix:NO depth:0] tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"失败后" value:[self recognitionBranchActionSummaryForTask:task success:NO includePrefix:NO depth:0] tint:tint rows:rows];
             break;
         }
         case AnClickActionModeJump: {
@@ -9479,9 +9468,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self clearTaskRunPauseState];
     _taskRunSingleStepStopIndex = index;
     _currentGlobalRunCycle = 0;
+    [self resetTaskRunJumpGuard];
+    [self resetRunProgressToastThrottle];
+    [_taskEngine resetListRefreshThrottle];
     NSUInteger runGeneration = ++_taskRunGeneration;
     [self startTaskRunRuntimeTimerReset:YES];
-    [self refreshTaskList];
+    [self refreshTaskListDuringRunIfNeeded];
     _panelHiddenForSingleStepTest = YES;
     [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
     [self runTaskAtIndex:(NSUInteger)index inWindow:hostWindow generation:runGeneration];
@@ -9611,7 +9603,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         if ([self modeIsRecognitionTask:branchMode]) {
             ownerTask[[self recognitionActionConfigKeyForSuccess:success]] = task;
         }
-        [ownerTask removeObjectForKey:success ? @"successActionTaskIndex" : @"failureActionTaskIndex"];
         _taskItems[(NSUInteger)ownerIndex] = [[AnClickTaskModel alloc] initWithDictionary:ownerTask];
         _editingBranchRecognitionConfig = NO;
         _editingBranchRecognitionSuccess = NO;
@@ -10199,6 +10190,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         mode == AnClickActionModeColor;
 }
 
+- (BOOL)modeIsJudgementTask:(AnClickActionMode)mode {
+    return [self modeIsRecognitionTask:mode] || mode == AnClickActionModeNetwork;
+}
+
 - (BOOL)modeCanUseRecognitionPoint:(AnClickActionMode)mode {
     return mode == AnClickActionModeTap ||
         mode == AnClickActionModeDoubleTap ||
@@ -10292,30 +10287,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [self branchActionConfigForTask:task success:success expectedMode:expectedMode];
 }
 
-- (NSDictionary *)legacyRecognitionActionTaskForTask:(NSDictionary *)task success:(BOOL)success expectedMode:(AnClickActionMode)expectedMode {
-    if (![self modeIsRecognitionTask:expectedMode]) {
-        return nil;
-    }
-    NSInteger legacyIndex = success
-        ? [self validRecognitionSuccessActionTaskIndexForTask:task]
-        : [self validRecognitionFailureActionTaskIndexForTask:task];
-    if (legacyIndex >= 0 && legacyIndex < (NSInteger)_taskItems.count) {
-        NSDictionary *legacyTask = [self taskDictionaryAtIndex:(NSUInteger)legacyIndex];
-        if ([self modeForTask:legacyTask] == expectedMode) {
-            return legacyTask;
-        }
-    }
-    return nil;
-}
-
-- (NSDictionary *)currentStoredRecognitionActionConfigForSuccess:(BOOL)success mode:(AnClickActionMode)mode {
-    if (_selectedTaskIndex < 0 || _selectedTaskIndex >= (NSInteger)_taskItems.count) {
-        return nil;
-    }
-    NSDictionary *ownerTask = [self taskDictionaryAtIndex:(NSUInteger)_selectedTaskIndex];
-    return [self recognitionActionConfigForTask:ownerTask success:success expectedMode:mode];
-}
-
 - (NSDictionary *)currentStoredBranchActionConfigForSuccess:(BOOL)success mode:(AnClickActionMode)mode {
     if (_selectedTaskIndex < 0 || _selectedTaskIndex >= (NSInteger)_taskItems.count) {
         return nil;
@@ -10338,17 +10309,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     NSDictionary *existingConfig = [self branchActionConfigForTask:ownerTask success:success expectedMode:mode];
-    if (!existingConfig && [self modeIsRecognitionTask:mode]) {
-        existingConfig = [self legacyRecognitionActionTaskForTask:ownerTask success:success expectedMode:mode];
-    }
-
     NSMutableDictionary *config = existingConfig ? [existingConfig mutableCopy] : [self draftActionTaskForMode:mode];
     config[@"mode"] = @(mode);
     ownerTask[[self branchActionConfigKeyForSuccess:success]] = config;
     if ([self modeIsRecognitionTask:mode]) {
         ownerTask[[self recognitionActionConfigKeyForSuccess:success]] = config;
     }
-    [ownerTask removeObjectForKey:success ? @"successActionTaskIndex" : @"failureActionTaskIndex"];
     _taskItems[(NSUInteger)_selectedTaskIndex] = [[AnClickTaskModel alloc] initWithDictionary:ownerTask];
     [self persistCurrentTaskList];
     [self refreshCollapsedButtonTitle];
@@ -10370,7 +10336,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if ([self modeIsRecognitionTask:mode]) {
         ownerTask[[self recognitionActionConfigKeyForSuccess:success]] = [config mutableCopy];
     }
-    [ownerTask removeObjectForKey:success ? @"successActionTaskIndex" : @"failureActionTaskIndex"];
     _taskItems[(NSUInteger)_selectedTaskIndex] = [[AnClickTaskModel alloc] initWithDictionary:ownerTask];
     _editingTaskModel = [[AnClickTaskModel alloc] initWithDictionary:ownerTask];
     [self persistCurrentTaskList];
@@ -10390,18 +10355,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSMutableDictionary *ownerTask = [self taskDictionaryForModel:editorModel];
     if (ownerTask) {
         NSDictionary *existingConfig = [self currentStoredBranchActionConfigForSuccess:success mode:mode];
-        if (!existingConfig && [self modeIsRecognitionTask:mode]) {
-                existingConfig = [self legacyRecognitionActionTaskForTask:[self taskDictionaryAtIndex:(NSUInteger)_selectedTaskIndex]
-                                                             success:success
-                                                        expectedMode:mode];
-        }
         if (existingConfig) {
             ownerTask[[self branchActionConfigKeyForSuccess:success]] = [existingConfig mutableCopy];
             if ([self modeIsRecognitionTask:mode]) {
                 ownerTask[[self recognitionActionConfigKeyForSuccess:success]] = [existingConfig mutableCopy];
             }
         }
-        [ownerTask removeObjectForKey:success ? @"successActionTaskIndex" : @"failureActionTaskIndex"];
         _taskItems[(NSUInteger)_selectedTaskIndex] = [[AnClickTaskModel alloc] initWithDictionary:ownerTask];
         [self persistCurrentTaskList];
     }
@@ -10412,6 +10371,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                    expectedMode:mode];
     NSMutableDictionary *branchTask = storedConfig ? [storedConfig mutableCopy] : [self draftActionTaskForMode:mode];
     branchTask[@"mode"] = @(mode);
+    NSDictionary *ownerTaskForMode = [self taskDictionaryAtIndex:(NSUInteger)ownerIndex];
+    if ([self modeForTask:ownerTaskForMode] == AnClickActionModeNetwork &&
+        [self modeCanUseRecognitionPoint:mode]) {
+        branchTask[@"useMatchPoint"] = @NO;
+    }
 
     _editingBranchRecognitionConfig = YES;
     _editingBranchRecognitionSuccess = success;
@@ -10427,7 +10391,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (AnClickActionMode)successActionModeForTask:(NSDictionary *)task {
-    if (![self modeIsRecognitionTask:[self modeForTask:task]]) {
+    if (![self modeIsJudgementTask:[self modeForTask:task]]) {
         return AnClickActionModeNone;
     }
     id value = task[@"imageActionMode"];
@@ -10435,68 +10399,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return AnClickActionModeTap;
     }
     return [self normalizedImageActionMode:(AnClickActionMode)[value integerValue]];
-}
-
-- (NSInteger)validRecognitionSuccessActionTaskIndexForMode:(AnClickActionMode)mode targetIndex:(NSInteger)targetIndex {
-    if (![self modeIsRecognitionTask:mode] ||
-        targetIndex < 0 ||
-        targetIndex >= (NSInteger)_taskItems.count) {
-        return -1;
-    }
-    NSDictionary *targetTask = [self taskDictionaryAtIndex:(NSUInteger)targetIndex];
-    return [self modeForTask:targetTask] == mode ? targetIndex : -1;
-}
-
-- (NSInteger)validRecognitionFailureActionTaskIndexForMode:(AnClickActionMode)mode targetIndex:(NSInteger)targetIndex {
-    if (![self modeIsRecognitionTask:mode] ||
-        targetIndex < 0 ||
-        targetIndex >= (NSInteger)_taskItems.count) {
-        return -1;
-    }
-    NSDictionary *targetTask = [self taskDictionaryAtIndex:(NSUInteger)targetIndex];
-    return [self modeForTask:targetTask] == mode ? targetIndex : -1;
-}
-
-- (NSInteger)ensureRecognitionSuccessActionTaskForMode:(AnClickActionMode)mode {
-    if (![self modeIsRecognitionTask:mode]) {
-        return -1;
-    }
-    NSInteger targetIndex = _recognitionSuccessActionTaskIndex;
-    if (targetIndex >= 0 && targetIndex < (NSInteger)_taskItems.count) {
-        NSDictionary *targetTask = [self taskDictionaryAtIndex:(NSUInteger)targetIndex];
-        AnClickActionMode targetMode = [self modeForTask:targetTask];
-        if (targetMode == mode) {
-            return targetIndex;
-        }
-        if (targetTask.count == 0 || targetMode == AnClickActionModeNone) {
-            _taskItems[(NSUInteger)targetIndex] = [[AnClickTaskModel alloc] initWithDictionary:[self draftRecognitionTaskForMode:mode]];
-            return targetIndex;
-        }
-    }
-
-    [_taskItems addObject:[[AnClickTaskModel alloc] initWithDictionary:[self draftRecognitionTaskForMode:mode]]];
-    return (NSInteger)_taskItems.count - 1;
-}
-
-- (NSInteger)ensureRecognitionFailureActionTaskForMode:(AnClickActionMode)mode {
-    if (![self modeIsRecognitionTask:mode]) {
-        return -1;
-    }
-    NSInteger targetIndex = _recognitionFailureActionTaskIndex;
-    if (targetIndex >= 0 && targetIndex < (NSInteger)_taskItems.count) {
-        NSDictionary *targetTask = [self taskDictionaryAtIndex:(NSUInteger)targetIndex];
-        AnClickActionMode targetMode = [self modeForTask:targetTask];
-        if (targetMode == mode) {
-            return targetIndex;
-        }
-        if (targetTask.count == 0 || targetMode == AnClickActionModeNone) {
-            _taskItems[(NSUInteger)targetIndex] = [[AnClickTaskModel alloc] initWithDictionary:[self draftRecognitionTaskForMode:mode]];
-            return targetIndex;
-        }
-    }
-
-    [_taskItems addObject:[[AnClickTaskModel alloc] initWithDictionary:[self draftRecognitionTaskForMode:mode]]];
-    return (NSInteger)_taskItems.count - 1;
 }
 
 - (BOOL)recognitionActionModeNeedsPoint:(AnClickActionMode)mode {
@@ -10547,7 +10449,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSInteger)recognitionBranchIndexForTask:(NSDictionary *)task success:(BOOL)success {
-    if (![self modeIsRecognitionTask:[self modeForTask:task]]) {
+    if (![self modeIsJudgementTask:[self modeForTask:task]]) {
         return -1;
     }
     id value = task[success ? @"successBranchIndex" : @"failureBranchIndex"];
@@ -10556,35 +10458,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     NSInteger branchIndex = [value integerValue];
     return branchIndex >= 0 ? branchIndex : -1;
-}
-
-- (NSInteger)recognitionFailureActionTaskIndexForTask:(NSDictionary *)task {
-    if (![self modeIsRecognitionTask:[self modeForTask:task]] ||
-        ![self modeIsRecognitionTask:[self failureActionModeForTask:task]]) {
-        return -1;
-    }
-    id value = task[@"failureActionTaskIndex"];
-    if (![value respondsToSelector:@selector(integerValue)]) {
-        value = task[@"failureBranchIndex"];
-    }
-    if (![value respondsToSelector:@selector(integerValue)]) {
-        return -1;
-    }
-    NSInteger taskIndex = [value integerValue];
-    return taskIndex >= 0 ? taskIndex : -1;
-}
-
-- (NSInteger)recognitionSuccessActionTaskIndexForTask:(NSDictionary *)task {
-    if (![self modeIsRecognitionTask:[self modeForTask:task]] ||
-        ![self modeIsRecognitionTask:[self successActionModeForTask:task]]) {
-        return -1;
-    }
-    id value = task[@"successActionTaskIndex"];
-    if (![value respondsToSelector:@selector(integerValue)]) {
-        return -1;
-    }
-    NSInteger taskIndex = [value integerValue];
-    return taskIndex >= 0 ? taskIndex : -1;
 }
 
 - (NSInteger)validRecognitionBranchIndexForTask:(NSDictionary *)task success:(BOOL)success {
@@ -10596,7 +10469,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (BOOL)recognitionTaskUsesJumpActionForTask:(NSDictionary *)task success:(BOOL)success {
-    if (![self modeIsRecognitionTask:[self modeForTask:task]]) {
+    if (![self modeIsJudgementTask:[self modeForTask:task]]) {
         return NO;
     }
     if (success) {
@@ -10613,28 +10486,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [self validRecognitionBranchIndexForTask:task success:success];
 }
 
-- (NSInteger)validRecognitionSuccessActionTaskIndexForTask:(NSDictionary *)task {
-    NSInteger taskIndex = [self recognitionSuccessActionTaskIndexForTask:task];
-    if (taskIndex < 0 || taskIndex >= (NSInteger)_taskItems.count) {
-        return -1;
-    }
-    NSDictionary *targetTask = [self taskDictionaryAtIndex:(NSUInteger)taskIndex];
-    AnClickActionMode successMode = [self successActionModeForTask:task];
-    return [self modeForTask:targetTask] == successMode ? taskIndex : -1;
-}
-
-- (NSInteger)validRecognitionFailureActionTaskIndexForTask:(NSDictionary *)task {
-    NSInteger taskIndex = [self recognitionFailureActionTaskIndexForTask:task];
-    if (taskIndex < 0 || taskIndex >= (NSInteger)_taskItems.count) {
-        return -1;
-    }
-    NSDictionary *targetTask = [self taskDictionaryAtIndex:(NSUInteger)taskIndex];
-    AnClickActionMode failureMode = [self failureActionModeForTask:task];
-    return [self modeForTask:targetTask] == failureMode ? taskIndex : -1;
-}
-
 - (AnClickActionMode)failureActionModeForTask:(NSDictionary *)task {
-    if (![self modeIsRecognitionTask:[self modeForTask:task]]) {
+    if (![self modeIsJudgementTask:[self modeForTask:task]]) {
         return AnClickActionModeNone;
     }
     id value = task[@"failureActionMode"];
@@ -10719,6 +10572,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (config) {
         return [self taskModelIsComplete:[[AnClickTaskModel alloc] initWithDictionary:config]];
     }
+    if ([self modeForTask:task] == AnClickActionModeNetwork &&
+        successMode != AnClickActionModeNone &&
+        successMode != AnClickActionModeJump) {
+        _statusLabel.text = [NSString stringWithFormat:@"网络成功后%@动作未设置", [self actionNameForMode:successMode]];
+        return NO;
+    }
     if ([self recognitionBranchActionModeRequiresConfig:successMode]) {
         _statusLabel.text = [NSString stringWithFormat:@"成功后%@动作未设置", [self actionNameForMode:successMode]];
         return NO;
@@ -10732,6 +10591,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (config) {
         return [self taskModelIsComplete:[[AnClickTaskModel alloc] initWithDictionary:config]];
     }
+    if ([self modeForTask:task] == AnClickActionModeNetwork &&
+        failureMode != AnClickActionModeNone &&
+        failureMode != AnClickActionModeJump) {
+        _statusLabel.text = [NSString stringWithFormat:@"网络失败后%@动作未设置", [self actionNameForMode:failureMode]];
+        return NO;
+    }
     if ([self recognitionBranchActionModeRequiresConfig:failureMode]) {
         _statusLabel.text = [NSString stringWithFormat:@"失败后%@动作未设置", [self actionNameForMode:failureMode]];
         return NO;
@@ -10740,7 +10605,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (BOOL)validateRecognitionJumpActionForTask:(NSDictionary *)task {
-    if (![self modeIsRecognitionTask:[self modeForTask:task]]) {
+    if (![self modeIsJudgementTask:[self modeForTask:task]]) {
         return YES;
     }
 
@@ -10844,13 +10709,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _recognitionRetryInterval = [self recognitionRetryIntervalForTask:task];
     _recognitionSuccessBranchIndex = [self recognitionBranchIndexForTask:task success:YES];
     _recognitionFailureBranchIndex = [self recognitionBranchIndexForTask:task success:NO];
-    _recognitionSuccessActionTaskIndex = [self recognitionSuccessActionTaskIndexForTask:task];
-    _recognitionFailureActionTaskIndex = [self recognitionFailureActionTaskIndexForTask:task];
-    if (![task[@"failureActionTaskIndex"] respondsToSelector:@selector(integerValue)] &&
-        _recognitionFailureActionTaskIndex >= 0 &&
-        _recognitionFailureActionTaskIndex == _recognitionFailureBranchIndex) {
-        _recognitionFailureBranchIndex = -1;
-    }
 }
 
 - (NSTimeInterval)networkTimeoutForTask:(NSDictionary *)task {
@@ -11062,155 +10920,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)normalizedNetworkURLString:(NSString *)urlText {
-    NSString *trimmed = [self trimmedActionDescription:urlText];
-    if (trimmed.length == 0) {
-        return nil;
-    }
-    if ([trimmed rangeOfString:@"://"].location == NSNotFound) {
-        trimmed = [@"https://" stringByAppendingString:trimmed];
-    }
-    return [NSURL URLWithString:trimmed] ? trimmed : nil;
-}
-
-- (NSString *)stringFromNetworkData:(NSData *)data {
-    if (data.length == 0) {
-        return @"";
-    }
-
-    NSString *body = nil;
-    [NSString stringEncodingForData:data encodingOptions:nil convertedString:&body usedLossyConversion:nil];
-    if (body.length > 0) {
-        return body;
-    }
-    body = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    return body ?: @"";
+    return [_networkService normalizedURLString:urlText];
 }
 
 - (BOOL)networkBody:(NSString *)body matchesRegexPattern:(NSString *)pattern {
-    NSString *regexPattern = [self trimmedActionDescription:pattern];
-    if (regexPattern.length == 0) {
-        return NO;
-    }
-
-    NSString *response = body ?: @"";
-    NSError *error = nil;
-    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:regexPattern
-                                                                           options:NSRegularExpressionCaseInsensitive
-                                                                             error:&error];
-    if (!regex || error) {
-        return NO;
-    }
-    NSRange range = NSMakeRange(0, response.length);
-    return [regex firstMatchInString:response options:0 range:range] != nil;
-}
-
-- (NSString *)networkRegexPatternFromRuleText:(NSString *)ruleText {
-    NSString *rule = [self trimmedActionDescription:ruleText];
-    NSString *lowercaseRule = [rule lowercaseString];
-    NSArray<NSString *> *prefixes = @[@"re:", @"regex:", @"正则:"];
-    for (NSString *prefix in prefixes) {
-        if ([lowercaseRule hasPrefix:prefix]) {
-            return [self trimmedActionDescription:[rule substringFromIndex:prefix.length]];
-        }
-    }
-    return nil;
+    return [_networkService body:body matchesRegexPattern:pattern];
 }
 
 - (BOOL)networkBody:(NSString *)body matchesRuleText:(NSString *)ruleText {
-    NSString *rule = [self trimmedActionDescription:ruleText];
-    if (rule.length == 0) {
-        return NO;
-    }
-
-    NSString *regexPattern = [self networkRegexPatternFromRuleText:rule];
-    if (regexPattern.length > 0) {
-        return [self networkBody:body matchesRegexPattern:regexPattern];
-    }
-
-    NSString *response = body ?: @"";
-    return [response rangeOfString:rule options:NSCaseInsensitiveSearch].location != NSNotFound;
-}
-
-- (NSNumber *)networkStatusBooleanFromBody:(NSString *)body {
-    NSData *data = [(body ?: @"") dataUsingEncoding:NSUTF8StringEncoding];
-    if (data.length == 0) {
-        return nil;
-    }
-
-    NSError *error = nil;
-    id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
-    if (error || ![object isKindOfClass:NSDictionary.class]) {
-        return nil;
-    }
-
-    id statusValue = ((NSDictionary *)object)[@"status"];
-    if ([statusValue isKindOfClass:NSNumber.class]) {
-        return @([statusValue boolValue]);
-    }
-    if ([statusValue isKindOfClass:NSString.class]) {
-        NSString *statusText = [[self trimmedActionDescription:statusValue] lowercaseString];
-        if ([statusText isEqualToString:@"true"]) {
-            return @(YES);
-        }
-        if ([statusText isEqualToString:@"false"]) {
-            return @(NO);
-        }
-    }
-    return nil;
-}
-
-- (BOOL)networkBodyMatchesDefaultTrue:(NSString *)body {
-    NSNumber *jsonStatus = [self networkStatusBooleanFromBody:body];
-    if (jsonStatus) {
-        return jsonStatus.boolValue;
-    }
-
-    NSString *response = body ?: @"";
-    if ([self networkBody:response matchesRegexPattern:@"\"status\"\\s*:\\s*true"]) {
-        return YES;
-    }
-    NSString *trimmed = [[response stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
-    return [trimmed isEqualToString:@"true"];
-}
-
-- (BOOL)networkBodyMatchesDefaultFalse:(NSString *)body {
-    NSNumber *jsonStatus = [self networkStatusBooleanFromBody:body];
-    if (jsonStatus) {
-        return !jsonStatus.boolValue;
-    }
-
-    NSString *response = body ?: @"";
-    if ([self networkBody:response matchesRegexPattern:@"\"status\"\\s*:\\s*false"]) {
-        return YES;
-    }
-    NSString *trimmed = [[response stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] lowercaseString];
-    return [trimmed isEqualToString:@"false"];
+    return [_networkService body:body matchesRuleText:ruleText];
 }
 
 - (BOOL)networkBody:(NSString *)body matchesTrueText:(NSString *)trueText falseText:(NSString *)falseText defaultExpectedTrue:(BOOL)defaultExpectedTrue {
-    NSString *trueRule = [self trimmedActionDescription:trueText];
-    NSString *falseRule = [self trimmedActionDescription:falseText];
-    if (falseRule.length > 0 && [self networkBody:body matchesRuleText:falseRule]) {
-        return NO;
-    }
-    if (trueRule.length > 0) {
-        return [self networkBody:body matchesRuleText:trueRule];
-    }
-    if (defaultExpectedTrue) {
-        if ([self networkBodyMatchesDefaultFalse:body]) {
-            return NO;
-        }
-        return [self networkBodyMatchesDefaultTrue:body];
-    }
-    return YES;
+    return [_networkService body:body
+                 matchesTrueText:trueText
+                       falseText:falseText
+             defaultExpectedTrue:defaultExpectedTrue];
 }
 
 - (BOOL)networkBody:(NSString *)body matchesBlockText:(NSString *)falseText defaultExpectedTrue:(BOOL)defaultExpectedTrue {
-    NSString *falseRule = [self trimmedActionDescription:falseText];
-    if (falseRule.length > 0) {
-        return [self networkBody:body matchesRuleText:falseRule];
-    }
-    return defaultExpectedTrue && [self networkBodyMatchesDefaultFalse:body];
+    return [_networkService body:body
+                matchesBlockText:falseText
+             defaultExpectedTrue:defaultExpectedTrue];
 }
 
 - (NSString *)globalNetworkGateValidationMessage {
@@ -11243,66 +10974,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                        defaultExpectedTrue:(BOOL)defaultExpectedTrue
                                    timeout:(NSTimeInterval)timeout
                                 completion:(void (^)(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error))completion {
-    NSString *normalizedURLString = [self normalizedNetworkURLString:urlString];
-    NSURL *url = normalizedURLString.length > 0 ? [NSURL URLWithString:normalizedURLString] : nil;
-    if (!url) {
-        if (completion) {
-            NSError *error = [NSError errorWithDomain:NSURLErrorDomain
-                                                 code:NSURLErrorBadURL
-                                             userInfo:@{NSLocalizedDescriptionKey: @"链接无效"}];
-            completion(NO, NO, @"", 0, error);
-        }
-        return;
-    }
-
-    NSTimeInterval requestTimeout = MIN(60.0, MAX(1.0, timeout));
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:requestTimeout];
-    NSString *normalizedMethod = [[self trimmedActionDescription:method] uppercaseString];
-    BOOL usesPost = [normalizedMethod isEqualToString:@"POST"];
-    request.HTTPMethod = usesPost ? @"POST" : @"GET";
-    if ([headers isKindOfClass:NSDictionary.class]) {
-        [headers enumerateKeysAndObjectsUsingBlock:^(id key, id value, __unused BOOL *stop) {
-            if (![key isKindOfClass:NSString.class]) {
-                return;
-            }
-            NSString *headerValue = [value isKindOfClass:NSString.class] ? value : [value description];
-            if (headerValue.length > 0) {
-                [request setValue:headerValue forHTTPHeaderField:key];
-            }
-        }];
-    }
-    if (usesPost) {
-        NSString *bodyText = postBody ?: @"";
-        request.HTTPBody = [bodyText dataUsingEncoding:NSUTF8StringEncoding];
-        NSString *trimmedBody = [self trimmedActionDescription:bodyText];
-        NSString *contentType = [trimmedBody hasPrefix:@"{"] || [trimmedBody hasPrefix:@"["]
-            ? @"application/json;charset=utf-8"
-            : @"application/x-www-form-urlencoded;charset=utf-8";
-        [request setValue:contentType forHTTPHeaderField:@"Content-Type"];
-    }
-    __block __weak NSURLSessionDataTask *weakTask = nil;
-    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        NSURLSessionDataTask *finishedTask = weakTask;
-        NSInteger statusCode = 0;
-        if ([response isKindOfClass:NSHTTPURLResponse.class]) {
-            statusCode = ((NSHTTPURLResponse *)response).statusCode;
-        }
-        NSString *body = [self stringFromNetworkData:data];
-        BOOL requestSucceeded = !error && (statusCode == 0 || (statusCode >= 200 && statusCode < 400));
-        BOOL matched = requestSucceeded && [self networkBody:body matchesTrueText:trueText falseText:falseText defaultExpectedTrue:defaultExpectedTrue];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self untrackNetworkTask:finishedTask];
-            if (error.code == NSURLErrorCancelled) {
-                return;
-            }
-            if (completion) {
-                completion(matched, requestSucceeded, body, statusCode, error);
-            }
-        });
-    }];
-    weakTask = task;
-    [self trackNetworkTask:task];
-    [task resume];
+    [_networkService performRequestWithURLString:urlString
+                                          method:method
+                                         headers:headers
+                                        postBody:postBody
+                                        trueText:trueText
+                                       falseText:falseText
+                             defaultExpectedTrue:defaultExpectedTrue
+                                         timeout:timeout
+                                      completion:completion];
 }
 
 - (BOOL)networkTaskIsOneShot:(NSDictionary *)task {
@@ -11316,16 +10996,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)networkStatusTextWithMatched:(BOOL)matched requestSucceeded:(BOOL)requestSucceeded statusCode:(NSInteger)statusCode error:(NSError *)error {
-    if (matched) {
-        return @"命中运行";
-    }
-    if (error) {
-        return @"网络请求失败";
-    }
-    if (!requestSucceeded && statusCode > 0) {
-        return [NSString stringWithFormat:@"网络状态%ld", (long)statusCode];
-    }
-    return @"未命中运行";
+    return [_networkService statusTextWithMatched:matched
+                                 requestSucceeded:requestSucceeded
+                                       statusCode:statusCode
+                                            error:error];
 }
 
 - (void)performNetworkRequestTask:(NSDictionary *)task
@@ -11380,102 +11054,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)continueTaskRunToIndex:(NSUInteger)nextIndex inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
-    NSTimeInterval globalDelay = MAX(0.0, _globalDelayMilliseconds / 1000.0);
-    __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(globalDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) {
-            return;
-        }
-        if (![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
-            return;
-        }
-        UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
-        [strongSelf runTaskAtIndex:nextIndex inWindow:currentHostWindow generation:runGeneration];
-    });
+    [_taskEngine continueTaskRunToIndex:nextIndex host:hostWindow generation:runGeneration];
 }
 
 - (void)continueTaskRunAfterIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
     [self continueTaskRunToIndex:index + 1 inWindow:hostWindow generation:runGeneration];
-}
-
-- (void)pollNetworkTask:(NSDictionary *)task atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration attempt:(NSInteger)attempt {
-    if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
-        return;
-    }
-
-    BOOL waitsForCondition = ![self networkTaskIsOneShot:task];
-    BOOL retryForever = [self networkRetryForeverForTask:task];
-    NSInteger retryLimit = [self networkRetryLimitForTask:task];
-    [self performNetworkRequestTask:task runGeneration:runGeneration completion:^(BOOL matched, BOOL requestSucceeded, BOOL blocked) {
-        if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
-            return;
-        }
-        UIWindow *currentHostWindow = [self currentUsableHostWindowForTaskRunFallback:hostWindow];
-        if (!waitsForCondition) {
-            [self continueTaskRunAfterIndex:index inWindow:currentHostWindow generation:runGeneration];
-            return;
-        }
-
-        NSString *runRule = [self trimmedActionDescription:task[@"networkContains"]];
-        BOOL shouldContinue = runRule.length > 0 ? (matched && !blocked) : (requestSucceeded && !blocked);
-        if (shouldContinue) {
-            [self continueTaskRunAfterIndex:index inWindow:currentHostWindow generation:runGeneration];
-            return;
-        }
-
-        NSString *stateText = blocked ? @"命中不运行" : (requestSucceeded ? @"网络不运行" : @"网络重试中");
-        if (!retryForever && attempt >= retryLimit) {
-            [self stopTaskRunWithStatus:[NSString stringWithFormat:@"%@ 达到%ld次", stateText, (long)retryLimit]];
-            return;
-        }
-
-        self->_statusLabel.text = retryForever
-            ? [NSString stringWithFormat:@"%@ 继续判断", stateText]
-            : [NSString stringWithFormat:@"%@ %ld/%ld", stateText, (long)attempt, (long)retryLimit];
-        [self showToast:self->_statusLabel.text];
-        __weak typeof(self) weakSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (!strongSelf ||
-                ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"]) {
-                return;
-            }
-            UIWindow *retryHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:currentHostWindow];
-            [strongSelf pollNetworkTask:task atIndex:index inWindow:retryHostWindow generation:runGeneration attempt:attempt + 1];
-        });
-    }];
-}
-
-- (void)runNetworkTask:(NSDictionary *)task atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
-    if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
-        return;
-    }
-    if (![self panelCanUseCurrentScene]) {
-        return;
-    }
-    NSTimeInterval delay = [self delayForTask:task];
-    _statusLabel.text = @"网络请求";
-    [self showToast:[self toastTextForTask:task index:index]];
-    __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf ||
-            ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
-            return;
-        }
-        UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
-        [strongSelf pollNetworkTask:task atIndex:index inWindow:currentHostWindow generation:runGeneration attempt:1];
-    });
-}
-
-- (void)runNetworkTaskModel:(AnClickTaskModel *)model atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
-    NSMutableDictionary *task = [self taskDictionaryForModel:model];
-    if (!task) {
-        [self stopTaskRunWithStatus:@"任务数据无效" showToast:YES];
-        return;
-    }
-    [self runNetworkTask:task atIndex:index inWindow:hostWindow generation:runGeneration];
 }
 
 - (BOOL)taskUsesRecognitionNetworkAction:(NSDictionary *)task {
@@ -11525,15 +11108,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         UIWindow *currentHostWindow = [self currentUsableHostWindowForTaskRunFallback:hostWindow];
         __weak typeof(self) weakSelf = self;
         NSTimeInterval interval = [self actionIntervalForTask:task];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(interval * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [_taskEngine scheduleAfter:interval guard:^BOOL{
             __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (!strongSelf ||
-                ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"]) {
+            if (!strongSelf) {
+                return NO;
+            }
+            return [strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"];
+        } block:^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
                 return;
             }
             UIWindow *nextHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:currentHostWindow];
             [strongSelf runRecognitionNetworkTask:task atIndex:index inWindow:nextHostWindow generation:runGeneration repeatIndex:repeatIndex + 1];
-        });
+        }];
     }];
 }
 
@@ -11544,15 +11132,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSTimeInterval delay = [self delayForTask:task];
     [self showToast:[self toastTextForTask:task index:index]];
     __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [_taskEngine scheduleAfter:delay guard:^BOOL{
         __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf ||
-            ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+        if (!strongSelf) {
+            return NO;
+        }
+        return [strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"];
+    } block:^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
             return;
         }
         UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
         [strongSelf runRecognitionNetworkTask:task atIndex:index inWindow:currentHostWindow generation:runGeneration repeatIndex:0];
-    });
+    }];
 }
 
 - (NSTimeInterval)postRecognitionSuccessDelayForTask:(NSDictionary *)task {
@@ -11575,28 +11168,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return (NSUInteger)branchIndex;
     }
     return index + 1;
-}
-
-- (void)scheduleRecognitionTaskAttempt:(NSDictionary *)task
-                               atIndex:(NSUInteger)index
-                              inWindow:(UIWindow *)hostWindow
-                            generation:(NSUInteger)runGeneration
-                               attempt:(NSInteger)attempt
-                                 delay:(NSTimeInterval)delay {
-    __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(0.0, delay) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf ||
-            ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
-            return;
-        }
-        UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
-        [strongSelf runRecognitionTaskAttempt:task
-                                      atIndex:index
-                                     inWindow:currentHostWindow
-                                   generation:runGeneration
-                                      attempt:attempt];
-    });
 }
 
 - (void)performRecognitionBranchActionForTask:(NSDictionary *)task
@@ -11681,10 +11252,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                             success:(BOOL)success
                                               delay:(NSTimeInterval)delay {
     __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(0.0, delay) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [_taskEngine scheduleAfter:delay guard:^BOOL{
         __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf ||
-            ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
+        if (!strongSelf) {
+            return NO;
+        }
+        return [strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"];
+    } block:^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
             return;
         }
         UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
@@ -11697,203 +11273,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 return;
             }
             __weak typeof(strongSelf) nestedWeakSelf = strongSelf;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(0.0, actionDelay) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [strongSelf->_taskEngine scheduleAfter:actionDelay guard:^BOOL{
                 __strong typeof(nestedWeakSelf) nestedSelf = nestedWeakSelf;
-                if (!nestedSelf ||
-                    ![nestedSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"]) {
+                if (!nestedSelf) {
+                    return NO;
+                }
+                return [nestedSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"];
+            } block:^{
+                __strong typeof(nestedWeakSelf) nestedSelf = nestedWeakSelf;
+                if (!nestedSelf) {
                     return;
                 }
                 UIWindow *nextHostWindow = [nestedSelf currentUsableHostWindowForTaskRunFallback:currentHostWindow];
                 NSUInteger nextIndex = [nestedSelf nextTaskIndexAfterRecognitionTask:task currentIndex:index success:success];
                 [nestedSelf continueTaskRunToIndex:nextIndex inWindow:nextHostWindow generation:runGeneration];
-            });
+            }];
         }];
-    });
-}
-
-- (void)continueAfterRecognitionFailureForTask:(NSDictionary *)task
-                                       atIndex:(NSUInteger)index
-                                      inWindow:(UIWindow *)hostWindow
-                                    generation:(NSUInteger)runGeneration
-                                       attempt:(NSInteger)attempt
-                             failureActionDelay:(NSTimeInterval)failureActionDelay {
-    if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
-        return;
-    }
-
-    BOOL retryUntilFound = [self recognitionRetryUntilFoundForTask:task];
-    NSInteger repeatCount = [self repeatCountForTask:task];
-    NSString *taskName = [self actionNameForMode:[self modeForTask:task]];
-    NSTimeInterval interval = [self actionIntervalForTask:task];
-    NSTimeInterval continuationDelay = failureActionDelay > 0.001 ? failureActionDelay : interval;
-
-    NSInteger failureBranchIndex = [self validRecognitionJumpIndexForTask:task success:NO];
-    if (failureBranchIndex >= 0) {
-        _statusLabel.text = [NSString stringWithFormat:@"%@ 未命中 失败后跳转任务%ld", taskName, (long)failureBranchIndex + 1];
-        [self showToast:_statusLabel.text];
-        [self scheduleTaskContinuationAfterRecognitionTask:task
-                                                   atIndex:index
-                                                  inWindow:hostWindow
-                                                generation:runGeneration
-                                                   success:NO
-                                                     delay:continuationDelay];
-        return;
-    }
-
-    if (retryUntilFound) {
-        NSTimeInterval retryInterval = [self recognitionRetryIntervalForTask:task];
-        NSTimeInterval retryDelay = failureActionDelay > 0.001 ? MAX(failureActionDelay, retryInterval) : retryInterval;
-        _statusLabel.text = [NSString stringWithFormat:@"%@ 未命中  %@后继续", taskName, [self millisecondsSummaryTextForDuration:retryDelay]];
-        [self showToast:_statusLabel.text];
-        [self scheduleRecognitionTaskAttempt:task
-                                     atIndex:index
-                                    inWindow:hostWindow
-                                  generation:runGeneration
-                                     attempt:attempt + 1
-                                       delay:retryDelay];
-        return;
-    }
-
-    if (attempt >= repeatCount) {
-        [self scheduleTaskContinuationAfterRecognitionTask:task
-                                                   atIndex:index
-                                                  inWindow:hostWindow
-                                                generation:runGeneration
-                                                   success:NO
-                                                     delay:continuationDelay];
-        return;
-    }
-
-    _statusLabel.text = [NSString stringWithFormat:@"%@ 重试 %ld/%ld", taskName, (long)attempt, (long)repeatCount];
-    [self showToast:_statusLabel.text];
-    [self scheduleRecognitionTaskAttempt:task
-                                 atIndex:index
-                                inWindow:hostWindow
-                              generation:runGeneration
-                                 attempt:attempt + 1
-                                   delay:continuationDelay];
-}
-
-- (void)runRecognitionTaskAttempt:(NSDictionary *)task
-                           atIndex:(NSUInteger)index
-                          inWindow:(UIWindow *)hostWindow
-                        generation:(NSUInteger)runGeneration
-                           attempt:(NSInteger)attempt {
-    if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
-        return;
-    }
-    if (![self panelCanUseCurrentScene]) {
-        return;
-    }
-
-    BOOL retryUntilFound = [self recognitionRetryUntilFoundForTask:task];
-    NSInteger repeatCount = [self repeatCountForTask:task];
-    if (!retryUntilFound && attempt > repeatCount) {
-        [self scheduleTaskContinuationAfterRecognitionTask:task
-                                                   atIndex:index
-                                                  inWindow:hostWindow
-                                                generation:runGeneration
-                                                   success:NO
-                                                     delay:[self actionIntervalForTask:task]];
-        return;
-    }
-
-    [self performRecognitionNetworkTask:task inWindow:hostWindow generation:runGeneration completion:^(BOOL success) {
-        if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
-            return;
-        }
-        UIWindow *currentHostWindow = [self currentUsableHostWindowForTaskRunFallback:hostWindow];
-        if (success) {
-            if (retryUntilFound || attempt >= repeatCount) {
-                [self scheduleTaskContinuationAfterRecognitionTask:task
-                                                           atIndex:index
-                                                          inWindow:currentHostWindow
-                                                        generation:runGeneration
-                                                           success:YES
-                                                             delay:[self postRecognitionSuccessDelayForTask:task]];
-                return;
-            }
-            [self scheduleRecognitionTaskAttempt:task
-                                         atIndex:index
-                                        inWindow:currentHostWindow
-                                      generation:runGeneration
-                                         attempt:attempt + 1
-                                           delay:[self postRecognitionSuccessDelayForTask:task]];
-            return;
-        }
-
-        AnClickActionMode failureActionMode = [self failureActionModeForTask:task];
-        if (failureActionMode == AnClickActionModeJump) {
-            [self continueAfterRecognitionFailureForTask:task
-                                                 atIndex:index
-                                                inWindow:currentHostWindow
-                                              generation:runGeneration
-                                                 attempt:attempt
-                                       failureActionDelay:0.0];
-            return;
-        }
-        if ([self modeIsRecognitionTask:failureActionMode]) {
-            [self performRecognitionBranchActionForTask:task success:NO inWindow:currentHostWindow generation:runGeneration completion:^(NSTimeInterval failureActionDelay) {
-                if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"]) {
-                    return;
-                }
-                UIWindow *failureHostWindow = [self currentUsableHostWindowForTaskRunFallback:currentHostWindow];
-                [self continueAfterRecognitionFailureForTask:task
-                                                     atIndex:index
-                                                    inWindow:failureHostWindow
-                                                  generation:runGeneration
-                                                     attempt:attempt
-                                           failureActionDelay:failureActionDelay];
-            }];
-            return;
-        }
-        if (failureActionMode != AnClickActionModeNone) {
-            [self performRecognitionFailureActionForTask:task inWindow:currentHostWindow generation:runGeneration completion:^(NSTimeInterval failureActionDelay) {
-                if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"]) {
-                    return;
-                }
-                UIWindow *failureHostWindow = [self currentUsableHostWindowForTaskRunFallback:currentHostWindow];
-                [self continueAfterRecognitionFailureForTask:task
-                                                     atIndex:index
-                                                    inWindow:failureHostWindow
-                                                  generation:runGeneration
-                                                     attempt:attempt
-                                           failureActionDelay:failureActionDelay];
-            }];
-            return;
-        }
-
-        [self continueAfterRecognitionFailureForTask:task
-                                             atIndex:index
-                                            inWindow:currentHostWindow
-                                          generation:runGeneration
-                                             attempt:attempt
-                                   failureActionDelay:0.0];
     }];
-}
-
-- (void)runRecognitionTask:(NSDictionary *)task
-                   atIndex:(NSUInteger)index
-                  inWindow:(UIWindow *)hostWindow
-                generation:(NSUInteger)runGeneration {
-    if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
-        return;
-    }
-    [self scheduleRecognitionTaskAttempt:task
-                                 atIndex:index
-                                inWindow:hostWindow
-                              generation:runGeneration
-                                 attempt:1
-                                 delay:[self delayForTask:task]];
-}
-
-- (void)runRecognitionTaskModel:(AnClickTaskModel *)model atIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
-    NSMutableDictionary *task = [self taskDictionaryForModel:model];
-    if (!task) {
-        [self stopTaskRunWithStatus:@"任务数据无效" showToast:YES];
-        return;
-    }
-    [self runRecognitionTask:task atIndex:index inWindow:hostWindow generation:runGeneration];
 }
 
 - (void)performPointActionMode:(AnClickActionMode)mode atPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow {
@@ -12060,7 +11456,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
            runGeneration:(NSUInteger)runGeneration
               completion:(void (^)(BOOL success))completion {
     NSString *templatePath = task[@"templatePath"];
-    UIImage *templateImage = (templatePath.length > 0 && [[NSFileManager defaultManager] fileExistsAtPath:templatePath]) ? [UIImage imageWithContentsOfFile:templatePath] : nil;
+    UIImage *templateImage = [self cachedTemplateImageAtPath:templatePath];
     if (!templateImage) {
         _statusLabel.text = @"识图无模板";
         if (completion) {
@@ -12078,7 +11474,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _templateSearchInProgress = YES;
     NSUInteger geometryGeneration = _screenGeometryGeneration;
     __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickRecognitionCaptureDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [_taskEngine scheduleRecognitionCaptureWithHost:hostWindow generation:runGeneration delay:AnClickRecognitionCaptureDelay block:^{
         __strong typeof(weakSelf) delayedSelf = weakSelf;
         if (!delayedSelf) {
             return;
@@ -12092,9 +11488,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [delayedSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
             return;
         }
-        dispatch_async([delayedSelf templateSearchQueue], ^{
-            NSDictionary *match = [AnClickCore findTemplateImageMatch:templateImage threshold:threshold];
-            dispatch_async(dispatch_get_main_queue(), ^{
+        [delayedSelf->_recognitionService findTemplateImageMatch:templateImage threshold:threshold completion:^(NSDictionary *match) {
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) {
                     return;
@@ -12232,9 +11626,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 if (completion) {
                     completion(YES);
                 }
-            });
         });
-    });
+    }];
 }
 
 - (void)performOCRTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow {
@@ -12287,7 +11680,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _templateSearchInProgress = YES;
     NSUInteger geometryGeneration = _screenGeometryGeneration;
     __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickRecognitionCaptureDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [_taskEngine scheduleRecognitionCaptureWithHost:hostWindow generation:runGeneration delay:AnClickRecognitionCaptureDelay block:^{
         __strong typeof(weakSelf) delayedSelf = weakSelf;
         if (!delayedSelf) {
             return;
@@ -12305,9 +11698,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [delayedSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
             return;
         }
-        dispatch_async([delayedSelf templateSearchQueue], ^{
-            NSDictionary *match = [AnClickOCR findText:targetText mode:ocrMode useRegex:useRegex];
-            dispatch_async(dispatch_get_main_queue(), ^{
+        [delayedSelf->_recognitionService findText:targetText mode:ocrMode useRegex:useRegex completion:^(NSDictionary *match) {
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) {
                     return;
@@ -12472,9 +11863,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 if (completion) {
                     completion(YES);
                 }
-            });
         });
-    });
+    }];
 }
 
 - (void)performColorTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow {
@@ -12511,7 +11901,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _templateSearchInProgress = YES;
     NSUInteger geometryGeneration = _screenGeometryGeneration;
     __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickRecognitionCaptureDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [_taskEngine scheduleRecognitionCaptureWithHost:hostWindow generation:runGeneration delay:AnClickRecognitionCaptureDelay block:^{
         __strong typeof(weakSelf) delayedSelf = weakSelf;
         if (!delayedSelf) {
             return;
@@ -12525,9 +11915,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [delayedSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
             return;
         }
-        dispatch_async([delayedSelf templateSearchQueue], ^{
-            NSDictionary *match = [AnClickCore findColorPatternMatchWithPoints:colorPoints tolerance:tolerance];
-            dispatch_async(dispatch_get_main_queue(), ^{
+        [delayedSelf->_recognitionService findColorPatternMatchWithPoints:colorPoints tolerance:tolerance completion:^(NSDictionary *match) {
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) {
                     return;
@@ -12690,9 +12078,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 if (completion) {
                     completion(YES);
                 }
-            });
         });
-    });
+    }];
 }
 
 - (BOOL)networkTaskHasPostPayload:(NSDictionary *)task {
@@ -12908,6 +12295,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             _statusLabel.text = @"任务POST键值未填写";
             return NO;
         }
+        if (![self validateSuccessRecognitionActionTaskForTask:task]) {
+            return NO;
+        }
+        if (![self validateFailureRecognitionActionTaskForTask:task]) {
+            return NO;
+        }
+        if (![self validateRecognitionJumpActionForTask:task]) {
+            return NO;
+        }
         return YES;
     }
     if (mode == AnClickActionModeJump) {
@@ -13025,25 +12421,37 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             NSArray<NSValue *> *basePoints = [[self resolvedMultiTapPointsForTask:task] copy];
             for (NSInteger i = 0; i < repeatCount; i++) {
                 NSTimeInterval fireDelay = delay + step * i;
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(fireDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [_taskEngine scheduleAfter:fireDelay guard:^BOOL{
                     __strong typeof(weakSelf) strongSelf = weakSelf;
                     if (!strongSelf || (runGeneration != 0 && (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration))) {
+                        return NO;
+                    }
+                    return YES;
+                } block:^{
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
+                    if (!strongSelf) {
                         return;
                     }
                     NSArray<NSValue *> *points = [strongSelf points:basePoints byApplyingJitterForTask:task];
                     if (points.count >= 2) {
                         [AnClickFakeTouch fastMultiTapAtPoints:points];
                     }
-                });
+                }];
             }
         } else {
             NSValue *pointValue = task[@"point"];
             CGPoint basePoint = [self resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue];
             for (NSInteger i = 0; i < repeatCount; i++) {
                 NSTimeInterval fireDelay = delay + step * i;
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(fireDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [_taskEngine scheduleAfter:fireDelay guard:^BOOL{
                     __strong typeof(weakSelf) strongSelf = weakSelf;
                     if (!strongSelf || (runGeneration != 0 && (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration))) {
+                        return NO;
+                    }
+                    return YES;
+                } block:^{
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
+                    if (!strongSelf) {
                         return;
                     }
                     CGPoint point = [strongSelf point:basePoint byApplyingJitterForTask:task];
@@ -13052,7 +12460,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     } else {
                         [AnClickFakeTouch fastTapAtPoint:point];
                     }
-                });
+                }];
             }
         }
         return delay + step * repeatCount;
@@ -13063,7 +12471,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     __weak typeof(self) weakSelf = self;
     for (NSInteger i = 0; i < repeatCount; i++) {
         NSTimeInterval fireDelay = delay + interval * i;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(fireDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [_taskEngine scheduleAfter:fireDelay guard:^BOOL{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return NO;
+            }
+            return runGeneration == 0 || (strongSelf->_taskRunActive && runGeneration == strongSelf->_taskRunGeneration);
+        } block:^{
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) {
                 return;
@@ -13136,7 +12550,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     [strongSelf performPointActionMode:mode atPoint:point inWindow:currentHostWindow showTrace:!suppressFastTrace];
                 }
             }
-        });
+        }];
     }
 
     return delay + duration + interval * MAX(0, repeatCount - 1);
@@ -13154,56 +12568,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self clearTaskRunPauseState];
     _volumeShortcutRunSuppressToasts = NO;
     [self startTaskListRunScheduled:NO];
-}
-
-- (void)monitorGlobalNetworkGateWithHostWindow:(UIWindow *)hostWindow scheduled:(BOOL)scheduled generation:(NSUInteger)runGeneration {
-    if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
-        return;
-    }
-    if (![self panelCanUseCurrentScene]) {
-        return;
-    }
-    [self rememberTaskRunResumePointAtIndex:0 inGlobalNetworkGate:YES scheduled:scheduled];
-
-    NSString *url = _globalNetworkURL;
-    NSString *contains = _globalNetworkContainsText;
-    NSString *falseText = _globalNetworkFalseText;
-    __weak typeof(self) weakSelf = self;
-    [self performNetworkRequestWithURLString:url method:@"GET" headers:nil postBody:nil trueText:contains falseText:falseText defaultExpectedTrue:NO timeout:8.0 completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf ||
-            ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
-            return;
-        }
-        UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
-        NSString *runRule = [strongSelf trimmedActionDescription:contains];
-        BOOL blocked = requestSucceeded && [strongSelf networkBody:body matchesBlockText:falseText defaultExpectedTrue:NO];
-        BOOL shouldRun = runRule.length > 0 ? matched : (requestSucceeded && !blocked);
-        if (shouldRun) {
-            strongSelf->_statusLabel.text = scheduled ? @"定时命中运行" : @"命中运行";
-            [strongSelf showToast:strongSelf->_statusLabel.text];
-            [strongSelf refreshCollapsedButtonTitle];
-            [strongSelf runTaskAtIndex:0 inWindow:currentHostWindow generation:runGeneration];
-            return;
-        }
-
-        strongSelf->_statusLabel.text = blocked
-            ? @"命中不运行 继续监控"
-            : (requestSucceeded
-                ? @"未命中运行 继续监控"
-                : [strongSelf networkStatusTextWithMatched:NO requestSucceeded:requestSucceeded statusCode:statusCode error:error]);
-        [strongSelf showToast:strongSelf->_statusLabel.text];
-        [strongSelf refreshCollapsedButtonTitle];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            __strong typeof(weakSelf) retrySelf = weakSelf;
-            if (!retrySelf ||
-                ![retrySelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"]) {
-                return;
-            }
-            UIWindow *retryHostWindow = [retrySelf currentUsableHostWindowForTaskRunFallback:currentHostWindow];
-            [retrySelf monitorGlobalNetworkGateWithHostWindow:retryHostWindow scheduled:scheduled generation:runGeneration];
-        });
-    }];
 }
 
 - (void)startTaskListRunScheduled:(BOOL)scheduled {
@@ -13245,15 +12609,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self clearTaskRunPauseState];
     _taskRunSingleStepStopIndex = -1;
     _currentGlobalRunCycle = 0;
+    [self resetTaskRunJumpGuard];
+    [self resetRunProgressToastThrottle];
+    [_taskEngine resetListRefreshThrottle];
     NSUInteger runGeneration = ++_taskRunGeneration;
     [self startTaskRunRuntimeTimerReset:YES];
     _statusLabel.text = _globalNetworkGateEnabled ? @"网络监控中" : (scheduled ? @"定时启动" : @"播放中");
     [self showToast:_statusLabel.text];
-    [self refreshTaskList];
+    [self refreshTaskListDuringRunIfNeeded];
     [self collapsePanel];
     if (_globalNetworkGateEnabled) {
         [self rememberTaskRunResumePointAtIndex:0 inGlobalNetworkGate:YES scheduled:scheduled];
-        [self monitorGlobalNetworkGateWithHostWindow:hostWindow scheduled:scheduled generation:runGeneration];
+        [_taskEngine monitorGlobalNetworkGateWithHost:hostWindow scheduled:scheduled generation:runGeneration];
         return;
     }
     [self rememberTaskRunResumePointAtIndex:0 inGlobalNetworkGate:NO scheduled:scheduled];
@@ -13273,6 +12640,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self clearTaskRunPauseState];
     _taskRunSingleStepStopIndex = -1;
     _currentGlobalRunCycle = 0;
+    [self resetTaskRunJumpGuard];
+    [self resetRunProgressToastThrottle];
+    [_taskEngine resetListRefreshThrottle];
     _taskRunGeneration++;
     [self cancelRunningTaskSideEffects];
     [self stopTaskRunRuntimeTimerReset:YES];
@@ -13303,99 +12673,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)runTaskAtIndex:(NSUInteger)index inWindow:(UIWindow *)hostWindow generation:(NSUInteger)runGeneration {
-    if (![self taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"]) {
-        return;
-    }
-    if (![self panelCanUseCurrentScene]) {
-        return;
-    }
-    UIWindow *currentHostWindow = [self currentUsableHostWindowForTaskRunFallback:hostWindow];
-    [self rememberTaskRunResumePointAtIndex:index inGlobalNetworkGate:NO scheduled:_taskRunResumeScheduled];
-
-    if (_taskRunSingleStepStopIndex >= 0 && (NSInteger)index != _taskRunSingleStepStopIndex) {
-        [self finishSingleStepTaskRunWithStatus:@"单步测试完成"];
-        return;
-    }
-
-    if (index >= _taskItems.count) {
-        _currentGlobalRunCycle++;
-        NSInteger repeatLimit = MAX(0, _globalRunRepeatCount);
-        if (repeatLimit == 0 || _currentGlobalRunCycle < repeatLimit) {
-            [self rememberTaskRunResumePointAtIndex:0 inGlobalNetworkGate:NO scheduled:_taskRunResumeScheduled];
-            [self runTaskAtIndex:0 inWindow:currentHostWindow generation:runGeneration];
-            return;
-        }
-
-        [self finishTaskRunWithStatus:@"任务完成" showToast:YES restorePanel:YES];
-        return;
-    }
-
-    AnClickTaskModel *taskModel = [self taskModelAtIndex:index];
-    NSDictionary *task = [self taskDictionaryForModel:taskModel];
-    if (!task) {
-        [self stopTaskRunWithStatus:@"任务数据无效" showToast:YES];
-        return;
-    }
-    AnClickActionMode mode = [self modeForTask:task];
-    [self showToast:[self toastTextForTask:task index:index]];
-    if (mode == AnClickActionModeJump) {
-        if (![self taskModelIsComplete:taskModel]) {
-            [self finishTaskRunWithStatus:(_statusLabel.text.length > 0 ? _statusLabel.text : @"任务数据无效") showToast:YES restorePanel:YES];
-            [self expandPanel];
-            return;
-        }
-        id value = task[@"jumpTaskIndex"] ?: task[@"targetTaskIndex"] ?: task[@"jumpTaskId"];
-        NSUInteger targetIndex = (NSUInteger)MAX(0, [value integerValue]);
-        _statusLabel.text = [NSString stringWithFormat:@"跳转任务%lu", (unsigned long)targetIndex + 1];
-        [self continueTaskRunToIndex:targetIndex inWindow:currentHostWindow generation:runGeneration];
-        return;
-    }
-    if (mode == AnClickActionModeNetwork) {
-        if (![self taskModelIsComplete:taskModel]) {
-            [self finishTaskRunWithStatus:(_statusLabel.text.length > 0 ? _statusLabel.text : @"任务数据无效") showToast:YES restorePanel:YES];
-            [self expandPanel];
-            return;
-        }
-        [self runNetworkTaskModel:taskModel atIndex:index inWindow:currentHostWindow generation:runGeneration];
-        return;
-    }
-
-    if ([self modeIsRecognitionTask:mode]) {
-        if (![self taskModelIsComplete:taskModel]) {
-            [self finishTaskRunWithStatus:(_statusLabel.text.length > 0 ? _statusLabel.text : @"任务数据无效") showToast:YES restorePanel:YES];
-            [self expandPanel];
-            return;
-        }
-        [self runRecognitionTaskModel:taskModel atIndex:index inWindow:currentHostWindow generation:runGeneration];
-        return;
-    }
-
-    NSTimeInterval duration = [self performTaskModel:taskModel inWindow:currentHostWindow runGeneration:runGeneration];
-    if (duration <= 0) {
-        [self finishTaskRunWithStatus:(_statusLabel.text.length > 0 ? _statusLabel.text : @"任务执行失败") showToast:YES restorePanel:YES];
-        [self expandPanel];
-        return;
-    }
-
-    NSTimeInterval globalDelay = MAX(0.0, _globalDelayMilliseconds / 1000.0);
-    __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        __strong typeof(weakSelf) delaySelf = weakSelf;
-        if (!delaySelf ||
-            ![delaySelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"]) {
-            return;
-        }
-        UIWindow *delayedHostWindow = [delaySelf currentUsableHostWindowForTaskRunFallback:currentHostWindow];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(globalDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            __strong typeof(weakSelf) strongSelf = weakSelf;
-            if (!strongSelf ||
-                ![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:delayedHostWindow status:@"窗口变化停止"]) {
-                return;
-            }
-            UIWindow *nextHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:delayedHostWindow];
-            [strongSelf runTaskAtIndex:index + 1 inWindow:nextHostWindow generation:runGeneration];
-        });
-    });
+    [_taskEngine runTaskAtIndex:index host:hostWindow generation:runGeneration];
 }
 
 - (void)clearColorPickPixelData {
@@ -13638,142 +12916,29 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return index == 0 ? @"点击点" : [NSString stringWithFormat:@"校验%lu", (unsigned long)index];
 }
 
-- (void)removeColorPickMarkers {
-    if (!_colorPickImageView) {
-        return;
-    }
-    for (NSUInteger index = 0; index < AnClickColorPickMaxSamples; index++) {
-        [[_colorPickImageView viewWithTag:AnClickColorPickMarkerTagBase + (NSInteger)index] removeFromSuperview];
-    }
-}
-
-- (void)rebuildColorPickMarkers {
-    if (!_colorPickImageView) {
-        return;
-    }
-
-    [self removeColorPickMarkers];
-    CGFloat zoomScale = MAX(0.01, _colorPickScrollView.zoomScale);
-    for (NSUInteger index = 0; index < _pendingColorPickSamples.count && index < AnClickColorPickMaxSamples; index++) {
-        NSDictionary *sample = _pendingColorPickSamples[index];
-        if (![sample[@"x"] respondsToSelector:@selector(doubleValue)] ||
-            ![sample[@"y"] respondsToSelector:@selector(doubleValue)]) {
-            continue;
-        }
-
-        BOOL selected = _selectedColorPickSampleIndex == (NSInteger)index;
-        CGFloat markerSize = (selected ? 20.0 : (index == 0 ? 18.0 : 15.0)) / zoomScale;
-        UIView *marker = [[UIView alloc] initWithFrame:CGRectMake(0, 0, markerSize, markerSize)];
-        marker.tag = AnClickColorPickMarkerTagBase + (NSInteger)index;
-        marker.userInteractionEnabled = NO;
-        marker.backgroundColor = UIColor.clearColor;
-        marker.layer.cornerRadius = markerSize * 0.5;
-        marker.layer.borderWidth = MAX(0.8, (selected ? 2.0 : 1.2) / zoomScale);
-        marker.layer.borderColor = (selected ? UIColor.systemRedColor : (index == 0 ? [self themeHighlightColor] : UIColor.systemGreenColor)).CGColor;
-        marker.layer.shadowColor = UIColor.blackColor.CGColor;
-        marker.layer.shadowOpacity = 0.28;
-        marker.layer.shadowRadius = 1.0 / zoomScale;
-        marker.layer.shadowOffset = CGSizeZero;
-        marker.center = CGPointMake([sample[@"x"] doubleValue], [sample[@"y"] doubleValue]);
-
-        UILabel *numberLabel = [[UILabel alloc] initWithFrame:marker.bounds];
-        numberLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)index + 1];
-        numberLabel.textColor = UIColor.blackColor;
-        numberLabel.textAlignment = NSTextAlignmentCenter;
-        numberLabel.font = [UIFont monospacedDigitSystemFontOfSize:MAX(5.0, 9.0 / zoomScale) weight:UIFontWeightHeavy];
-        numberLabel.backgroundColor = selected ? UIColor.systemRedColor : (index == 0 ? [self themeHighlightColor] : UIColor.systemGreenColor);
-        numberLabel.layer.cornerRadius = markerSize * 0.5;
-        numberLabel.clipsToBounds = YES;
-        numberLabel.userInteractionEnabled = NO;
-        [marker addSubview:numberLabel];
-        [_colorPickImageView addSubview:marker];
-    }
-}
-
-- (void)rebuildColorPickList {
-    if (!_colorPickListView) {
-        return;
-    }
-
-    for (UIView *view in _colorPickListView.subviews) {
-        [view removeFromSuperview];
-    }
-
-    CGFloat rowHeight = 34.0;
-    CGFloat gap = 5.0;
-    CGFloat width = MAX(1.0, _colorPickListView.bounds.size.width);
-    for (NSUInteger index = 0; index < _pendingColorPickSamples.count; index++) {
-        NSDictionary *sample = _pendingColorPickSamples[index];
-        BOOL selected = _selectedColorPickSampleIndex == (NSInteger)index;
-        UIButton *row = [UIButton buttonWithType:UIButtonTypeSystem];
-        row.tag = AnClickColorPickRowTagBase + (NSInteger)index;
-        row.frame = CGRectMake(0.0, (rowHeight + gap) * index, width, rowHeight);
-        row.backgroundColor = selected
-            ? [[self themeHighlightColor] colorWithAlphaComponent:0.12]
-            : [[self themeSurfaceColor] colorWithAlphaComponent:0.90];
-        row.layer.cornerRadius = 8.0;
-        row.layer.borderWidth = 1;
-        row.layer.borderColor = (selected
-            ? [[self themeHighlightColor] colorWithAlphaComponent:0.62]
-            : [[self themeSeparatorColor] colorWithAlphaComponent:0.82]).CGColor;
-        row.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
-        row.contentEdgeInsets = UIEdgeInsetsMake(0, 38, 0, 8);
-        row.titleLabel.font = [UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightSemibold];
-        row.titleLabel.adjustsFontSizeToFitWidth = YES;
-        row.titleLabel.minimumScaleFactor = 0.62;
-        [row setTitleColor:[self themePrimaryTextColor] forState:UIControlStateNormal];
-        [row addTarget:self action:@selector(handleColorPickRowTap:) forControlEvents:UIControlEventTouchUpInside];
-
-        NSInteger red = [sample[@"red"] integerValue];
-        NSInteger green = [sample[@"green"] integerValue];
-        NSInteger blue = [sample[@"blue"] integerValue];
-        NSString *hex = [self colorHexStringForSample:sample];
-        NSString *role = [self colorPickRoleForIndex:index];
-        NSString *coord = [self colorPickSampleHasCoordinate:sample]
-            ? [NSString stringWithFormat:@"X%.0f Y%.0f", [sample[@"x"] doubleValue], [sample[@"y"] doubleValue]]
-            : @"旧颜色";
-        [row setTitle:[NSString stringWithFormat:@"%lu %@ %@ %@", (unsigned long)index + 1, role, hex, coord]
-             forState:UIControlStateNormal];
-
-        UIView *swatch = [[UIView alloc] initWithFrame:CGRectMake(10, 8, 18, 18)];
-        swatch.userInteractionEnabled = NO;
-        swatch.backgroundColor = [UIColor colorWithRed:MIN(255, MAX(0, red)) / 255.0
-                                                 green:MIN(255, MAX(0, green)) / 255.0
-                                                  blue:MIN(255, MAX(0, blue)) / 255.0
-                                                 alpha:1.0];
-        swatch.layer.cornerRadius = 4;
-        swatch.layer.borderWidth = 1;
-        swatch.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.90].CGColor;
-        [row addSubview:swatch];
-        [_colorPickListView addSubview:row];
-    }
-
-    CGFloat contentHeight = _pendingColorPickSamples.count == 0 ? 0.0 : (rowHeight + gap) * _pendingColorPickSamples.count - gap;
-    _colorPickListView.contentSize = CGSizeMake(width, contentHeight);
-    _colorPickListView.hidden = _pendingColorPickSamples.count == 0;
-    _colorPickDeleteButton.enabled = _pendingColorPickSamples.count > 0;
-    _colorPickDeleteButton.alpha = _pendingColorPickSamples.count > 0 ? 1.0 : 0.45;
+- (void)refreshColorPickOverlaySamples {
+    [_colorPickOverlay updateSamples:_pendingColorPickSamples selectedIndex:_selectedColorPickSampleIndex];
 }
 
 - (void)refreshColorPickInfoLabelWithLastSample:(NSDictionary *)lastSample {
     NSDictionary *sample = lastSample ?: (_selectedColorPickSampleIndex >= 0 && _selectedColorPickSampleIndex < (NSInteger)_pendingColorPickSamples.count
         ? _pendingColorPickSamples[(NSUInteger)_selectedColorPickSampleIndex]
         : _pendingColorPickSamples.lastObject);
-    if (!_colorPickInfoLabel) {
+    if (!_colorPickOverlay) {
         return;
     }
     NSDictionary *previewSample = _pendingColorPickSamples.firstObject ?: sample;
     if (previewSample) {
-        _colorPickSwatchView.backgroundColor = [self uiColorForColorSample:previewSample fallback:[UIColor colorWithWhite:1 alpha:0.10]];
+        _colorPickOverlay.swatchColor = [self uiColorForColorSample:previewSample fallback:[UIColor colorWithWhite:1 alpha:0.10]];
     }
     if (!sample) {
-        _colorPickInfoLabel.text = @"第1点为点击坐标";
-        _colorPickSwatchView.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+        _colorPickOverlay.infoText = @"第1点为点击坐标";
+        _colorPickOverlay.swatchColor = [UIColor colorWithWhite:1 alpha:0.10];
         return;
     }
     if (![sample[@"x"] respondsToSelector:@selector(doubleValue)] ||
         ![sample[@"y"] respondsToSelector:@selector(doubleValue)]) {
-        _colorPickInfoLabel.text = @"旧颜色 点截图重设";
+        _colorPickOverlay.infoText = @"旧颜色 点截图重设";
         return;
     }
 
@@ -13785,37 +12950,35 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         displayIndex = _pendingColorPickSamples.count > 0 ? _pendingColorPickSamples.count - 1 : 0;
     }
     NSString *actionText = _selectedColorPickSampleIndex >= 0 ? @"已选中 点击截图修改" : @"点截图继续新增";
-    _colorPickInfoLabel.text = [NSString stringWithFormat:@"%lu点 %@ %@ X%.0f Y%.0f #%02lX%02lX%02lX",
-                                (unsigned long)_pendingColorPickSamples.count,
-                                [self colorPickRoleForIndex:displayIndex],
-                                actionText,
-                                [sample[@"x"] doubleValue],
-                                [sample[@"y"] doubleValue],
-                                (long)red,
-                                (long)green,
-                                (long)blue];
+    _colorPickOverlay.infoText = [NSString stringWithFormat:@"%lu点 %@ %@ X%.0f Y%.0f #%02lX%02lX%02lX",
+                                  (unsigned long)_pendingColorPickSamples.count,
+                                  [self colorPickRoleForIndex:displayIndex],
+                                  actionText,
+                                  [sample[@"x"] doubleValue],
+                                  [sample[@"y"] doubleValue],
+                                  (long)red,
+                                  (long)green,
+                                  (long)blue];
 }
 
-- (void)handleColorPickRowTap:(UIButton *)button {
-    NSInteger index = button.tag - AnClickColorPickRowTagBase;
-    if (index < 0 || index >= (NSInteger)_pendingColorPickSamples.count) {
+- (void)selectColorPickSampleAtIndex:(NSUInteger)index {
+    if (index >= _pendingColorPickSamples.count) {
         return;
     }
-    _selectedColorPickSampleIndex = index;
+    _selectedColorPickSampleIndex = (NSInteger)index;
     NSDictionary *sample = _pendingColorPickSamples[(NSUInteger)index];
     if ([self colorPickSampleHasCoordinate:sample]) {
         _pendingColorPickPoint = CGPointMake([sample[@"x"] doubleValue], [sample[@"y"] doubleValue]);
         _hasPendingColorPickPoint = YES;
         [self updateColorPickCursorAtImagePoint:_pendingColorPickPoint];
     }
-    [self rebuildColorPickMarkers];
-    [self rebuildColorPickList];
+    [self refreshColorPickOverlaySamples];
     [self refreshColorPickInfoLabelWithLastSample:sample];
 }
 
 - (void)deleteSelectedColorPickSample {
     if (_pendingColorPickSamples.count == 0) {
-        _colorPickInfoLabel.text = @"没有可删点";
+        _colorPickOverlay.infoText = @"没有可删点";
         return;
     }
 
@@ -13834,10 +12997,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self updateColorPickCursorAtImagePoint:_pendingColorPickPoint];
     } else {
         _hasPendingColorPickPoint = NO;
-        _colorPickCursorView.hidden = YES;
+        [_colorPickOverlay hideCursor];
     }
-    [self rebuildColorPickMarkers];
-    [self rebuildColorPickList];
+    [self refreshColorPickOverlaySamples];
     [self refreshColorPickInfoLabelWithLastSample:sample];
 }
 
@@ -13850,15 +13012,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
+    [_pickerService cancelPendingCaptures];
     [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
     __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [_pickerService captureAfterDelay:0.12 completion:^(UIImage *image, UIWindow *capturedWindow) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) {
             return;
         }
-        UIWindow *capturedWindow = nil;
-        UIImage *image = [AnClickCore captureCurrentWindowImageWithWindow:&capturedWindow];
         if (!image.CGImage) {
             strongSelf->_branchColorPickActive = NO;
             strongSelf->_branchColorPickMode = AnClickActionModeNone;
@@ -13867,7 +13028,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return;
         }
         UIWindow *overlayWindow = capturedWindow ?: hostWindow;
-        if (![strongSelf capturedImage:image matchesWindow:overlayWindow]) {
+        if (![strongSelf->_pickerService capturedImage:image matchesWindow:overlayWindow]) {
             strongSelf->_branchColorPickActive = NO;
             strongSelf->_branchColorPickMode = AnClickActionModeNone;
             strongSelf->_statusLabel.text = @"截图方向异常 请重试";
@@ -13876,7 +13037,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return;
         }
         [strongSelf showColorPickOverlayWithImage:image hostWindow:overlayWindow];
-    });
+    }];
 }
 
 - (void)beginSuccessBranchColorPicking {
@@ -13910,8 +13071,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)showColorPickOverlayWithImage:(UIImage *)image hostWindow:(UIWindow *)hostWindow {
-    [_colorPickWindow removeFromSuperview];
-    _colorPickWindow.hidden = YES;
+    _colorPickOverlay.delegate = nil;
+    [_colorPickOverlay removeFromSuperview];
+    [_pickerService dismissOverlayWindow:_colorPickWindow];
     _colorPickImage = image;
     _pendingColorPickSamples = [NSMutableArray array];
     _hasPendingColorPickPoint = NO;
@@ -13921,115 +13083,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    _colorPickWindow = [[UIWindow alloc] initWithFrame:[self screenBoundsForWindow:hostWindow]];
-    if (@available(iOS 13.0, *)) {
-        _colorPickWindow.windowScene = hostWindow.windowScene ?: [self activeWindowScene];
-    }
-    _colorPickWindow.windowLevel = UIWindowLevelAlert + 2100;
-    _colorPickWindow.backgroundColor = UIColor.blackColor;
-    _colorPickWindow.rootViewController = [[UIViewController alloc] init];
+    _colorPickWindow = [_pickerService overlayWindowForHostWindow:hostWindow levelOffset:2100.0];
 
     UIView *root = _colorPickWindow.rootViewController.view;
-    root.backgroundColor = UIColor.blackColor;
-
-    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:root.bounds];
-    scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    scrollView.delegate = self;
-    scrollView.backgroundColor = UIColor.blackColor;
-    scrollView.minimumZoomScale = 1.0;
-    scrollView.maximumZoomScale = 8.0;
-    scrollView.showsHorizontalScrollIndicator = NO;
-    scrollView.showsVerticalScrollIndicator = NO;
-    [root addSubview:scrollView];
-    _colorPickScrollView = scrollView;
-
-    UIImageView *imageView = [[UIImageView alloc] initWithImage:image];
-    imageView.frame = CGRectMake(0, 0, image.size.width, image.size.height);
-    imageView.userInteractionEnabled = YES;
-    [scrollView addSubview:imageView];
-    _colorPickImageView = imageView;
-    scrollView.contentSize = imageView.bounds.size;
-
-    CGFloat minZoom = MIN(root.bounds.size.width / MAX(1.0, image.size.width),
-                          root.bounds.size.height / MAX(1.0, image.size.height));
-    minZoom = MIN(MAX(minZoom, 0.25), 1.0);
-    scrollView.minimumZoomScale = minZoom;
-    scrollView.zoomScale = minZoom;
-    [self centerColorPickImageContent];
-
-    UIView *cursor = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 9, 9)];
-    cursor.backgroundColor = UIColor.systemYellowColor;
-    cursor.layer.cornerRadius = 4.5;
-    cursor.layer.borderWidth = 1.0;
-    cursor.layer.borderColor = UIColor.blackColor.CGColor;
-    cursor.layer.shadowColor = UIColor.blackColor.CGColor;
-    cursor.layer.shadowOpacity = 0.55;
-    cursor.layer.shadowRadius = 1.0;
-    cursor.layer.shadowOffset = CGSizeZero;
-    cursor.hidden = YES;
-    cursor.userInteractionEnabled = NO;
-    [imageView addSubview:cursor];
-    _colorPickCursorView = cursor;
-
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleColorPickTap:)];
-    [imageView addGestureRecognizer:tap];
-
-    UIScrollView *listView = [[UIScrollView alloc] initWithFrame:CGRectZero];
-    listView.backgroundColor = [[self themeSurfaceColor] colorWithAlphaComponent:0.86];
-    listView.layer.cornerRadius = 12.0;
-    listView.layer.borderWidth = 1;
-    listView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72].CGColor;
-    listView.clipsToBounds = YES;
-    listView.showsVerticalScrollIndicator = YES;
-    listView.hidden = YES;
-    [root addSubview:listView];
-    _colorPickListView = listView;
-
-    UIView *toolbar = [[UIView alloc] initWithFrame:CGRectZero];
-    toolbar.backgroundColor = [[self themeSurfaceColor] colorWithAlphaComponent:0.90];
-    toolbar.layer.cornerRadius = 12.0;
-    toolbar.layer.borderWidth = 1;
-    toolbar.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72].CGColor;
-    toolbar.layer.shadowColor = UIColor.blackColor.CGColor;
-    toolbar.layer.shadowOffset = CGSizeMake(0, 4);
-    toolbar.layer.shadowRadius = 14.0;
-    toolbar.layer.shadowOpacity = 0.16;
-    toolbar.clipsToBounds = NO;
-    [root addSubview:toolbar];
-    _colorPickToolbar = toolbar;
-
-    _colorPickSwatchView = [[UIView alloc] initWithFrame:CGRectZero];
-    _colorPickSwatchView.layer.cornerRadius = 6.0;
-    _colorPickSwatchView.layer.borderWidth = 1;
-    _colorPickSwatchView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.92].CGColor;
-    [toolbar addSubview:_colorPickSwatchView];
-
-    _colorPickInfoLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    _colorPickInfoLabel.textColor = [self themePrimaryTextColor];
-    _colorPickInfoLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightSemibold];
-    _colorPickInfoLabel.adjustsFontSizeToFitWidth = YES;
-    _colorPickInfoLabel.minimumScaleFactor = 0.6;
-    _colorPickInfoLabel.text = @"双指查看截图后点选颜色";
-    [toolbar addSubview:_colorPickInfoLabel];
-
-    UIButton *deleteButton = [self pointPickButtonWithTitle:@"删点" action:@selector(deleteSelectedColorPickSample)];
-    deleteButton.tag = 4103;
-    deleteButton.enabled = NO;
-    deleteButton.alpha = 0.45;
-    [toolbar addSubview:deleteButton];
-    _colorPickDeleteButton = deleteButton;
-
-    UIButton *confirmButton = [self pointPickButtonWithTitle:@"确定" action:@selector(confirmColorPicking)];
-    confirmButton.tag = 4101;
-    [toolbar addSubview:confirmButton];
-    UIButton *cancelButton = [self pointPickButtonWithTitle:@"取消" action:@selector(cancelColorPicking)];
-    cancelButton.tag = 4102;
-    [toolbar addSubview:cancelButton];
+    _colorPickOverlay = [[AnClickColorPickerView alloc] initWithFrame:root.bounds
+                                                                 image:image
+                                                          surfaceColor:[self themeSurfaceColor]
+                                                        separatorColor:[self themeSeparatorColor]
+                                                      primaryTextColor:[self themePrimaryTextColor]
+                                                      controlFillColor:[self themeControlFillColor]
+                                                        highlightColor:[self themeHighlightColor]
+                                                           dangerColor:[self themeDangerColor]];
+    _colorPickOverlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    _colorPickOverlay.delegate = self;
+    [root addSubview:_colorPickOverlay];
 
     _selectedColorPickSampleIndex = -1;
-    [self layoutColorPickToolbar];
-    [self rebuildColorPickMarkers];
-    [self rebuildColorPickList];
+    [self refreshColorPickOverlaySamples];
     NSDictionary *displaySample = _selectedColorPickSampleIndex >= 0
         ? _pendingColorPickSamples[(NSUInteger)_selectedColorPickSampleIndex]
         : _pendingColorPickSamples.lastObject;
@@ -14049,147 +13119,24 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _statusLabel.text = @"截图取色";
 }
 
-- (void)layoutColorPickToolbar {
-    if (!_colorPickToolbar || !_colorPickWindow) {
-        return;
-    }
-
-    UIView *root = _colorPickWindow.rootViewController.view;
-    UIEdgeInsets safeInsets = [self overlaySafeAreaInsetsForView:root window:_colorPickWindow];
-    CGFloat margin = 8.0;
-    CGFloat toolbarHeight = 52.0;
-    CGFloat availableWidth = MAX(1.0, root.bounds.size.width - safeInsets.left - safeInsets.right - margin * 2.0);
-    CGFloat toolbarWidth = MIN(availableWidth, 390.0);
-    CGFloat toolbarX = safeInsets.left + (availableWidth - toolbarWidth) * 0.5 + margin;
-    CGFloat toolbarY = root.bounds.size.height - safeInsets.bottom - toolbarHeight - margin;
-    toolbarY = MAX(safeInsets.top + margin, toolbarY);
-    _colorPickToolbar.frame = CGRectMake(toolbarX,
-                                         toolbarY,
-                                         toolbarWidth,
-                                         toolbarHeight);
-
-    CGFloat listMaxHeight = MIN(168.0, MAX(0.0, toolbarY - safeInsets.top - margin * 2.0));
-    CGFloat rowHeight = 34.0;
-    CGFloat rowGap = 5.0;
-    CGFloat wantedListHeight = _pendingColorPickSamples.count == 0
-        ? 0.0
-        : MIN(listMaxHeight, (rowHeight + rowGap) * _pendingColorPickSamples.count - rowGap + 12.0);
-    _colorPickListView.frame = CGRectMake(toolbarX,
-                                          toolbarY - wantedListHeight - 6.0,
-                                          toolbarWidth,
-                                          wantedListHeight);
-
-    CGFloat swatchSize = MIN(34.0, MAX(24.0, toolbarWidth * 0.18));
-    _colorPickSwatchView.frame = CGRectMake(10.0, (toolbarHeight - swatchSize) * 0.5, swatchSize, swatchSize);
-    CGFloat buttonWidth = MIN(56.0, MAX(0.0, floor((toolbarWidth - margin * 4.0) / 3.0)));
-    CGFloat buttonHeight = 34.0;
-    CGFloat buttonY = (toolbarHeight - buttonHeight) * 0.5;
-    UIButton *cancelButton = (UIButton *)[_colorPickToolbar viewWithTag:4102];
-    UIButton *confirmButton = (UIButton *)[_colorPickToolbar viewWithTag:4101];
-    UIButton *deleteButton = (UIButton *)[_colorPickToolbar viewWithTag:4103];
-    cancelButton.frame = CGRectMake(toolbarWidth - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
-    confirmButton.frame = CGRectMake(CGRectGetMinX(cancelButton.frame) - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
-    deleteButton.frame = CGRectMake(CGRectGetMinX(confirmButton.frame) - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
-    [self updateButtonShadowPath:cancelButton];
-    [self updateButtonShadowPath:confirmButton];
-    [self updateButtonShadowPath:deleteButton];
-    CGFloat infoX = CGRectGetMaxX(_colorPickSwatchView.frame) + 8.0;
-    CGFloat infoWidth = MAX(0.0, CGRectGetMinX(deleteButton.frame) - infoX - 8.0);
-    _colorPickInfoLabel.frame = CGRectMake(infoX,
-                                           0,
-                                           infoWidth,
-                                           toolbarHeight);
-    [self rebuildColorPickList];
-}
-
-- (void)centerColorPickImageContent {
-    if (!_colorPickScrollView || !_colorPickImageView) {
-        return;
-    }
-    CGSize boundsSize = _colorPickScrollView.bounds.size;
-    CGRect frame = _colorPickImageView.frame;
-    frame.origin.x = frame.size.width < boundsSize.width ? (boundsSize.width - frame.size.width) * 0.5 : 0;
-    frame.origin.y = frame.size.height < boundsSize.height ? (boundsSize.height - frame.size.height) * 0.5 : 0;
-    _colorPickImageView.frame = frame;
-}
-
-- (UIView *)viewForZoomingInScrollView:(UIScrollView *)scrollView {
-    if (scrollView == _captureScrollView) {
-        return _captureImageView;
-    }
-    if (scrollView == _pointPickScrollView) {
-        return _pointPickImageView;
-    }
-    if (scrollView == _colorPickScrollView) {
-        return _colorPickImageView;
-    }
-    return nil;
-}
-
-- (void)scrollViewDidZoom:(UIScrollView *)scrollView {
-    if (scrollView == _captureScrollView) {
-        [self centerCaptureImageContent];
-        [self layoutCaptureActionButtonsAvoidingSelection];
-        return;
-    }
-    if (scrollView == _pointPickScrollView) {
-        [self centerPointPickImageContent];
-        if (_hasPendingPointPickPoint) {
-            [self updatePointPickCursor];
-        }
-        if (_actionMode == AnClickActionModeSwipe && _hasManualSwipeAnchor) {
-            [self showPointPickSwipeStartMarker];
-        }
-        return;
-    }
-    if (scrollView == _colorPickScrollView) {
-        [self centerColorPickImageContent];
-        if (_hasPendingColorPickPoint) {
-            [self updateColorPickCursorAtImagePoint:_pendingColorPickPoint];
-        }
-        [self rebuildColorPickMarkers];
-    }
-}
-
-- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
-    if (scrollView == _captureScrollView) {
-        [self layoutCaptureActionButtonsAvoidingSelection];
-        return;
-    }
-    if (scrollView == _pointPickScrollView) {
-        [self layoutPointPickToolbar];
-        return;
-    }
-}
-
 - (void)updateColorPickCursorAtImagePoint:(CGPoint)point {
-    if (!_colorPickCursorView) {
+    if (!_colorPickOverlay) {
         return;
     }
-
-    CGFloat zoomScale = MAX(0.01, _colorPickScrollView.zoomScale);
-    CGFloat cursorSize = 9.0 / zoomScale;
-    _colorPickCursorView.bounds = CGRectMake(0, 0, cursorSize, cursorSize);
-    _colorPickCursorView.center = point;
-    _colorPickCursorView.layer.cornerRadius = cursorSize * 0.5;
-    _colorPickCursorView.layer.borderWidth = 1.0 / zoomScale;
-    _colorPickCursorView.layer.shadowRadius = 1.0 / zoomScale;
-    _colorPickCursorView.hidden = NO;
+    [_colorPickOverlay showCursorAtImagePoint:point];
 }
 
-- (void)handleColorPickTap:(UITapGestureRecognizer *)recognizer {
-    if (recognizer.state != UIGestureRecognizerStateEnded || !_colorPickImage) {
+- (void)handleColorPickImagePoint:(CGPoint)point {
+    if (!_colorPickImage) {
         return;
     }
-    CGPoint point = [recognizer locationInView:_colorPickImageView];
-    point.x = MIN(MAX(point.x, 0.0), _colorPickImage.size.width);
-    point.y = MIN(MAX(point.y, 0.0), _colorPickImage.size.height);
+    point = [_colorPickOverlay clampedImagePoint:point];
 
     NSInteger red = 0;
     NSInteger green = 0;
     NSInteger blue = 0;
     if (![self sampleColorAtImagePoint:point image:_colorPickImage red:&red green:&green blue:&blue]) {
-        _colorPickInfoLabel.text = @"取色失败";
+        _colorPickOverlay.infoText = @"取色失败";
         return;
     }
 
@@ -14204,7 +13151,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSInteger editIndex = _selectedColorPickSampleIndex;
     BOOL editingExistingPoint = editIndex >= 0 && editIndex < (NSInteger)_pendingColorPickSamples.count;
     if (!editingExistingPoint && _pendingColorPickSamples.count >= AnClickColorPickMaxSamples) {
-        _colorPickInfoLabel.text = [NSString stringWithFormat:@"最多支持%lu点", (unsigned long)AnClickColorPickMaxSamples];
+        _colorPickOverlay.infoText = [NSString stringWithFormat:@"最多支持%lu点", (unsigned long)AnClickColorPickMaxSamples];
         return;
     }
 
@@ -14224,20 +13171,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _pendingColorBlue = blue;
     _hasPendingColorPickPoint = YES;
     [self updateColorPickCursorAtImagePoint:point];
-    [self rebuildColorPickMarkers];
-    [self rebuildColorPickList];
+    [self refreshColorPickOverlaySamples];
     [self refreshColorPickInfoLabelWithLastSample:displaySample];
     BOOL sampledWhite = red >= 245 && green >= 245 && blue >= 245;
     NSDictionary *primarySample = _pendingColorPickSamples.firstObject ?: sample;
-    _colorPickSwatchView.backgroundColor = [self uiColorForColorSample:primarySample fallback:[UIColor colorWithWhite:1 alpha:0.10]];
-    _colorPickInfoLabel.text = [NSString stringWithFormat:@"%@ 主色%@ 当前#%02lX%02lX%02lX  X%.0f Y%.0f",
-                                sampledWhite ? @"采样白色 截图可能白底" : @"采样",
-                                [self colorHexStringForSample:primarySample],
-                                (long)red,
-                                (long)green,
-                                (long)blue,
-                                point.x,
-                                point.y];
+    _colorPickOverlay.swatchColor = [self uiColorForColorSample:primarySample fallback:[UIColor colorWithWhite:1 alpha:0.10]];
+    _colorPickOverlay.infoText = [NSString stringWithFormat:@"%@ 主色%@ 当前#%02lX%02lX%02lX  X%.0f Y%.0f",
+                                  sampledWhite ? @"采样白色 截图可能白底" : @"采样",
+                                  [self colorHexStringForSample:primarySample],
+                                  (long)red,
+                                  (long)green,
+                                  (long)blue,
+                                  point.x,
+                                  point.y];
     NSLog(@"[AnClick] Color pick sample #%02lX%02lX%02lX point=(%.1f, %.1f) image=(%.1f, %.1f) scale=%.2f",
           (long)red,
           (long)green,
@@ -14249,17 +13195,32 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
           _colorPickImage.scale);
 }
 
+- (void)colorPickerView:(__unused AnClickColorPickerView *)view didTapImagePoint:(CGPoint)point {
+    [self handleColorPickImagePoint:point];
+}
+
+- (void)colorPickerView:(__unused AnClickColorPickerView *)view didSelectSampleAtIndex:(NSUInteger)index {
+    [self selectColorPickSampleAtIndex:index];
+}
+
+- (void)colorPickerViewDidDeleteSample:(__unused AnClickColorPickerView *)view {
+    [self deleteSelectedColorPickSample];
+}
+
+- (void)colorPickerViewDidConfirm:(__unused AnClickColorPickerView *)view {
+    [self confirmColorPicking];
+}
+
+- (void)colorPickerViewDidCancel:(__unused AnClickColorPickerView *)view {
+    [self cancelColorPicking];
+}
+
 - (void)finishColorPickingOverlay {
-    _colorPickWindow.hidden = YES;
+    _colorPickOverlay.delegate = nil;
+    [_colorPickOverlay removeFromSuperview];
+    _colorPickOverlay = nil;
+    [_pickerService dismissOverlayWindow:_colorPickWindow];
     _colorPickWindow = nil;
-    _colorPickScrollView = nil;
-    _colorPickImageView = nil;
-    _colorPickCursorView = nil;
-    _colorPickToolbar = nil;
-    _colorPickListView = nil;
-    _colorPickInfoLabel = nil;
-    _colorPickSwatchView = nil;
-    _colorPickDeleteButton = nil;
     _colorPickImage = nil;
     _pendingColorPickSamples = [NSMutableArray array];
     _selectedColorPickSampleIndex = -1;
@@ -14272,7 +13233,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)confirmColorPicking {
     if (_pendingColorPickSamples.count == 0) {
-        _colorPickInfoLabel.text = @"先点选颜色";
+        _colorPickOverlay.infoText = @"先点选颜色";
         return;
     }
     if (_branchColorPickActive) {
@@ -14315,29 +13276,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)beginScreenPointPickingWithHostWindow:(UIWindow *)hostWindow {
+    [_pickerService cancelPendingCaptures];
     [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
     __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [_pickerService captureAfterDelay:0.12 completion:^(UIImage *image, UIWindow *capturedWindow) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) {
             return;
         }
-        UIWindow *capturedWindow = nil;
-        UIImage *image = [AnClickCore captureCurrentWindowImageWithWindow:&capturedWindow];
         if (!image.CGImage) {
             strongSelf->_statusLabel.text = @"截图失败";
             [strongSelf restorePanelAfterExternalTap];
             return;
         }
         UIWindow *overlayWindow = capturedWindow ?: hostWindow;
-        if (![strongSelf capturedImage:image matchesWindow:overlayWindow]) {
+        if (![strongSelf->_pickerService capturedImage:image matchesWindow:overlayWindow]) {
             strongSelf->_statusLabel.text = @"截图方向异常 请重试";
             [strongSelf showToast:strongSelf->_statusLabel.text];
             [strongSelf restorePanelAfterExternalTap];
             return;
         }
         [strongSelf showPointPickOverlayWithImage:image hostWindow:overlayWindow];
-    });
+    }];
 }
 
 - (void)beginFailureActionPointPicking {
@@ -14422,125 +13382,25 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)showPointPickOverlayWithImage:(UIImage *)image hostWindow:(UIWindow *)hostWindow {
+    _pointPickOverlay.delegate = nil;
     [_pointPickOverlay removeFromSuperview];
-    _pointPickWindow.hidden = YES;
+    [_pickerService dismissOverlayWindow:_pointPickWindow];
     _pointPickSnapshot = image;
     _pointPickHostWindow = hostWindow;
 
-    _pointPickWindow = [[UIWindow alloc] initWithFrame:[self screenBoundsForWindow:hostWindow]];
-    if (@available(iOS 13.0, *)) {
-        _pointPickWindow.windowScene = hostWindow.windowScene ?: [self activeWindowScene];
-    }
-    _pointPickWindow.windowLevel = UIWindowLevelAlert + 2000;
-    _pointPickWindow.backgroundColor = UIColor.blackColor;
-    _pointPickWindow.rootViewController = [[UIViewController alloc] init];
-    _pointPickWindow.rootViewController.view.frame = _pointPickWindow.bounds;
-    _pointPickWindow.rootViewController.view.backgroundColor = UIColor.blackColor;
-
-    UIView *overlay = [[UIView alloc] initWithFrame:_pointPickWindow.rootViewController.view.bounds];
-    overlay.backgroundColor = UIColor.blackColor;
-    overlay.userInteractionEnabled = YES;
-    [_pointPickWindow.rootViewController.view addSubview:overlay];
-    _pointPickOverlay = overlay;
-
-    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:overlay.bounds];
-    scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    scrollView.delegate = self;
-    scrollView.backgroundColor = UIColor.blackColor;
-    scrollView.minimumZoomScale = 1.0;
-    scrollView.maximumZoomScale = 8.0;
-    scrollView.showsHorizontalScrollIndicator = NO;
-    scrollView.showsVerticalScrollIndicator = NO;
-    scrollView.panGestureRecognizer.minimumNumberOfTouches = 2;
-    [overlay addSubview:scrollView];
-    _pointPickScrollView = scrollView;
-
-    UIImageView *imageView = [[UIImageView alloc] initWithImage:image];
-    imageView.frame = CGRectMake(0, 0, image.size.width, image.size.height);
-    imageView.userInteractionEnabled = YES;
-    [scrollView addSubview:imageView];
-    _pointPickImageView = imageView;
-    scrollView.contentSize = imageView.bounds.size;
-    [self updatePointPickZoomForCurrentBounds];
-    scrollView.zoomScale = scrollView.minimumZoomScale;
-    [self centerPointPickImageContent];
-
-    UIEdgeInsets safeInsets = [self overlaySafeAreaInsetsForView:overlay window:_pointPickWindow];
-    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(12,
-                                                              safeInsets.top + 12.0,
-                                                              overlay.bounds.size.width - 24.0,
-                                                              38.0)];
-    hint.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    hint.text = @"双指缩放移动，单指点选或微调";
-    hint.textColor = UIColor.whiteColor;
-    hint.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    hint.adjustsFontSizeToFitWidth = YES;
-    hint.textAlignment = NSTextAlignmentCenter;
-    [overlay addSubview:hint];
-
-    CGFloat cursorSize = 32.0;
-    UIView *cursor = [[UIView alloc] initWithFrame:CGRectMake(0, 0, cursorSize, cursorSize)];
-    cursor.backgroundColor = UIColor.clearColor;
-    cursor.layer.cornerRadius = cursorSize * 0.5;
-    cursor.layer.borderWidth = 1.25;
-    cursor.layer.borderColor = UIColor.systemYellowColor.CGColor;
-    cursor.userInteractionEnabled = NO;
-    UIView *horizontal = [[UIView alloc] initWithFrame:CGRectMake(6, cursorSize * 0.5 - 0.5, cursorSize - 12, 1)];
-    horizontal.tag = 1;
-    horizontal.backgroundColor = UIColor.systemYellowColor;
-    horizontal.userInteractionEnabled = NO;
-    [cursor addSubview:horizontal];
-    UIView *vertical = [[UIView alloc] initWithFrame:CGRectMake(cursorSize * 0.5 - 0.5, 6, 1, cursorSize - 12)];
-    vertical.tag = 2;
-    vertical.backgroundColor = UIColor.systemYellowColor;
-    vertical.userInteractionEnabled = NO;
-    [cursor addSubview:vertical];
-    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(cursorSize * 0.5 - 2, cursorSize * 0.5 - 2, 4, 4)];
-    dot.tag = 3;
-    dot.backgroundColor = UIColor.systemRedColor;
-    dot.layer.cornerRadius = 2;
-    dot.userInteractionEnabled = NO;
-    [cursor addSubview:dot];
-    [imageView addSubview:cursor];
-    _pointCursorView = cursor;
-
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingTap:)];
-    tap.cancelsTouchesInView = NO;
-    [imageView addGestureRecognizer:tap];
-    UIPanGestureRecognizer *overlayPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePointPickingOverlayPan:)];
-    overlayPan.maximumNumberOfTouches = 1;
-    overlayPan.cancelsTouchesInView = NO;
-    [imageView addGestureRecognizer:overlayPan];
-
-    UIView *toolbar = [[UIView alloc] initWithFrame:CGRectZero];
-    toolbar.backgroundColor = [[self themeSurfaceColor] colorWithAlphaComponent:0.90];
-    toolbar.layer.cornerRadius = 12.0;
-    toolbar.layer.borderWidth = 1;
-    toolbar.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72].CGColor;
-    toolbar.layer.shadowColor = UIColor.blackColor.CGColor;
-    toolbar.layer.shadowOffset = CGSizeMake(0, 4);
-    toolbar.layer.shadowRadius = 14.0;
-    toolbar.layer.shadowOpacity = 0.16;
-    toolbar.clipsToBounds = NO;
-    [overlay addSubview:toolbar];
-    _pointPickToolbar = toolbar;
-
-    _pointCoordinateLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    _pointCoordinateLabel.textColor = [self themePrimaryTextColor];
-    _pointCoordinateLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightSemibold];
-    _pointCoordinateLabel.adjustsFontSizeToFitWidth = YES;
-    _pointCoordinateLabel.minimumScaleFactor = 0.65;
-    [toolbar addSubview:_pointCoordinateLabel];
-
-    UIButton *confirmButton = [self pointPickButtonWithTitle:@"确定" action:@selector(confirmPointPicking)];
-    confirmButton.tag = 1001;
-    [toolbar addSubview:confirmButton];
-
-    UIButton *cancelButton = [self pointPickButtonWithTitle:@"取消" action:@selector(cancelPointPicking)];
-    cancelButton.tag = 1002;
-    [toolbar addSubview:cancelButton];
-
-    _pendingPointPickPoint = [self initialPointPickPointInOverlay:overlay];
+    _pointPickWindow = [_pickerService overlayWindowForHostWindow:hostWindow levelOffset:2000.0];
+    _pendingPointPickPoint = [self initialPointPickPoint];
+    _pointPickOverlay = [[AnClickPointPickerView alloc] initWithFrame:_pointPickWindow.rootViewController.view.bounds
+                                                                 image:image
+                                                          initialPoint:_pendingPointPickPoint
+                                                          surfaceColor:[self themeSurfaceColor]
+                                                        separatorColor:[self themeSeparatorColor]
+                                                      primaryTextColor:[self themePrimaryTextColor]
+                                                      controlFillColor:[self themeControlFillColor]
+                                                        highlightColor:[self themeHighlightColor]];
+    _pointPickOverlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    _pointPickOverlay.delegate = self;
+    [_pointPickWindow.rootViewController.view addSubview:_pointPickOverlay];
     _hasPendingPointPickPoint = YES;
     if (_actionMode == AnClickActionModeSwipe && _pickingSwipeEndPoint && _hasManualSwipeAnchor) {
         [self showPointPickSwipeStartMarker];
@@ -14552,25 +13412,24 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         : (_pickingFailureActionPoint ? @"取失败动作位置" : (_pickingSwipeEndPoint ? @"滑动取终点" : @"拖动取点"));
 }
 
-- (CGPoint)initialPointPickPointInOverlay:(UIView *)overlay {
+- (CGPoint)initialPointPickPoint {
     UIWindow *hostWindow = _pointPickHostWindow;
     if (_actionMode == AnClickActionModeSwipe && _pickingSwipeEndPoint && _hasManualSwipeAnchor && hostWindow) {
-        return [self clampedPointPickPoint:[hostWindow convertPoint:_manualSwipeAnchor fromWindow:nil] inOverlay:overlay];
+        return [self pointPickImagePointFromScreenPoint:_manualSwipeAnchor];
     }
     if (_pickingSuccessActionPoint && _hasSuccessActionPoint && hostWindow) {
-        return [self clampedPointPickPoint:[hostWindow convertPoint:_successActionPoint fromWindow:nil] inOverlay:overlay];
+        return [self pointPickImagePointFromScreenPoint:_successActionPoint];
     }
     if (_pickingFailureActionPoint && _hasFailureActionPoint && hostWindow) {
-        return [self clampedPointPickPoint:[hostWindow convertPoint:_failureActionPoint fromWindow:nil] inOverlay:overlay];
+        return [self pointPickImagePointFromScreenPoint:_failureActionPoint];
     }
     if (_actionMode == AnClickActionModeTwoFingerTap && _multiTapPoints.count > 0 && hostWindow) {
-        return [self clampedPointPickPoint:[hostWindow convertPoint:_multiTapPoints.lastObject.CGPointValue fromWindow:nil] inOverlay:overlay];
+        return [self pointPickImagePointFromScreenPoint:_multiTapPoints.lastObject.CGPointValue];
     }
     if ([self hasManualPointForMode:_actionMode] && hostWindow) {
-        return [self clampedPointPickPoint:[hostWindow convertPoint:_manualActionPoints[(NSUInteger)_actionMode] fromWindow:nil]
-                                  inOverlay:overlay];
+        return [self pointPickImagePointFromScreenPoint:_manualActionPoints[(NSUInteger)_actionMode]];
     }
-    CGRect bounds = _pointPickImageView ? _pointPickImageView.bounds : (overlay ? overlay.bounds : CGRectMake(0, 0, _pointPickSnapshot.size.width, _pointPickSnapshot.size.height));
+    CGRect bounds = CGRectMake(0, 0, _pointPickSnapshot.size.width, _pointPickSnapshot.size.height);
     return CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds));
 }
 
@@ -14590,46 +13449,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [hostWindow convertPoint:point fromWindow:nil];
 }
 
-- (CGPoint)clampedPointPickPoint:(CGPoint)point inOverlay:(UIView *)overlay {
-    CGRect bounds = _pointPickImageView ? _pointPickImageView.bounds : (overlay ? overlay.bounds : CGRectMake(0, 0, _pointPickSnapshot.size.width, _pointPickSnapshot.size.height));
-    point.x = MIN(MAX(point.x, 0.0), bounds.size.width);
-    point.y = MIN(MAX(point.y, 0.0), bounds.size.height);
-    return point;
-}
-
 - (void)updatePointPickCursor {
-    if (!_pointPickImageView || !_pointCursorView || !_hasPendingPointPickPoint) {
+    if (!_pointPickOverlay || !_hasPendingPointPickPoint) {
         return;
     }
-    _pendingPointPickPoint = [self clampedPointPickPoint:_pendingPointPickPoint inOverlay:_pointPickOverlay];
-
-    CGFloat zoomScale = MAX(0.01, _pointPickScrollView.zoomScale);
-    CGFloat cursorSize = 28.0 / zoomScale;
-    _pointCursorView.bounds = CGRectMake(0, 0, cursorSize, cursorSize);
-    _pointCursorView.center = _pendingPointPickPoint;
-    _pointCursorView.layer.cornerRadius = cursorSize * 0.5;
-    _pointCursorView.layer.borderWidth = MAX(0.8, 1.2 / zoomScale);
-
-    UIView *horizontal = [_pointCursorView viewWithTag:1];
-    UIView *vertical = [_pointCursorView viewWithTag:2];
-    UIView *dot = [_pointCursorView viewWithTag:3];
-    CGFloat lineInset = 5.0 / zoomScale;
-    CGFloat lineThickness = MAX(0.8, 1.0 / zoomScale);
-    horizontal.frame = CGRectMake(lineInset,
-                                  cursorSize * 0.5 - lineThickness * 0.5,
-                                  MAX(0.0, cursorSize - lineInset * 2.0),
-                                  lineThickness);
-    vertical.frame = CGRectMake(cursorSize * 0.5 - lineThickness * 0.5,
-                                lineInset,
-                                lineThickness,
-                                MAX(0.0, cursorSize - lineInset * 2.0));
-    CGFloat dotSize = MAX(2.0, 4.0 / zoomScale);
-    dot.frame = CGRectMake((cursorSize - dotSize) * 0.5,
-                           (cursorSize - dotSize) * 0.5,
-                           dotSize,
-                           dotSize);
-    dot.layer.cornerRadius = dotSize * 0.5;
-
+    _pendingPointPickPoint = [_pointPickOverlay clampedImagePoint:_pendingPointPickPoint];
+    _pointPickOverlay.selectedImagePoint = _pendingPointPickPoint;
     CGPoint screenPoint = [self pointPickScreenPointFromImagePoint:_pendingPointPickPoint];
     BOOL pickingCustomClickPoint = _actionMode == AnClickActionModeImage ||
         _actionMode == AnClickActionModeOCR ||
@@ -14646,118 +13471,26 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } else {
         stage = pickingCustomClickPoint ? @"点击点" : [self currentActionName];
     }
-    _pointCoordinateLabel.text = [NSString stringWithFormat:@"%@  X %.0f  Y %.0f",
-                                  stage,
-                                  screenPoint.x,
-                                  screenPoint.y];
-    [self layoutPointPickToolbar];
-}
-
-- (UIButton *)pointPickButtonWithTitle:(NSString *)title action:(SEL)action {
-    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-    [button setTitle:title forState:UIControlStateNormal];
-    BOOL primary = [title isEqualToString:@"确定"];
-    BOOL destructive = [title isEqualToString:@"删点"];
-    UIColor *accentColor = destructive ? [self themeDangerColor] : [self themeHighlightColor];
-    button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-    button.backgroundColor = primary || destructive
-        ? accentColor
-        : [self themeControlFillColor];
-    [button setTitleColor:(primary || destructive ? UIColor.whiteColor : [self themePrimaryTextColor]) forState:UIControlStateNormal];
-    button.layer.cornerRadius = 8.0;
-    button.layer.borderWidth = 1.0;
-    button.layer.borderColor = (primary || destructive
-        ? [accentColor colorWithAlphaComponent:0.86]
-        : [[self themeSeparatorColor] colorWithAlphaComponent:0.82]).CGColor;
-    button.layer.shadowColor = UIColor.blackColor.CGColor;
-    button.layer.shadowOffset = CGSizeMake(0, primary || destructive ? 2 : 1);
-    button.layer.shadowRadius = primary || destructive ? 4.0 : 2.0;
-    button.layer.shadowOpacity = primary || destructive ? 0.12 : 0.04;
-    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
-    return button;
-}
-
-- (void)layoutPointPickToolbar {
-    if (!_pointPickOverlay || !_pointPickToolbar) {
-        return;
-    }
-
-    CGFloat margin = 8.0;
-    CGFloat toolbarHeight = 48.0;
-    UIEdgeInsets safeInsets = [self overlaySafeAreaInsetsForView:_pointPickOverlay window:_pointPickWindow];
-    CGFloat topY = MAX(margin, safeInsets.top + margin);
-    CGFloat bottomY = _pointPickOverlay.bounds.size.height - toolbarHeight - MAX(margin, safeInsets.bottom + margin);
-    bottomY = MAX(topY, bottomY);
-    CGFloat availableWidth = MAX(1.0, _pointPickOverlay.bounds.size.width - safeInsets.left - safeInsets.right - margin * 2.0);
-    CGFloat toolbarWidth = MIN(availableWidth, 360.0);
-    CGFloat x = safeInsets.left + margin + (availableWidth - toolbarWidth) * 0.5;
-    CGPoint overlayPoint = _hasPendingPointPickPoint && _pointPickImageView
-        ? [_pointPickImageView convertPoint:_pendingPointPickPoint toView:_pointPickOverlay]
-        : CGPointMake(CGRectGetMidX(_pointPickOverlay.bounds), CGRectGetMidY(_pointPickOverlay.bounds));
-    BOOL cursorNearBottom = overlayPoint.y > bottomY - 20.0;
-    CGFloat y = cursorNearBottom ? topY : bottomY;
-    _pointPickToolbar.frame = CGRectMake(x, y, toolbarWidth, toolbarHeight);
-
-    CGFloat buttonWidth = MIN(64.0, MAX(0.0, floor((toolbarWidth - margin * 3.0) / 2.0)));
-    CGFloat buttonHeight = 34.0;
-    CGFloat buttonY = (toolbarHeight - buttonHeight) * 0.5;
-    UIButton *confirmButton = (UIButton *)[_pointPickToolbar viewWithTag:1001];
-    UIButton *cancelButton = (UIButton *)[_pointPickToolbar viewWithTag:1002];
-    cancelButton.frame = CGRectMake(toolbarWidth - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
-    confirmButton.frame = CGRectMake(CGRectGetMinX(cancelButton.frame) - margin - buttonWidth, buttonY, buttonWidth, buttonHeight);
-    [self updateButtonShadowPath:cancelButton];
-    [self updateButtonShadowPath:confirmButton];
-    _pointCoordinateLabel.frame = CGRectMake(10, 0, MAX(0.0, CGRectGetMinX(confirmButton.frame) - 18), toolbarHeight);
-}
-
-- (BOOL)pointPickLocationHitsToolbar:(CGPoint)location {
-    return _pointPickToolbar && CGRectContainsPoint(_pointPickToolbar.frame, location);
+    _pointPickOverlay.coordinateText = [NSString stringWithFormat:@"%@  X %.0f  Y %.0f",
+                                        stage,
+                                        screenPoint.x,
+                                        screenPoint.y];
 }
 
 - (void)showPointPickSwipeStartMarker {
-    if (!_pointPickImageView || !_hasManualSwipeAnchor) {
+    if (!_pointPickOverlay || !_hasManualSwipeAnchor) {
         return;
     }
-
-    [[_pointPickImageView viewWithTag:2201] removeFromSuperview];
-    CGFloat zoomScale = MAX(0.01, _pointPickScrollView.zoomScale);
-    CGFloat size = 22.0 / zoomScale;
-    UIView *marker = [[UIView alloc] initWithFrame:CGRectMake(0, 0, size, size)];
-    marker.tag = 2201;
-    marker.center = [self clampedPointPickPoint:[self pointPickImagePointFromScreenPoint:_manualSwipeAnchor] inOverlay:_pointPickOverlay];
-    marker.userInteractionEnabled = NO;
-    marker.backgroundColor = UIColor.clearColor;
-    marker.layer.cornerRadius = size * 0.5;
-    marker.layer.borderWidth = MAX(1.0, 1.8 / zoomScale);
-    marker.layer.borderColor = UIColor.systemGreenColor.CGColor;
-
-    CGFloat dotSize = MAX(2.0, 4.0 / zoomScale);
-    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake((size - dotSize) * 0.5,
-                                                           (size - dotSize) * 0.5,
-                                                           dotSize,
-                                                           dotSize)];
-    dot.backgroundColor = UIColor.systemGreenColor;
-    dot.layer.cornerRadius = dotSize * 0.5;
-    dot.userInteractionEnabled = NO;
-    [marker addSubview:dot];
-    if (_pointCursorView) {
-        [_pointPickImageView insertSubview:marker belowSubview:_pointCursorView];
-    } else {
-        [_pointPickImageView addSubview:marker];
-    }
+    [_pointPickOverlay showStartMarkerAtImagePoint:[self pointPickImagePointFromScreenPoint:_manualSwipeAnchor]];
 }
 
 - (void)finishPointPickingOverlay {
+    _pointPickOverlay.delegate = nil;
     [_pointPickOverlay removeFromSuperview];
     _pointPickOverlay = nil;
-    _pointPickScrollView = nil;
-    _pointPickImageView = nil;
-    _pointCursorView = nil;
-    _pointPickToolbar = nil;
-    _pointCoordinateLabel = nil;
     _pointPickSnapshot = nil;
     _hasPendingPointPickPoint = NO;
-    _pointPickWindow.hidden = YES;
+    [_pickerService dismissOverlayWindow:_pointPickWindow];
     _pointPickWindow = nil;
     _pointPickHostWindow = nil;
     _pickingSwipeEndPoint = NO;
@@ -14773,47 +13506,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _statusLabel.text = @"取消取点";
 }
 
-- (void)handlePointPickingTap:(UITapGestureRecognizer *)recognizer {
-    if (recognizer.state != UIGestureRecognizerStateEnded || !_pointPickImageView) {
-        return;
-    }
-    CGPoint location = [recognizer locationInView:_pointPickImageView];
-    _pendingPointPickPoint = [self clampedPointPickPoint:location inOverlay:_pointPickOverlay];
+- (void)pointPickerView:(AnClickPointPickerView *)view didMoveToImagePoint:(CGPoint)point {
+    _pendingPointPickPoint = [view clampedImagePoint:point];
     _hasPendingPointPickPoint = YES;
     [self updatePointPickCursor];
 }
 
-- (void)handlePointPickingOverlayPan:(UIPanGestureRecognizer *)recognizer {
-    if (!_pointPickImageView) {
-        return;
-    }
-    if (recognizer.state == UIGestureRecognizerStateBegan) {
-        [recognizer setTranslation:CGPointZero inView:_pointPickImageView];
-        return;
-    }
-    if (recognizer.state == UIGestureRecognizerStateChanged ||
-        recognizer.state == UIGestureRecognizerStateEnded) {
-        CGPoint translation = [recognizer translationInView:_pointPickImageView];
-        _pendingPointPickPoint = [self clampedPointPickPoint:CGPointMake(_pendingPointPickPoint.x + translation.x,
-                                                                         _pendingPointPickPoint.y + translation.y)
-                                                  inOverlay:_pointPickOverlay];
-        _hasPendingPointPickPoint = YES;
-        [self updatePointPickCursor];
-        [recognizer setTranslation:CGPointZero inView:_pointPickImageView];
-    }
+- (void)pointPickerViewDidConfirm:(__unused AnClickPointPickerView *)view {
+    [self confirmPointPicking];
 }
 
-- (void)handlePointCursorPan:(UIPanGestureRecognizer *)recognizer {
-    if (!_pointPickImageView) {
-        return;
-    }
-    CGPoint translation = [recognizer translationInView:_pointPickImageView];
-    _pendingPointPickPoint = [self clampedPointPickPoint:CGPointMake(_pendingPointPickPoint.x + translation.x,
-                                                                     _pendingPointPickPoint.y + translation.y)
-                                              inOverlay:_pointPickOverlay];
-    _hasPendingPointPickPoint = YES;
-    [self updatePointPickCursor];
-    [recognizer setTranslation:CGPointZero inView:_pointPickImageView];
+- (void)pointPickerViewDidCancel:(__unused AnClickPointPickerView *)view {
+    [self cancelPointPicking];
 }
 
 - (void)confirmPointPicking {
@@ -14957,6 +13661,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)previewCurrentAction {
     if (![self panelCanUseCurrentScene]) {
         return;
+    }
+    if (!_taskRunActive) {
+        [_recognitionService cancelPendingRequests];
     }
     if (_actionMode == AnClickActionModeNone) {
         _statusLabel.text = @"先选择动作";
@@ -15130,7 +13837,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self hidePanelForScreenInteractionWithHostWindow:hostWindow];
         NSUInteger geometryGeneration = _screenGeometryGeneration;
         __weak typeof(self) weakSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickRecognitionCaptureDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [_taskEngine scheduleRecognitionCaptureWithHost:hostWindow generation:0 delay:AnClickRecognitionCaptureDelay block:^{
             __strong typeof(weakSelf) delayedSelf = weakSelf;
             if (!delayedSelf) {
                 return;
@@ -15140,9 +13847,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                               restorePanel:YES]) {
                 return;
             }
-            dispatch_async([delayedSelf templateSearchQueue], ^{
-                NSDictionary *match = [AnClickCore findColorPatternMatchWithPoints:colorPoints tolerance:tolerance];
-                dispatch_async(dispatch_get_main_queue(), ^{
+            [delayedSelf->_recognitionService findColorPatternMatchWithPoints:colorPoints tolerance:tolerance completion:^(NSDictionary *match) {
                     __strong typeof(weakSelf) strongSelf = weakSelf;
                     if (!strongSelf) {
                         return;
@@ -15169,9 +13874,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                     }
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览识色 %@ %.0f,%.0f", patternSummary, point.x, point.y];
                     [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
-                });
             });
-        });
+        }];
         return;
     }
 
@@ -15393,15 +14097,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self updateLiveTrajectoryInWindow:hostWindow];
 }
 
-- (dispatch_queue_t)templateSearchQueue {
-    static dispatch_queue_t queue;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        queue = dispatch_queue_create(NULL, DISPATCH_QUEUE_SERIAL);
-    });
-    return queue;
-}
-
 - (void)playTemplateTap {
     if (![self panelCanUseCurrentScene]) {
         return;
@@ -15415,7 +14110,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (path.length == 0) {
         path = [self templatePath];
     }
-    UIImage *templateImage = [[NSFileManager defaultManager] fileExistsAtPath:path] ? [UIImage imageWithContentsOfFile:path] : nil;
+    UIImage *templateImage = [self cachedTemplateImageAtPath:path];
     if (!templateImage) {
         _statusLabel.text = @"先截图";
         return;
@@ -15432,7 +14127,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL shouldRestorePanel = [self hideOwnUIForRecognitionCaptureWithHostWindow:hostWindow];
     NSUInteger geometryGeneration = _screenGeometryGeneration;
     __weak typeof(self) weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickRecognitionCaptureDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [_taskEngine scheduleRecognitionCaptureWithHost:hostWindow generation:0 delay:AnClickRecognitionCaptureDelay block:^{
         __strong typeof(weakSelf) delayedSelf = weakSelf;
         if (!delayedSelf) {
             return;
@@ -15444,9 +14139,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [delayedSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
             return;
         }
-        dispatch_async([delayedSelf templateSearchQueue], ^{
-            NSDictionary *match = [AnClickCore findTemplateImageMatch:templateImage threshold:matchThreshold];
-            dispatch_async(dispatch_get_main_queue(), ^{
+        [delayedSelf->_recognitionService findTemplateImageMatch:templateImage threshold:matchThreshold completion:^(NSDictionary *match) {
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) {
                     return;
@@ -15490,9 +14183,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                 NSTimeInterval restoreDelay = MAX([strongSelf durationForTaskMode:strongSelf->_actionMode],
                                                   strongSelf->_actionMode == AnClickActionModeSwipe ? 1.15 : 1.0);
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:restoreDelay + 0.10];
-            });
         });
-    });
+    }];
 }
 
 - (void)testCenterTap {
