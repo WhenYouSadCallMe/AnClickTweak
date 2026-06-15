@@ -1293,6 +1293,10 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindNetworkAddPostPair:
             return mode == AnClickActionModeNetwork &&
                 [[self.model.networkMethod uppercaseString] isEqualToString:@"POST"];
+        case ACEditorRowKindNetworkPostPairBase:
+            return mode == AnClickActionModeNetwork &&
+                [[self.model.networkMethod uppercaseString] isEqualToString:@"POST"] &&
+                self.model.networkPostPairs.count > 0;
         case ACEditorRowKindJumpTarget:
             return mode == AnClickActionModeJump;
         case ACEditorRowKindMacroRecord:
