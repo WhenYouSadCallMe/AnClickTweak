@@ -11626,7 +11626,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 if (completion) {
                     completion(YES);
                 }
-        });
+        }];
     }];
 }
 
@@ -11863,7 +11863,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 if (completion) {
                     completion(YES);
                 }
-        });
+        }];
     }];
 }
 
@@ -12078,7 +12078,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 if (completion) {
                     completion(YES);
                 }
-        });
+        }];
     }];
 }
 
@@ -13874,7 +13874,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     }
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览识色 %@ %.0f,%.0f", patternSummary, point.x, point.y];
                     [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
-            });
+            }];
         }];
         return;
     }
@@ -14183,7 +14183,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 NSTimeInterval restoreDelay = MAX([strongSelf durationForTaskMode:strongSelf->_actionMode],
                                                   strongSelf->_actionMode == AnClickActionModeSwipe ? 1.15 : 1.0);
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:restoreDelay + 0.10];
-        });
+        }];
     }];
 }
 
