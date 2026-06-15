@@ -123,11 +123,21 @@ static const NSUInteger ACColorPickerMaxSamples = 32;
     self.swatchView = swatchView;
 
     UILabel *infoLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    infoLabel.textColor = _primaryTextColor;
+    infoLabel.textColor = UIColor.systemYellowColor;
     infoLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightSemibold];
     infoLabel.adjustsFontSizeToFitWidth = YES;
     infoLabel.minimumScaleFactor = 0.6;
+    infoLabel.textAlignment = NSTextAlignmentCenter;
     infoLabel.text = _infoText;
+    infoLabel.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.72];
+    infoLabel.layer.cornerRadius = 10.0;
+    infoLabel.layer.borderWidth = 1.0;
+    infoLabel.layer.borderColor = [[UIColor whiteColor] colorWithAlphaComponent:0.18].CGColor;
+    infoLabel.layer.shadowColor = UIColor.blackColor.CGColor;
+    infoLabel.layer.shadowOffset = CGSizeMake(0, 2.0);
+    infoLabel.layer.shadowRadius = 6.0;
+    infoLabel.layer.shadowOpacity = 0.28;
+    infoLabel.clipsToBounds = NO;
     [toolbar addSubview:infoLabel];
     self.infoLabel = infoLabel;
 
@@ -275,7 +285,7 @@ static const NSUInteger ACColorPickerMaxSamples = 32;
 
     CGFloat infoX = CGRectGetMaxX(self.swatchView.frame) + 8.0;
     CGFloat infoWidth = MAX(0.0, CGRectGetMinX(self.deleteButton.frame) - infoX - 8.0);
-    self.infoLabel.frame = CGRectMake(infoX, 0.0, infoWidth, toolbarHeight);
+    self.infoLabel.frame = CGRectMake(infoX, 10.0, infoWidth, toolbarHeight - 20.0);
     [self rebuildList];
 }
 

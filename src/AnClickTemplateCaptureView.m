@@ -59,10 +59,19 @@ typedef NS_OPTIONS(NSInteger, AnClickCaptureSelectionEditMode) {
 
     UILabel *hint = [[UILabel alloc] initWithFrame:CGRectZero];
     hint.text = @"双指缩放移动，单指框选/拖边调整";
-    hint.textColor = UIColor.whiteColor;
+    hint.textColor = UIColor.systemYellowColor;
     hint.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     hint.adjustsFontSizeToFitWidth = YES;
     hint.textAlignment = NSTextAlignmentCenter;
+    hint.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.72];
+    hint.layer.cornerRadius = 13.0;
+    hint.layer.borderWidth = 1.0;
+    hint.layer.borderColor = [[UIColor whiteColor] colorWithAlphaComponent:0.22].CGColor;
+    hint.layer.shadowColor = UIColor.blackColor.CGColor;
+    hint.layer.shadowOffset = CGSizeMake(0, 3.0);
+    hint.layer.shadowRadius = 8.0;
+    hint.layer.shadowOpacity = 0.32;
+    hint.clipsToBounds = NO;
     [self addSubview:hint];
     hint.translatesAutoresizingMaskIntoConstraints = NO;
 

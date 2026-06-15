@@ -2919,6 +2919,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 }
 
 - (void)handleButtonRow:(UIButton *)button {
+    [self commitActiveEditing];
     switch ((ACEditorRowKind)button.tag) {
         case ACEditorRowKindPointPick:
             [self.delegate taskEditorViewDidRequestPointPick:self];
@@ -2983,12 +2984,21 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 }
 
 - (void)handleSave {
-    [self notifyModelChanged];
+    [self commitActiveEditing];
     [self.delegate taskEditorViewDidSave:self];
 }
 
 - (void)notifyModelChanged {
     [self.delegate taskEditorView:self didUpdateModel:self.model];
+}
+
+- (void)commitActiveEditing {
+    UITextField *textField = self.activeTextField;
+    if ([textField isKindOfClass:UITextField.class]) {
+        [self handleTextFieldChanged:textField];
+    }
+    [self endEditing:YES];
+    [self notifyModelChanged];
 }
 
 - (NSString *)hexColorText {

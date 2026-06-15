@@ -293,6 +293,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_homeMonitorButton;
     UIButton *_homeSaveConfigButton;
     UIButton *_authorFollowButton;
+    UIButton *_authorGroupButton;
     UIButton *_globalSettingsButton;
     UITableView *_taskListView;
     AnClickTaskEditorView *_taskEditorView;
@@ -1702,6 +1703,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _authorFollowButton.layer.shadowOffset = CGSizeMake(0.0, 2.0);
     [_authorFollowButton addTarget:self action:@selector(openBilibiliProfile) forControlEvents:UIControlEventTouchUpInside];
     [_homeBrandView addSubview:_authorFollowButton];
+
+    _authorGroupButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_authorGroupButton setTitle:@"加入群聊" forState:UIControlStateNormal];
+    [_authorGroupButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    _authorGroupButton.titleLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightBold];
+    _authorGroupButton.titleLabel.adjustsFontSizeToFitWidth = YES;
+    _authorGroupButton.titleLabel.minimumScaleFactor = 0.72;
+    _authorGroupButton.backgroundColor = [self themeSuccessColor];
+    _authorGroupButton.layer.cornerRadius = 8.0;
+    _authorGroupButton.layer.shadowColor = [self themeSuccessColor].CGColor;
+    _authorGroupButton.layer.shadowOpacity = 0.20;
+    _authorGroupButton.layer.shadowRadius = 5.0;
+    _authorGroupButton.layer.shadowOffset = CGSizeMake(0.0, 2.0);
+    [_authorGroupButton addTarget:self action:@selector(openQQGroup) forControlEvents:UIControlEventTouchUpInside];
+    [_homeBrandView addSubview:_authorGroupButton];
 
     _homeOutputView = [[UIView alloc] initWithFrame:CGRectZero];
     _homeOutputView.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.76];
@@ -3339,6 +3355,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalSettingsButton.hidden = visible;
     _homeBrandView.hidden = visible;
     _authorFollowButton.hidden = visible;
+    _authorGroupButton.hidden = visible;
     _homeOutputView.hidden = visible;
     [_panelView viewWithTag:AnClickHomeAddLabelTag].hidden = visible;
     [_panelView viewWithTag:AnClickHomeDeleteLabelTag].hidden = visible;
@@ -3435,15 +3452,29 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _homeBrandView.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.76];
     _homeBrandView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.42].CGColor;
 
-    CGFloat followWidth = MIN(106.0, MAX(92.0, floor(width * 0.30)));
+    CGFloat buttonGap = 5.0;
+    CGFloat groupWidth = MIN(78.0, MAX(68.0, floor(width * 0.19)));
+    CGFloat followWidth = MIN(100.0, MAX(86.0, floor(width * 0.25)));
+    CGFloat buttonY = 6.0;
+    CGFloat buttonHeight = brandHeight - 12.0;
+    CGFloat groupX = CGRectGetWidth(_homeBrandView.bounds) - groupWidth - 7.0;
     _authorFollowButton.hidden = NO;
-    _authorFollowButton.frame = CGRectMake(CGRectGetWidth(_homeBrandView.bounds) - followWidth - 7.0,
-                                           6.0,
+    _authorFollowButton.frame = CGRectMake(groupX - buttonGap - followWidth,
+                                           buttonY,
                                            followWidth,
-                                           brandHeight - 12.0);
+                                           buttonHeight);
     _authorFollowButton.backgroundColor = [self themeHighlightColor];
     _authorFollowButton.layer.shadowColor = [self themeHighlightColor].CGColor;
     [self updateButtonShadowPath:_authorFollowButton];
+
+    _authorGroupButton.hidden = NO;
+    _authorGroupButton.frame = CGRectMake(groupX,
+                                          buttonY,
+                                          groupWidth,
+                                          buttonHeight);
+    _authorGroupButton.backgroundColor = [self themeSuccessColor];
+    _authorGroupButton.layer.shadowColor = [self themeSuccessColor].CGColor;
+    [self updateButtonShadowPath:_authorGroupButton];
 
     _toolTitleLabel.hidden = NO;
     _toolTitleLabel.text = [self toolDisplayName];
@@ -3455,7 +3486,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                        brandHeight);
     _toolTitleLabel.textColor = [self themePrimaryTextColor];
     _toolTitleLabel.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightHeavy];
-    _toolTitleLabel.textAlignment = NSTextAlignmentLeft;
+    _toolTitleLabel.textAlignment = NSTextAlignmentCenter;
 
     CGFloat outputHeight = [self homeOutputFooterHeight];
     _homeOutputView.hidden = NO;
@@ -4051,6 +4082,22 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [application openURL:appURL options:@{} completionHandler:^(BOOL success) {
         if (!success) {
             openWebURL();
+        }
+    }];
+}
+
+- (void)openQQGroup {
+    NSString *groupNumber = @"940676065";
+    NSString *urlText = [NSString stringWithFormat:@"mqqapi://card/show_pslcard?src_type=internal&version=1&uin=%@&card_type=group&source=qrcode", groupNumber];
+    NSURL *qqURL = [NSURL URLWithString:urlText];
+    if (!qqURL) {
+        return;
+    }
+    UIApplication *application = UIApplication.sharedApplication;
+    [application openURL:qqURL options:@{} completionHandler:^(BOOL success) {
+        if (!success) {
+            self->_statusLabel.text = [NSString stringWithFormat:@"请手动搜索QQ群 %@", groupNumber];
+            [self showToast:self->_statusLabel.text];
         }
     }];
 }
@@ -7340,8 +7387,15 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     }
     if (_panelWindow) {
         _panelWindow.alpha = 1.0;
-        _panelWindow.userInteractionEnabled = NO;
-        _panelWindow.hidden = YES;
+        if (_taskRunActive || _taskRunPausedForForeground) {
+            _panelWindow.userInteractionEnabled = YES;
+            _panelWindow.hidden = NO;
+            [self collapsePanel];
+            [self refreshCollapsedButtonTitle];
+        } else {
+            _panelWindow.userInteractionEnabled = NO;
+            _panelWindow.hidden = YES;
+        }
     }
 }
 
@@ -7878,6 +7932,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         return;
     }
 
+    [_taskEditorView commitActiveEditing];
     AnClickTaskModel *model = _editingTaskModel ?: [self taskEditorModelByMergingRuntimeState];
     _taskItems[(NSUInteger)_selectedTaskIndex] = [model copy];
     _editingTaskModel = [model copy];
@@ -9638,6 +9693,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (void)saveSelectedTaskFromCurrentConfig {
+    [_taskEditorView commitActiveEditing];
     [self saveTaskEditorModel:_taskEditorView.model ?: _editingTaskModel];
 }
 
@@ -9662,6 +9718,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (void)taskEditorViewDidSave:(AnClickTaskEditorView *)editorView {
+    [editorView commitActiveEditing];
     [self saveTaskEditorModel:editorView.model];
 }
 
@@ -9674,12 +9731,14 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (void)taskEditorViewDidRequestPointPick:(AnClickTaskEditorView *)editorView {
+    [editorView commitActiveEditing];
     _editingTaskModel = [editorView.model copy];
     [self stageTaskEditorModelForRuntime:editorView.model];
     [self beginPointPicking];
 }
 
 - (void)taskEditorView:(AnClickTaskEditorView *)editorView didRequestRecognitionResultPointPickForSuccess:(BOOL)success {
+    [editorView commitActiveEditing];
     AnClickTaskModel *model = [editorView.model copy];
     AnClickActionMode branchMode = success
         ? [self normalizedImageActionMode:model.successActionMode]
@@ -9781,24 +9840,28 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (void)taskEditorViewDidRequestColorPick:(AnClickTaskEditorView *)editorView {
+    [editorView commitActiveEditing];
     _editingTaskModel = [editorView.model copy];
     [self stageTaskEditorModelForRuntime:editorView.model];
     [self beginColorPicking];
 }
 
 - (void)taskEditorViewDidRequestTemplateCapture:(AnClickTaskEditorView *)editorView {
+    [editorView commitActiveEditing];
     _editingTaskModel = [editorView.model copy];
     [self stageTaskEditorModelForRuntime:editorView.model];
     [self beginTemplateCapture];
 }
 
 - (void)taskEditorViewDidRequestRecording:(AnClickTaskEditorView *)editorView {
+    [editorView commitActiveEditing];
     _editingTaskModel = [editorView.model copy];
     [self stageTaskEditorModelForRuntime:editorView.model];
     [self toggleMacroRecording];
 }
 
 - (void)taskEditorViewDidRequestSingleStepTest:(AnClickTaskEditorView *)editorView {
+    [editorView commitActiveEditing];
     _editingTaskModel = [editorView.model copy];
     [self stageTaskEditorModelForRuntime:_editingTaskModel];
     if (![self taskModelIsComplete:_editingTaskModel]) {
@@ -10515,29 +10578,67 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     return branchIndex;
 }
 
+- (NSInteger)jumpIndexFromRecognitionTask:(NSDictionary *)task success:(BOOL)success {
+    id value = task[success ? @"successBranchIndex" : @"failureBranchIndex"];
+    if ([value respondsToSelector:@selector(integerValue)]) {
+        NSInteger index = [value integerValue];
+        if (index >= 0 && index < (NSInteger)_taskItems.count) {
+            return index;
+        }
+    }
+
+    NSDictionary *jumpConfig = [self branchActionConfigForTask:task
+                                                       success:success
+                                                  expectedMode:AnClickActionModeJump];
+    if ([jumpConfig isKindOfClass:NSDictionary.class]) {
+        value = jumpConfig[@"successBranchIndex"] ?: jumpConfig[@"jumpTaskIndex"] ?: jumpConfig[@"targetTaskIndex"] ?: jumpConfig[@"jumpTaskId"];
+        NSInteger index = [value respondsToSelector:@selector(integerValue)] ? [value integerValue] : -1;
+        if (index >= 0 && index < (NSInteger)_taskItems.count) {
+            return index;
+        }
+    }
+    return -1;
+}
+
 - (BOOL)recognitionTaskUsesJumpActionForTask:(NSDictionary *)task success:(BOOL)success {
     if (![self modeIsJudgementTask:[self modeForTask:task]]) {
         return NO;
     }
     if (success) {
         AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
+        if ([self modeIsRecognitionTask:actionMode]) {
+            NSDictionary *config = [self branchActionConfigForTask:task success:YES expectedMode:actionMode];
+            if ([config isKindOfClass:NSDictionary.class]) {
+                return [self successActionModeForTask:config] == AnClickActionModeJump;
+            }
+        }
         return actionMode == AnClickActionModeJump;
     }
-    return [self failureActionModeForTask:task] == AnClickActionModeJump;
+    AnClickActionMode failureMode = [self failureActionModeForTask:task];
+    if ([self modeIsRecognitionTask:failureMode]) {
+        NSDictionary *config = [self branchActionConfigForTask:task success:NO expectedMode:failureMode];
+        if ([config isKindOfClass:NSDictionary.class]) {
+            return [self successActionModeForTask:config] == AnClickActionModeJump;
+        }
+    }
+    return failureMode == AnClickActionModeJump;
 }
 
 - (NSInteger)validRecognitionJumpIndexForTask:(NSDictionary *)task success:(BOOL)success {
     if (![self recognitionTaskUsesJumpActionForTask:task success:success]) {
         return -1;
     }
-    NSDictionary *config = [self branchActionConfigForTask:task
-                                                   success:success
-                                              expectedMode:AnClickActionModeJump];
-    if ([config isKindOfClass:NSDictionary.class]) {
-        id value = config[@"successBranchIndex"] ?: config[@"jumpTaskIndex"] ?: config[@"targetTaskIndex"] ?: config[@"jumpTaskId"];
-        NSInteger configIndex = [value respondsToSelector:@selector(integerValue)] ? [value integerValue] : -1;
-        if (configIndex >= 0 && configIndex < (NSInteger)_taskItems.count) {
-            return configIndex;
+    AnClickActionMode branchMode = success ? [self successActionModeForTask:task] : [self failureActionModeForTask:task];
+    if (branchMode == AnClickActionModeJump) {
+        return [self jumpIndexFromRecognitionTask:task success:success];
+    }
+    if ([self modeIsRecognitionTask:branchMode]) {
+        NSDictionary *branchConfig = [self branchActionConfigForTask:task success:success expectedMode:branchMode];
+        if ([branchConfig isKindOfClass:NSDictionary.class]) {
+            NSInteger configIndex = [self jumpIndexFromRecognitionTask:branchConfig success:YES];
+            if (configIndex >= 0 && configIndex < (NSInteger)_taskItems.count) {
+                return configIndex;
+            }
         }
     }
     return [self validRecognitionBranchIndexForTask:task success:success];
@@ -10667,25 +10768,17 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     }
 
     if ([self recognitionTaskUsesJumpActionForTask:task success:YES]) {
-        NSInteger taskIndex = [self recognitionBranchIndexForTask:task success:YES];
+        NSInteger taskIndex = [self validRecognitionJumpIndexForTask:task success:YES];
         if (taskIndex < 0) {
             _statusLabel.text = @"成功后跳转任务号未设置";
-            return NO;
-        }
-        if (taskIndex >= (NSInteger)_taskItems.count) {
-            _statusLabel.text = [NSString stringWithFormat:@"成功后任务%ld不存在", (long)taskIndex + 1];
             return NO;
         }
     }
 
     if ([self recognitionTaskUsesJumpActionForTask:task success:NO]) {
-        NSInteger taskIndex = [self recognitionBranchIndexForTask:task success:NO];
+        NSInteger taskIndex = [self validRecognitionJumpIndexForTask:task success:NO];
         if (taskIndex < 0) {
             _statusLabel.text = @"失败后跳转任务号未设置";
-            return NO;
-        }
-        if (taskIndex >= (NSInteger)_taskItems.count) {
-            _statusLabel.text = [NSString stringWithFormat:@"失败后任务%ld不存在", (long)taskIndex + 1];
             return NO;
         }
     }

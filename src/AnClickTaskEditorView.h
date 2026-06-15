@@ -32,6 +32,7 @@ NS_ASSUME_NONNULL_BEGIN
                  taskIndex:(NSInteger)taskIndex
                branchTitle:(nullable NSString *)branchTitle
                 actionName:(NSString *)actionName;
+- (void)commitActiveEditing;
 - (void)reloadForm;
 
 @end
