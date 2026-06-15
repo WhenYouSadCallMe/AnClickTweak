@@ -311,6 +311,20 @@
     return 1;
 }
 
++ (CGFloat)matchScoreForRank:(NSInteger)rank specificity:(CGFloat)specificity confidence:(CGFloat)confidence {
+    CGFloat rankScore = 0.0;
+    if (rank >= 4) {
+        rankScore = 1.0;
+    } else if (rank == 3) {
+        rankScore = 0.95;
+    } else if (rank == 2) {
+        rankScore = 0.90;
+    } else if (rank == 1) {
+        rankScore = MAX(0.0, MIN(0.75, specificity));
+    }
+    return MIN(1.0, MAX(confidence, rankScore));
+}
+
 + (CGRect)clippedImageRect:(CGRect)rect image:(UIImage *)image {
     if (CGRectIsNull(rect) || CGRectIsEmpty(rect) || image.size.width <= 0.0 || image.size.height <= 0.0) {
         return CGRectNull;
@@ -615,7 +629,8 @@
                 }
                 validMatchCount++;
 
-                CGFloat score = candidate.confidence;
+                CGFloat visionConfidence = candidate.confidence;
+                CGFloat score = [self matchScoreForRank:rank specificity:specificity confidence:visionConfidence];
                 CGPoint clickImagePoint = CGPointMake(CGRectGetMidX(sourceImageRect), CGRectGetMidY(sourceImageRect));
                 CGFloat area = CGRectGetWidth(sourceImageRect) * CGRectGetHeight(sourceImageRect);
 
@@ -641,11 +656,13 @@
 
                 CGRect rect = [self screenRectFromImageRect:sourceImageRect image:image sourceWindow:sourceWindow];
                 CGPoint point = sourceWindow ? [sourceWindow convertPoint:clickImagePoint toWindow:nil] : clickImagePoint;
-                NSLog(@"[AnClick][OCR] target=%@ regex=%d text=%@ match=%@ visionRect=(%.1f, %.1f, %.1f, %.1f) screenRect=(%.1f, %.1f, %.1f, %.1f) point=(%.1f, %.1f)",
+                NSLog(@"[AnClick][OCR] target=%@ regex=%d text=%@ match=%@ score=%.2f confidence=%.2f visionRect=(%.1f, %.1f, %.1f, %.1f) screenRect=(%.1f, %.1f, %.1f, %.1f) point=(%.1f, %.1f)",
                       target,
                       useRegex,
                       candidate.string,
                       matchedText,
+                      score,
+                      visionConfidence,
                       sourceImageRect.origin.x,
                       sourceImageRect.origin.y,
                       sourceImageRect.size.width,
@@ -666,6 +683,7 @@
                     @"point": [NSValue valueWithCGPoint:point],
                     @"rect": [NSValue valueWithCGRect:rect],
                     @"score": @(score),
+                    @"visionConfidence": @(visionConfidence),
                     @"text": matchedText,
                     @"lineText": candidate.string,
                     @"regex": @(useRegex),

@@ -689,7 +689,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)toolDisplayName {
-    return @"安姐点击器V2.0";
+    return @"安姐点击器V2.02";
 }
 
 - (void)markPanelSceneUnavailable {
@@ -2659,7 +2659,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSTimeInterval delay = (!volumeShortcutToast && _toastDeferNonVolumeUntil > now)
         ? (_toastDeferNonVolumeUntil - now)
         : 0.0;
+    __weak typeof(self) weakSelf = self;
     void (^presentToast)(void) = ^{
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) {
+            return;
+        }
         if (!volumeShortcutToast && self->_volumeShortcutRunSuppressToasts) {
             return;
         }
@@ -2667,8 +2672,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             CFTimeInterval currentTime = CACurrentMediaTime();
             if (self->_toastDeferNonVolumeUntil > currentTime) {
                 NSTimeInterval nextDelay = self->_toastDeferNonVolumeUntil - currentTime;
+                __weak typeof(self) nestedWeakSelf = self;
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(nextDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    [self showToast:text];
+                    __strong typeof(nestedWeakSelf) nestedSelf = nestedWeakSelf;
+                    [nestedSelf showToast:text];
                 });
                 return;
             }
@@ -2688,26 +2695,31 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             self->_toastWindow.hidden = NO;
         }
         NSUInteger generation = ++self->_toastGeneration;
-        [self->_toastView.layer removeAllAnimations];
-        [self->_hostToastView.layer removeAllAnimations];
-        self->_toastView.alpha = 1.0;
-        self->_hostToastView.alpha = hostWindow ? 1.0 : 0.0;
-        self->_toastView.transform = CGAffineTransformMakeScale(0.98, 0.98);
-        self->_hostToastView.transform = CGAffineTransformMakeScale(0.98, 0.98);
+        UIView *toastView = self->_toastView;
+        UIView *hostToastView = self->_hostToastView;
+        UIWindow *toastWindow = self->_toastWindow;
+        [toastView.layer removeAllAnimations];
+        [hostToastView.layer removeAllAnimations];
+        toastView.alpha = 1.0;
+        hostToastView.alpha = hostWindow ? 1.0 : 0.0;
+        toastView.transform = CGAffineTransformMakeScale(0.98, 0.98);
+        hostToastView.transform = CGAffineTransformMakeScale(0.98, 0.98);
         [UIView animateWithDuration:0.16 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
-            self->_toastView.transform = CGAffineTransformIdentity;
-            self->_hostToastView.transform = CGAffineTransformIdentity;
+            toastView.transform = CGAffineTransformIdentity;
+            hostToastView.transform = CGAffineTransformIdentity;
         } completion:nil];
+        __weak typeof(self) hideWeakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (generation != self->_toastGeneration) {
+            __strong typeof(hideWeakSelf) hideSelf = hideWeakSelf;
+            if (!hideSelf || generation != hideSelf->_toastGeneration) {
                 return;
             }
             [UIView animateWithDuration:0.22 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseIn animations:^{
-                self->_toastView.alpha = 0.0;
-                self->_hostToastView.alpha = 0.0;
+                toastView.alpha = 0.0;
+                hostToastView.alpha = 0.0;
             } completion:^(BOOL finished) {
-                if (finished && generation == self->_toastGeneration) {
-                    self->_toastWindow.hidden = YES;
+                if (finished && hideSelf && generation == hideSelf->_toastGeneration && toastWindow == hideSelf->_toastWindow) {
+                    toastWindow.hidden = YES;
                 }
             }];
         });
@@ -3639,6 +3651,23 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     [self showFunctionMenu];
+}
+
+- (void)stopTaskRunFromHomeButton {
+    if ([AnClickRecorder shared].isRecording) {
+        [[AnClickRecorder shared] stopRecording];
+        _statusLabel.text = @"录制已停止";
+        [self showToast:_statusLabel.text];
+        [self refreshCollapsedButtonTitle];
+        return;
+    }
+
+    if (_taskRunActive || _taskRunPausedForForeground) {
+        [self stopTaskRunWithStatus:@"已停止"];
+        return;
+    }
+
+    [self collapsePanel];
 }
 
 - (NSString *)savedTaskConfigsPath {
@@ -12005,8 +12034,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     : 0.0;
                 if (scoreNumber && scoreNumber.doubleValue + 0.0001 < requiredSimilarity) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = @"识字相似度不足";
-                    [strongSelf showToast:@"识字相似度不足"];
+                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字相似度不足 %.0f%%/%.0f%%",
+                                                     scoreNumber.doubleValue * 100.0,
+                                                     requiredSimilarity * 100.0];
+                    [strongSelf showToast:strongSelf->_statusLabel.text];
                     if (completion) {
                         completion(NO, NO, 0.0);
                     } else {
@@ -12988,6 +13019,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         return;
     }
 
+    _taskRunGeneration++;
+    [_taskEngine invalidateScheduledCallbacks];
+    [_recognitionService cancelPendingRequests];
+    [self cancelActiveNetworkTasks];
+    _toastGeneration++;
+
     _taskRunActive = NO;
     [self clearTaskRunPauseState];
     _taskRunSingleStepStopIndex = -1;
@@ -12995,7 +13032,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     [self resetTaskRunJumpGuard];
     [self resetRunProgressToastThrottle];
     [_taskEngine resetListRefreshThrottle];
-    _taskRunGeneration++;
     [self cancelRunningTaskSideEffects];
     [self stopTaskRunRuntimeTimerReset:YES];
     _statusLabel.text = status.length > 0 ? status : @"已停止";
