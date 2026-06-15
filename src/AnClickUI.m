@@ -9723,9 +9723,47 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         ? [existingConfig mutableCopy]
         : [self draftActionTaskForMode:branchMode];
     config[@"mode"] = @(branchMode);
-    config[@"point"] = [NSValue valueWithCGPoint:point];
-    config[@"pointScreenSize"] = [self currentScreenCoordinateSizeValue];
-    config[@"useMatchPoint"] = @NO;
+    AnClickActionMode targetMode = branchMode;
+    NSMutableDictionary *targetConfig = config;
+    BOOL storesNestedRecognitionResultAction = [self modeIsRecognitionTask:branchMode];
+    if (storesNestedRecognitionResultAction) {
+        targetMode = [self normalizedImageActionMode:(AnClickActionMode)[config[@"imageActionMode"] integerValue]];
+        if (![self modeCanUseRecognitionPoint:targetMode]) {
+            return;
+        }
+        NSDictionary *existingNestedConfig = [config[@"successActionConfig"] isKindOfClass:NSDictionary.class]
+            ? config[@"successActionConfig"]
+            : nil;
+        targetConfig = ([existingNestedConfig isKindOfClass:NSDictionary.class] &&
+                        [self modeForTask:existingNestedConfig] == targetMode)
+            ? [existingNestedConfig mutableCopy]
+            : [self draftActionTaskForMode:targetMode];
+        targetConfig[@"mode"] = @(targetMode);
+        config[@"imageActionMode"] = @(targetMode);
+    }
+    if (targetMode == AnClickActionModeTwoFingerTap) {
+        NSMutableArray<NSValue *> *points = [NSMutableArray array];
+        NSArray *existingPoints = [targetConfig[@"multiPoints"] isKindOfClass:NSArray.class] ? targetConfig[@"multiPoints"] : @[];
+        for (id value in existingPoints) {
+            if ([value isKindOfClass:NSValue.class] && points.count < AnClickMultiTapMaxPoints) {
+                [points addObject:value];
+            }
+        }
+        if (points.count < AnClickMultiTapMaxPoints) {
+            [points addObject:[NSValue valueWithCGPoint:point]];
+        }
+        targetConfig[@"multiPoints"] = points;
+        targetConfig[@"multiPointScreenSize"] = [self currentScreenCoordinateSizeValue];
+        [targetConfig removeObjectForKey:@"point"];
+        [targetConfig removeObjectForKey:@"pointScreenSize"];
+    } else {
+        targetConfig[@"point"] = [NSValue valueWithCGPoint:point];
+        targetConfig[@"pointScreenSize"] = [self currentScreenCoordinateSizeValue];
+    }
+    targetConfig[@"useMatchPoint"] = @NO;
+    if (storesNestedRecognitionResultAction) {
+        config[@"successActionConfig"] = targetConfig;
+    }
 
     if (success) {
         model.successActionConfig = config;
@@ -9735,6 +9773,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         model.failureRecognitionActionConfig = [self modeIsRecognitionTask:branchMode] ? config : @{};
     }
     _editingTaskModel = model;
+    _statusLabel.text = targetMode == AnClickActionModeTwoFingerTap
+        ? [NSString stringWithFormat:@"%@分支多指已取 %lu 点",
+           success ? @"成功" : @"失败",
+           (unsigned long)[self storedMultiTapPointsForTask:targetConfig].count]
+        : [NSString stringWithFormat:@"%@分支已取点", success ? @"成功" : @"失败"];
 }
 
 - (void)taskEditorViewDidRequestColorPick:(AnClickTaskEditorView *)editorView {
@@ -10259,6 +10302,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         [self modeForTask:(NSDictionary *)fullConfig] == expectedMode) {
         NSDictionary *fullConfigDictionary = (NSDictionary *)fullConfig;
         if ([self modeCanUseRecognitionPoint:expectedMode]) {
+            if (expectedMode == AnClickActionModeTwoFingerTap &&
+                [self storedMultiTapPointsForTask:fullConfigDictionary].count >= 2) {
+                return fullConfigDictionary;
+            }
             id useMatchPointValue = fullConfigDictionary[@"useMatchPoint"];
             BOOL useMatchPoint = [useMatchPointValue respondsToSelector:@selector(boolValue)]
                 ? [useMatchPointValue boolValue]
@@ -10482,6 +10529,16 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 - (NSInteger)validRecognitionJumpIndexForTask:(NSDictionary *)task success:(BOOL)success {
     if (![self recognitionTaskUsesJumpActionForTask:task success:success]) {
         return -1;
+    }
+    NSDictionary *config = [self branchActionConfigForTask:task
+                                                   success:success
+                                              expectedMode:AnClickActionModeJump];
+    if ([config isKindOfClass:NSDictionary.class]) {
+        id value = config[@"successBranchIndex"] ?: config[@"jumpTaskIndex"] ?: config[@"targetTaskIndex"] ?: config[@"jumpTaskId"];
+        NSInteger configIndex = [value respondsToSelector:@selector(integerValue)] ? [value integerValue] : -1;
+        if (configIndex >= 0 && configIndex < (NSInteger)_taskItems.count) {
+            return configIndex;
+        }
     }
     return [self validRecognitionBranchIndexForTask:task success:success];
 }
@@ -11224,17 +11281,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         [self performRecognitionNetworkTask:singleCheckConfig
                                    inWindow:hostWindow
                                  generation:runGeneration
-                                 completion:^(BOOL matched) {
-            [self performRecognitionBranchActionForTask:singleCheckConfig
-                                                success:matched
-                                               inWindow:hostWindow
-                                             generation:runGeneration
-                                             completion:^(NSTimeInterval nestedDelay) {
-                if (completion) {
-                    completion(nestedDelay + [self actionIntervalForTask:task]);
-                }
-            }];
-        }];
+                                 completion:nil];
+        if (completion) {
+            completion([self estimatedTaskDurationForTask:singleCheckConfig depth:1] + [self actionIntervalForTask:task]);
+        }
         return;
     }
     NSTimeInterval duration = [self performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:config]
@@ -11551,17 +11601,25 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 NSDictionary *successConfig = [strongSelf branchActionConfigForTask:task success:YES expectedMode:imageActionMode];
                 if (successConfig) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    if (completion) {
+                        completion(YES);
+                        return;
+                    }
+                    if ([strongSelf modeIsRecognitionTask:imageActionMode]) {
+                        [strongSelf performRecognitionBranchActionForTask:task
+                                                                  success:YES
+                                                                 inWindow:currentHostWindow
+                                                               generation:runGeneration
+                                                               completion:nil];
+                        return;
+                    }
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f 成功后%@完整动作",
                                                      scoreNumber.doubleValue,
                                                      [strongSelf actionNameForMode:imageActionMode]];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
-                    if (completion) {
-                        completion(YES);
-                    } else {
-                        [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
-                                            inWindow:currentHostWindow
-                                       runGeneration:runGeneration];
-                    }
+                    [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
+                                        inWindow:currentHostWindow
+                                   runGeneration:runGeneration];
                     return;
                 }
                 if ([strongSelf modeIsRecognitionTask:imageActionMode]) {
@@ -11787,18 +11845,26 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 NSDictionary *successConfig = [strongSelf branchActionConfigForTask:task success:YES expectedMode:actionMode];
                 if (successConfig) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    if (completion) {
+                        completion(YES);
+                        return;
+                    }
+                    if ([strongSelf modeIsRecognitionTask:actionMode]) {
+                        [strongSelf performRecognitionBranchActionForTask:task
+                                                                  success:YES
+                                                                 inWindow:currentHostWindow
+                                                               generation:runGeneration
+                                                               completion:nil];
+                        return;
+                    }
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ 成功后%@完整动作",
                                                      matchSummary,
                                                      text,
                                                      [strongSelf actionNameForMode:actionMode]];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
-                    if (completion) {
-                        completion(YES);
-                    } else {
-                        [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
-                                            inWindow:currentHostWindow
-                                       runGeneration:runGeneration];
-                    }
+                    [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
+                                        inWindow:currentHostWindow
+                                   runGeneration:runGeneration];
                     return;
                 }
                 if ([strongSelf modeIsRecognitionTask:actionMode]) {
@@ -12005,17 +12071,25 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 NSDictionary *successConfig = [strongSelf branchActionConfigForTask:task success:YES expectedMode:actionMode];
                 if (successConfig) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
+                    if (completion) {
+                        completion(YES);
+                        return;
+                    }
+                    if ([strongSelf modeIsRecognitionTask:actionMode]) {
+                        [strongSelf performRecognitionBranchActionForTask:task
+                                                                  success:YES
+                                                                 inWindow:currentHostWindow
+                                                               generation:runGeneration
+                                                               completion:nil];
+                        return;
+                    }
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ 成功后%@完整动作",
                                                      patternSummary,
                                                      [strongSelf actionNameForMode:actionMode]];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
-                    if (completion) {
-                        completion(YES);
-                    } else {
-                        [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
-                                            inWindow:currentHostWindow
-                                       runGeneration:runGeneration];
-                    }
+                    [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
+                                        inWindow:currentHostWindow
+                                   runGeneration:runGeneration];
                     return;
                 }
                 if ([strongSelf modeIsRecognitionTask:actionMode]) {
