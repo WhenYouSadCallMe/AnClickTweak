@@ -717,10 +717,11 @@
     }
 
     NSArray<NSDictionary *> *primaryAttempts = @[
-        @{@"level": @(VNRequestTextRecognitionLevelAccurate), @"correction": @YES, @"fallback": @NO},
+        @{@"level": @(VNRequestTextRecognitionLevelFast), @"correction": @NO, @"fallback": @NO},
+        @{@"level": @(VNRequestTextRecognitionLevelAccurate), @"correction": @NO, @"fallback": @NO},
     ];
     NSArray<NSDictionary *> *fallbackAttempts = @[
-        @{@"level": @(VNRequestTextRecognitionLevelAccurate), @"correction": @NO, @"fallback": @YES},
+        @{@"level": @(VNRequestTextRecognitionLevelAccurate), @"correction": @YES, @"fallback": @YES},
         @{@"level": @(VNRequestTextRecognitionLevelFast), @"correction": @YES, @"fallback": @YES},
     ];
     NSDictionary *lastResult = nil;
@@ -805,7 +806,7 @@
         if (!retryable || frameAttempt >= 1) {
             break;
         }
-        [NSThread sleepForTimeInterval:0.05];
+        [NSThread sleepForTimeInterval:0.010];
     }
     return lastResult ?: @{@"error": @"文字识别未找到"};
 }

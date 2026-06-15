@@ -45,7 +45,7 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 static const double AnClickMacroMinPlaybackSpeed = 0.1;
 static const double AnClickMacroMaxPlaybackSpeed = 10.0;
 static const NSTimeInterval AnClickDefaultTapPressDuration = 0.030;
-static const NSTimeInterval AnClickFastRecognitionTapDuration = 1.0 / 60.0;
+static const NSTimeInterval AnClickFastRecognitionTapDuration = 1.0 / 240.0;
 static const NSTimeInterval AnClickDefaultDoubleTapInterval = 0.100;
 static const NSTimeInterval AnClickDefaultSwipeDuration = 0.300;
 static const NSTimeInterval AnClickDefaultLongPressDuration = 0.500;
@@ -94,9 +94,9 @@ static const NSInteger AnClickHomeOptionPanelTimeTag = 54101;
 static const NSInteger AnClickHomeOptionPanelLoopTag = 54102;
 static const NSInteger AnClickHomeOptionPanelSaveTag = 54103;
 static const NSInteger AnClickHomeOptionPanelMonitorTag = 54104;
-static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.12;
-static const NSTimeInterval AnClickVisualRecognitionCaptureDelay = 0.09;
-static const NSTimeInterval AnClickColorRecognitionCaptureDelay = 0.07;
+static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.045;
+static const NSTimeInterval AnClickVisualRecognitionCaptureDelay = 0.040;
+static const NSTimeInterval AnClickColorRecognitionCaptureDelay = 0.030;
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
 static void (*AnClickOriginalSpringBoardHandlePhysicalButtonEvent)(id self, SEL _cmd, id event);
 
@@ -2653,6 +2653,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     BOOL volumeShortcutToast = [text hasPrefix:@"音量"];
     if (!volumeShortcutToast && _volumeShortcutRunSuppressToasts) {
+        return;
+    }
+    if (!volumeShortcutToast && _taskRunActive && _taskRunSingleStepStopIndex < 0) {
         return;
     }
     CFTimeInterval now = CACurrentMediaTime();
@@ -6632,6 +6635,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (BOOL)shouldShowRunProgressToastText:(NSString *)text {
+    if (_taskRunActive && _taskRunSingleStepStopIndex < 0) {
+        return NO;
+    }
     if (!_taskRunActive || _taskRunSingleStepStopIndex >= 0) {
         return YES;
     }
@@ -6650,6 +6656,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (BOOL)shouldShowRunTraceNow {
+    if (_taskRunActive && _taskRunSingleStepStopIndex < 0) {
+        return NO;
+    }
     if (!_taskRunActive || _taskRunSingleStepStopIndex >= 0) {
         return YES;
     }
@@ -11830,7 +11839,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                          [strongSelf actionNameForMode:imageActionMode]];
                         [strongSelf showToast:strongSelf->_statusLabel.text];
                         [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                           delay:fastPointDuration + 0.03];
+                                                                           delay:fastPointDuration + 0.008];
                         return;
                     }
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
@@ -12107,7 +12116,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                          [strongSelf actionNameForMode:actionMode]];
                         [strongSelf showToast:strongSelf->_statusLabel.text];
                         [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                           delay:fastPointDuration + 0.03];
+                                                                           delay:fastPointDuration + 0.008];
                         return;
                     }
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
@@ -12366,7 +12375,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                          [strongSelf actionNameForMode:actionMode]];
                         [strongSelf showToast:strongSelf->_statusLabel.text];
                         [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                           delay:fastPointDuration + 0.03];
+                                                                           delay:fastPointDuration + 0.008];
                         return;
                     }
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
