@@ -4216,8 +4216,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)setHomeOutputText:(NSString *)text {
     NSString *safeText = [self trimmedActionDescription:text];
+    BOOL isError = [self homeOutputTextIsError:safeText];
+    if (!isError && [_statusLabel.text isEqualToString:safeText]) {
+        return;
+    }
     _statusLabel.text = safeText;
-    if (![self homeOutputTextIsError:safeText]) {
+    if (!isError) {
         return;
     }
     _homeErrorLabel.text = safeText;
@@ -5446,7 +5450,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         case AnClickActionModeDelay:
             return @"延时";
         case AnClickActionModeOpenApp:
-            return @"切应用";
+            return @"应用切换";
         default:
             return @"动作";
     }
@@ -5786,6 +5790,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
+        @(AnClickActionModeOpenApp),
         @(AnClickActionModeImage),
         @(AnClickActionModeOCR),
         @(AnClickActionModeColor),
@@ -5815,6 +5820,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
+        @(AnClickActionModeOpenApp),
         @(AnClickActionModeImage),
         @(AnClickActionModeOCR),
         @(AnClickActionModeColor),
@@ -5839,6 +5845,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeLongPress),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
+        @(AnClickActionModeOpenApp),
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeMacro),
         @(AnClickActionModeJump),
@@ -5853,6 +5860,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeLongPress),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
+        @(AnClickActionModeOpenApp),
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeMacro),
         @(AnClickActionModeJump),
@@ -8297,7 +8305,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         }
         case AnClickActionModeOpenApp: {
             NSString *bundleID = [self configuredTargetBundleIDForTask:task];
-            return bundleID.length > 0 ? [NSString stringWithFormat:@"%@ %@", name, bundleID] : @"切应用 Alook";
+            return bundleID.length > 0 ? [NSString stringWithFormat:@"%@ %@", name, bundleID] : @"应用切换未填 Bundle ID";
         }
         case AnClickActionModeDelay:
             return [NSString stringWithFormat:@"%@ %@", name, [self millisecondsSummaryTextForDuration:[self delayForTask:task]]];
@@ -8549,7 +8557,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         subtitle = [NSString stringWithFormat:@"等待%@", [self millisecondsSummaryTextForDuration:[self delayForTask:task]]];
     } else if (desc.length == 0 && mode == AnClickActionModeOpenApp) {
         NSString *bundleID = [self configuredTargetBundleIDForTask:task];
-        subtitle = bundleID.length > 0 ? [NSString stringWithFormat:@"切换到 %@", bundleID] : @"切换到 Alook";
+        subtitle = bundleID.length > 0 ? [NSString stringWithFormat:@"切换到 %@", bundleID] : @"未填写 Bundle ID";
     }
     if (mode != AnClickActionModeNetwork) {
         NSString *suffix = [self commonSuffixForTask:task];
@@ -8588,7 +8596,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         detail = [NSString stringWithFormat:@"等待%@", [self millisecondsSummaryTextForDuration:[self delayForTask:task]]];
     } else if (detail.length == 0 && mode == AnClickActionModeOpenApp) {
         NSString *bundleID = [self configuredTargetBundleIDForTask:task];
-        detail = bundleID.length > 0 ? bundleID : @"Alook";
+        detail = bundleID.length > 0 ? bundleID : @"未填写";
     }
 
     NSString *prefix = [NSString stringWithFormat:@"任务%lu/%lu %@",
@@ -8769,7 +8777,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         case AnClickActionModeNetwork:
             return @"network";
         case AnClickActionModeOpenApp:
-            return @"app.fill";
+            return @"arrow.triangle.2.circlepath";
         case AnClickActionModeJump:
             return @"arrow.triangle.branch";
         case AnClickActionModeDelay:
@@ -9059,7 +9067,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         case AnClickActionModeNetwork:
             return @"网络参数";
         case AnClickActionModeOpenApp:
-            return @"切换应用";
+            return @"应用切换";
         case AnClickActionModeJump:
             return @"跳转参数";
         case AnClickActionModeDelay:
@@ -9207,7 +9215,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         }
         case AnClickActionModeOpenApp: {
             NSString *bundleID = [self configuredTargetBundleIDForTask:task];
-            [self addTaskListDetailRowWithTitle:@"目标应用" value:bundleID.length > 0 ? bundleID : @"Alook" tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"目标应用" value:bundleID.length > 0 ? bundleID : @"未填写 Bundle ID" tint:tint rows:rows];
             break;
         }
         case AnClickActionModeDelay:
@@ -12142,27 +12150,31 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                         }
                         return;
                     }
-                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    if (completion) {
-                        completion(YES, NO, 0.0);
-                        return;
-                    }
                     if ([strongSelf modeIsRecognitionTask:imageActionMode]) {
+                        [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                         [strongSelf performRecognitionBranchActionForTask:task
                                                                   success:YES
                                                                  inWindow:currentHostWindow
                                                                generation:runGeneration
                                                                recognitionText:nil
-                                                               completion:nil];
+                                                                completion:^(NSTimeInterval actionDelay) {
+                            if (completion) {
+                                completion(YES, YES, actionDelay);
+                            }
+                        }];
                         return;
                     }
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f 成功后%@完整动作",
                                                      scoreNumber.doubleValue,
                                                      [strongSelf actionNameForMode:imageActionMode]];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
-                    [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
-                                        inWindow:currentHostWindow
-                                   runGeneration:runGeneration];
+                    NSTimeInterval configDuration = [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
+                                                                        inWindow:currentHostWindow
+                                                                   runGeneration:runGeneration];
+                    if (completion) {
+                        completion(YES, YES, configDuration);
+                    }
                     return;
                 }
                 if ([strongSelf modeIsRecognitionTask:imageActionMode]) {
@@ -12424,28 +12436,32 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                         }
                         return;
                     }
-                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    if (completion) {
-                        completion(YES, NO, 0.0);
-                        return;
-                    }
                     if ([strongSelf modeIsRecognitionTask:actionMode]) {
+                        [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                         [strongSelf performRecognitionBranchActionForTask:task
                                                                   success:YES
                                                                  inWindow:currentHostWindow
                                                                generation:runGeneration
                                                                recognitionText:text
-                                                               completion:nil];
+                                                                completion:^(NSTimeInterval actionDelay) {
+                            if (completion) {
+                                completion(YES, YES, actionDelay);
+                            }
+                        }];
                         return;
                     }
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ 成功后%@完整动作",
                                                      matchSummary,
                                                      text,
                                                      [strongSelf actionNameForMode:actionMode]];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
-                    [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
-                                        inWindow:currentHostWindow
-                                   runGeneration:runGeneration];
+                    NSTimeInterval configDuration = [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
+                                                                        inWindow:currentHostWindow
+                                                                   runGeneration:runGeneration];
+                    if (completion) {
+                        completion(YES, YES, configDuration);
+                    }
                     return;
                 }
                 if ([strongSelf modeIsRecognitionTask:actionMode]) {
@@ -12688,27 +12704,31 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                         }
                         return;
                     }
-                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    if (completion) {
-                        completion(YES, NO, 0.0);
-                        return;
-                    }
                     if ([strongSelf modeIsRecognitionTask:actionMode]) {
+                        [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                         [strongSelf performRecognitionBranchActionForTask:task
                                                                   success:YES
                                                                  inWindow:currentHostWindow
                                                                generation:runGeneration
                                                                recognitionText:nil
-                                                               completion:nil];
+                                                                completion:^(NSTimeInterval actionDelay) {
+                            if (completion) {
+                                completion(YES, YES, actionDelay);
+                            }
+                        }];
                         return;
                     }
+                    [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ 成功后%@完整动作",
                                                      patternSummary,
                                                      [strongSelf actionNameForMode:actionMode]];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
-                    [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
-                                        inWindow:currentHostWindow
-                                   runGeneration:runGeneration];
+                    NSTimeInterval configDuration = [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
+                                                                        inWindow:currentHostWindow
+                                                                   runGeneration:runGeneration];
+                    if (completion) {
+                        completion(YES, YES, configDuration);
+                    }
                     return;
                 }
                 if ([strongSelf modeIsRecognitionTask:actionMode]) {
@@ -12855,11 +12875,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (NSString *)targetBundleIDForTask:(NSDictionary *)task {
-    NSString *bundleID = [self configuredTargetBundleIDForTask:task];
-    if (bundleID.length > 0) {
-        return bundleID;
-    }
-    return [self bundleIDForInstalledApplicationMatchingName:@"Alook"];
+    return [self configuredTargetBundleIDForTask:task];
 }
 
 - (NSString *)configuredTargetBundleIDForTask:(NSDictionary *)task {
@@ -12870,7 +12886,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     NSString *bundleID = [self targetBundleIDForTask:task];
     if (bundleID.length == 0) {
         if (errorMessage) {
-            *errorMessage = @"未找到 Alook，请填写 Bundle ID";
+            *errorMessage = @"应用切换 Bundle ID 未填写";
         }
         return NO;
     }
@@ -12886,7 +12902,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 
     BOOL success = ((BOOL (*)(id, SEL, NSString *))objc_msgSend)(workspace, selector, bundleID);
     if (!success && errorMessage) {
-        *errorMessage = [NSString stringWithFormat:@"切换应用失败：%@", bundleID];
+        *errorMessage = [NSString stringWithFormat:@"应用切换失败：%@", bundleID];
     }
     return success;
 }
@@ -13103,6 +13119,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         return YES;
     }
     if (mode == AnClickActionModeOpenApp) {
+        NSString *bundleID = [self configuredTargetBundleIDForTask:task];
+        if (bundleID.length == 0) {
+            _statusLabel.text = @"应用切换 Bundle ID 未填写";
+            return NO;
+        }
         return YES;
     }
     if (mode == AnClickActionModeDelay) {
@@ -13196,13 +13217,13 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             NSString *bundleID = [strongSelf targetBundleIDForTask:task];
             if (success) {
                 strongSelf->_statusLabel.text = bundleID.length > 0
-                    ? [NSString stringWithFormat:@"已切换应用 %@", bundleID]
-                    : @"已切换应用";
+                    ? [NSString stringWithFormat:@"已切换到应用 %@", bundleID]
+                    : @"已完成应用切换";
                 if (runGeneration != 0) {
                     [strongSelf finishTaskRunWithStatus:strongSelf->_statusLabel.text showToast:NO restorePanel:NO];
                 }
             } else {
-                NSString *message = error.length > 0 ? error : @"切换应用失败";
+                NSString *message = error.length > 0 ? error : @"应用切换失败";
                 strongSelf->_statusLabel.text = message;
                 [strongSelf setHomeOutputText:message];
                 if (runGeneration != 0) {

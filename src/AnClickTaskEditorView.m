@@ -108,6 +108,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindFailureBranchNetworkFalse,
     ACEditorRowKindSuccessBranchDelay,
     ACEditorRowKindFailureBranchDelay,
+    ACEditorRowKindSuccessBranchAppBundleID,
+    ACEditorRowKindFailureBranchAppBundleID,
     ACEditorRowKindSuccessBranchThreshold,
     ACEditorRowKindFailureBranchThreshold,
     ACEditorRowKindSuccessBranchOCRText,
@@ -682,7 +684,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @{@"title": @"🌐 网络", @"mode": @(AnClickActionModeNetwork)},
             @{@"title": @"🔀 跳转", @"mode": @(AnClickActionModeJump)},
             @{@"title": @"⏱ 延时", @"mode": @(AnClickActionModeDelay)},
-            @{@"title": @"▣ 切应用", @"mode": @(AnClickActionModeOpenApp)},
+            @{@"title": @"⇄ 应用切换", @"mode": @(AnClickActionModeOpenApp)},
         ];
         NSMutableArray *buttons = [NSMutableArray array];
         UIStackView *outer = [[UIStackView alloc] initWithFrame:CGRectZero];
@@ -991,7 +993,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case AnClickActionModeDelay:
             return @"延时设置";
         case AnClickActionModeOpenApp:
-            return @"切换设置";
+            return @"应用切换设置";
         default:
             return @"动作设置";
     }
@@ -1213,6 +1215,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         mode == AnClickActionModeSwipe ||
         mode == AnClickActionModeNetwork ||
         mode == AnClickActionModeDelay ||
+        mode == AnClickActionModeOpenApp ||
         mode == AnClickActionModeJump;
 }
 
@@ -1235,6 +1238,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @(AnClickActionModeSwipe),
             @(AnClickActionModeNetwork),
             @(AnClickActionModeDelay),
+            @(AnClickActionModeOpenApp),
             @(AnClickActionModeTwoFingerTap),
             @(AnClickActionModeJump),
         ]];
@@ -1248,6 +1252,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeNetwork),
         @(AnClickActionModeDelay),
+        @(AnClickActionModeOpenApp),
     ]];
     if (![self isEditingBranchActionConfig]) {
         [modes addObjectsFromArray:@[
@@ -1302,7 +1307,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case AnClickActionModeNetwork: return @"网络";
         case AnClickActionModeJump: return @"跳转";
         case AnClickActionModeDelay: return @"延时";
-        case AnClickActionModeOpenApp: return @"切应用";
+        case AnClickActionModeOpenApp: return @"应用切换";
         default: return @"动作";
     }
 }
@@ -1495,6 +1500,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
         @(AnClickActionModeDelay),
+        @(AnClickActionModeOpenApp),
         @(AnClickActionModeJump),
     ];
     NSMutableArray<NSDictionary *> *items = [NSMutableArray array];
@@ -1621,6 +1627,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             config[@"successActionConfig"] = childConfig;
         } else if (mode == AnClickActionModeSwipe) {
             config[@"successActionConfig"] = [self draftBranchConfigForMode:mode];
+        } else if (mode == AnClickActionModeOpenApp) {
+            config[@"successActionConfig"] = [self draftBranchConfigForMode:mode];
         } else if ([self branchActionModeCanUseRecognitionPoint:mode]) {
             NSMutableDictionary *childConfig = [[self draftBranchConfigForMode:mode] mutableCopy];
             childConfig[@"useMatchPoint"] = @(success);
@@ -1662,6 +1670,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     } else if (mode == AnClickActionModeOCR) {
         config[@"ocrMatchMode"] = @(AnClickOCRMatchModeContains);
         config[@"ocrSimilarity"] = @0.80;
+    } else if (mode == AnClickActionModeOpenApp) {
+        config[@"targetBundleID"] = @"";
     }
     return config;
 }
@@ -1920,6 +1930,10 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             return judgementMode && successInlineMode == AnClickActionModeDelay;
         case ACEditorRowKindFailureBranchDelay:
             return judgementMode && failureInlineMode == AnClickActionModeDelay;
+        case ACEditorRowKindSuccessBranchAppBundleID:
+            return judgementMode && successInlineMode == AnClickActionModeOpenApp;
+        case ACEditorRowKindFailureBranchAppBundleID:
+            return judgementMode && failureInlineMode == AnClickActionModeOpenApp;
         case ACEditorRowKindSuccessBranchThreshold:
             return successActionMode == AnClickActionModeImage || successActionMode == AnClickActionModeColor;
         case ACEditorRowKindFailureBranchThreshold:
@@ -1990,6 +2004,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @(ACEditorRowKindSuccessBranchNetworkContains),
             @(ACEditorRowKindSuccessBranchNetworkFalse),
             @(ACEditorRowKindSuccessBranchDelay),
+            @(ACEditorRowKindSuccessBranchAppBundleID),
         ];
         for (NSNumber *rowNumber in successInlineRows) {
             if ([self shouldShowRowForKind:(ACEditorRowKind)rowNumber.integerValue]) {
@@ -2052,6 +2067,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @(ACEditorRowKindFailureBranchNetworkContains),
             @(ACEditorRowKindFailureBranchNetworkFalse),
             @(ACEditorRowKindFailureBranchDelay),
+            @(ACEditorRowKindFailureBranchAppBundleID),
         ];
         for (NSNumber *rowNumber in failureInlineRows) {
             if ([self shouldShowRowForKind:(ACEditorRowKind)rowNumber.integerValue]) {
@@ -2875,12 +2891,23 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             cell.textField.keyboardType = UIKeyboardTypeNumberPad;
             break;
         case ACEditorRowKindAppBundleID:
-            cell.iconLabel.text = @"▣";
+            cell.iconLabel.text = @"⇄";
             cell.titleLabel.text = @"目标应用 Bundle ID";
             cell.textField.text = self.model.targetBundleID;
-            cell.textField.placeholder = @"留空自动查找 Alook";
+            cell.textField.placeholder = @"例如 com.vendor.app";
             cell.textField.keyboardType = UIKeyboardTypeASCIICapable;
             break;
+        case ACEditorRowKindSuccessBranchAppBundleID:
+        case ACEditorRowKindFailureBranchAppBundleID: {
+            BOOL success = row == ACEditorRowKindSuccessBranchAppBundleID;
+            cell.iconLabel.text = success ? @"↳" : @"↯";
+            cell.iconLabel.textColor = success ? UIColor.systemGreenColor : UIColor.systemRedColor;
+            cell.titleLabel.text = success ? @"成功分支应用 Bundle ID" : @"失败分支应用 Bundle ID";
+            cell.textField.text = [self branchInlineStringValueForSuccess:success key:@"targetBundleID"];
+            cell.textField.placeholder = @"必须填写 Bundle ID";
+            cell.textField.keyboardType = UIKeyboardTypeASCIICapable;
+            break;
+        }
         case ACEditorRowKindMacroSummary:
             cell.iconLabel.text = @"●";
             cell.titleLabel.text = @"录制内容";
@@ -3136,6 +3163,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             break;
         case ACEditorRowKindAppBundleID:
             self.model.targetBundleID = text;
+            break;
+        case ACEditorRowKindSuccessBranchAppBundleID:
+            [self storeBranchInlineValue:text key:@"targetBundleID" success:YES];
+            break;
+        case ACEditorRowKindFailureBranchAppBundleID:
+            [self storeBranchInlineValue:text key:@"targetBundleID" success:NO];
             break;
         case ACEditorRowKindMacroSpeed:
             self.model.macroSpeed = MIN(10.0, MAX(0.1, text.doubleValue));

@@ -15,6 +15,7 @@
 @interface AnClickRecognitionService ()
 @property (nonatomic) dispatch_queue_t queue;
 @property (atomic, assign) NSUInteger cancellationGeneration;
+@property (atomic, assign) NSUInteger latestRequestToken;
 @end
 
 @implementation AnClickRecognitionService
@@ -31,6 +32,20 @@
         });
     }
     return self;
+}
+
+- (NSUInteger)beginRequestToken {
+    @synchronized (self) {
+        self.latestRequestToken += 1;
+        if (self.latestRequestToken == 0) {
+            self.latestRequestToken = 1;
+        }
+        return self.latestRequestToken;
+    }
+}
+
+- (BOOL)isRequestTokenCurrent:(NSUInteger)token {
+    return token == self.latestRequestToken;
 }
 
 - (void)completeOnMain:(AnClickRecognitionMatchCompletion)completion
@@ -53,6 +68,7 @@
 - (void)findTemplateImageMatch:(UIImage *)templateImage
                      threshold:(double)threshold
                     completion:(AnClickRecognitionMatchCompletion)completion {
+    NSUInteger requestToken = [self beginRequestToken];
     if (!templateImage) {
         [self completeOnMain:completion match:nil generation:self.cancellationGeneration];
         return;
@@ -60,11 +76,11 @@
     NSUInteger generation = self.cancellationGeneration;
     dispatch_async(_queue, ^{
         @autoreleasepool {
-            if (![self isGenerationCurrent:generation]) {
+            if (![self isGenerationCurrent:generation] || ![self isRequestTokenCurrent:requestToken]) {
                 return;
             }
             NSDictionary *match = [AnClickCore findTemplateImageMatch:templateImage threshold:threshold];
-            if (![self isGenerationCurrent:generation]) {
+            if (![self isGenerationCurrent:generation] || ![self isRequestTokenCurrent:requestToken]) {
                 return;
             }
             [self completeOnMain:completion match:match generation:generation];
@@ -76,6 +92,7 @@
             mode:(AnClickOCRMode)mode
         useRegex:(BOOL)useRegex
       completion:(AnClickRecognitionMatchCompletion)completion {
+    NSUInteger requestToken = [self beginRequestToken];
     if (targetText.length == 0) {
         [self completeOnMain:completion match:nil generation:self.cancellationGeneration];
         return;
@@ -83,11 +100,11 @@
     NSUInteger generation = self.cancellationGeneration;
     dispatch_async(_queue, ^{
         @autoreleasepool {
-            if (![self isGenerationCurrent:generation]) {
+            if (![self isGenerationCurrent:generation] || ![self isRequestTokenCurrent:requestToken]) {
                 return;
             }
             NSDictionary *match = [AnClickOCR findText:targetText mode:mode useRegex:useRegex];
-            if (![self isGenerationCurrent:generation]) {
+            if (![self isGenerationCurrent:generation] || ![self isRequestTokenCurrent:requestToken]) {
                 return;
             }
             [self completeOnMain:completion match:match generation:generation];
@@ -98,6 +115,7 @@
 - (void)findColorPatternMatchWithPoints:(NSArray<NSDictionary *> *)points
                               tolerance:(double)tolerance
                              completion:(AnClickRecognitionMatchCompletion)completion {
+    NSUInteger requestToken = [self beginRequestToken];
     if (points.count == 0) {
         [self completeOnMain:completion match:nil generation:self.cancellationGeneration];
         return;
@@ -105,11 +123,11 @@
     NSUInteger generation = self.cancellationGeneration;
     dispatch_async(_queue, ^{
         @autoreleasepool {
-            if (![self isGenerationCurrent:generation]) {
+            if (![self isGenerationCurrent:generation] || ![self isRequestTokenCurrent:requestToken]) {
                 return;
             }
             NSDictionary *match = [AnClickCore findColorPatternMatchWithPoints:points tolerance:tolerance];
-            if (![self isGenerationCurrent:generation]) {
+            if (![self isGenerationCurrent:generation] || ![self isRequestTokenCurrent:requestToken]) {
                 return;
             }
             [self completeOnMain:completion match:match generation:generation];
@@ -119,6 +137,12 @@
 
 - (void)cancelPendingRequests {
     self.cancellationGeneration = self.cancellationGeneration + 1;
+    @synchronized (self) {
+        self.latestRequestToken += 1;
+        if (self.latestRequestToken == 0) {
+            self.latestRequestToken = 1;
+        }
+    }
 }
 
 @end
