@@ -270,11 +270,11 @@ static NSString * const AnClickDefaultUserAgent = @"Mozilla/5.0 (iPhone; CPU iPh
     NSString *normalizedMethod = [self trimmedText:method].uppercaseString;
     BOOL usesPost = [normalizedMethod isEqualToString:@"POST"];
     request.HTTPMethod = usesPost ? @"POST" : @"GET";
-    [request setValue:AnClickDefaultContentType forHTTPHeaderField:@"Content-Type"];
     [request setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
     [request setValue:AnClickDefaultUserAgent forHTTPHeaderField:@"User-Agent"];
     (void)headers;
     if (usesPost) {
+        [request setValue:AnClickDefaultContentType forHTTPHeaderField:@"Content-Type"];
         NSString *bodyText = postBody ?: @"";
         request.HTTPBody = [bodyText dataUsingEncoding:NSUTF8StringEncoding];
     }

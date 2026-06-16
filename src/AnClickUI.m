@@ -274,6 +274,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (BOOL)currentEditorNetworkPostAllowsRecognitionResult;
 - (void)cleanupScreenInteractionStateRestoringPanel:(BOOL)restorePanel;
 - (void)showToast:(NSString *)message;
+- (void)setHomeOutputText:(NSString *)text;
+- (void)copyHomeOutputText;
 - (void)performSelectedActionAtPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow preparePanel:(BOOL)preparePanel;
 - (BOOL)panelCanUseCurrentScene;
 - (void)clearTaskRunPauseState;
@@ -308,6 +310,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_homeSaveConfigButton;
     UIButton *_authorFollowButton;
     UIButton *_authorGroupButton;
+    UIButton *_homeOutputCopyButton;
     UIButton *_globalSettingsButton;
     UITableView *_taskListView;
     AnClickTaskEditorView *_taskEditorView;
@@ -1749,8 +1752,21 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _statusLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightSemibold];
     _statusLabel.adjustsFontSizeToFitWidth = YES;
     _statusLabel.minimumScaleFactor = 0.6;
-    _statusLabel.textAlignment = NSTextAlignmentCenter;
+    _statusLabel.textAlignment = NSTextAlignmentLeft;
+    _statusLabel.numberOfLines = 2;
     [_homeOutputView addSubview:_statusLabel];
+
+    _homeOutputCopyButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_homeOutputCopyButton setTitle:@"复制" forState:UIControlStateNormal];
+    [_homeOutputCopyButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    _homeOutputCopyButton.titleLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightBold];
+    _homeOutputCopyButton.titleLabel.adjustsFontSizeToFitWidth = YES;
+    _homeOutputCopyButton.titleLabel.minimumScaleFactor = 0.75;
+    _homeOutputCopyButton.backgroundColor = [[self themeHighlightColor] colorWithAlphaComponent:0.88];
+    _homeOutputCopyButton.layer.cornerRadius = 7.0;
+    _homeOutputCopyButton.layer.masksToBounds = YES;
+    [_homeOutputCopyButton addTarget:self action:@selector(copyHomeOutputText) forControlEvents:UIControlEventTouchUpInside];
+    [_homeOutputView addSubview:_homeOutputCopyButton];
 
     _taskEditorView = [[AnClickTaskEditorView alloc] initWithFrame:_panelView.bounds];
     _taskEditorView.delegate = self;
@@ -2850,7 +2866,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (CGFloat)homeOutputFooterHeight {
-    return 25.0;
+    return 32.0;
 }
 
 - (CGFloat)homeOutputFooterGap {
@@ -3395,6 +3411,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _authorFollowButton.hidden = visible;
     _authorGroupButton.hidden = visible;
     _homeOutputView.hidden = visible;
+    _homeOutputCopyButton.hidden = visible;
     [_panelView viewWithTag:AnClickHomeAddLabelTag].hidden = visible;
     [_panelView viewWithTag:AnClickHomeDeleteLabelTag].hidden = visible;
     [_panelView viewWithTag:AnClickHomeRunLabelTag].hidden = visible;
@@ -3535,7 +3552,20 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _homeOutputView.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.76];
     _homeOutputView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.42].CGColor;
     _statusLabel.hidden = NO;
-    _statusLabel.frame = CGRectInset(_homeOutputView.bounds, 10.0, 3.0);
+    CGFloat copyWidth = 44.0;
+    CGFloat copyHeight = 22.0;
+    CGFloat copyX = CGRectGetWidth(_homeOutputView.bounds) - copyWidth - 6.0;
+    _homeOutputCopyButton.hidden = NO;
+    _homeOutputCopyButton.frame = CGRectMake(copyX,
+                                             (CGRectGetHeight(_homeOutputView.bounds) - copyHeight) * 0.5,
+                                             copyWidth,
+                                             copyHeight);
+    _homeOutputCopyButton.backgroundColor = [[self themeHighlightColor] colorWithAlphaComponent:0.88];
+    _homeOutputCopyButton.titleLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightBold];
+    _statusLabel.frame = CGRectMake(10.0,
+                                    3.0,
+                                    MAX(1.0, copyX - 16.0),
+                                    CGRectGetHeight(_homeOutputView.bounds) - 6.0);
     _statusLabel.textColor = [self themeSecondaryTextColor];
     _statusLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightSemibold];
 
@@ -4155,6 +4185,36 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [self showToast:self->_statusLabel.text];
         }
     }];
+}
+
+- (void)setHomeOutputText:(NSString *)text {
+    NSString *safeText = [self trimmedActionDescription:text];
+    _statusLabel.text = safeText;
+    [_homeOutputCopyButton setTitle:@"复制" forState:UIControlStateNormal];
+    [self refreshCollapsedButtonTitle];
+    if (!_taskEditorVisible && _homeOutputView) {
+        _homeOutputView.hidden = NO;
+        _homeOutputCopyButton.hidden = NO;
+    }
+}
+
+- (void)copyHomeOutputText {
+    NSString *text = [self trimmedActionDescription:_statusLabel.text];
+    if (text.length == 0) {
+        [_homeOutputCopyButton setTitle:@"无内容" forState:UIControlStateNormal];
+    } else {
+        UIPasteboard.generalPasteboard.string = text;
+        [_homeOutputCopyButton setTitle:@"已复制" forState:UIControlStateNormal];
+    }
+
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+        [strongSelf->_homeOutputCopyButton setTitle:@"复制" forState:UIControlStateNormal];
+    });
 }
 
 - (void)scrollGlobalSettingsToControl:(UIView *)control focus:(BOOL)focus {
@@ -11185,6 +11245,38 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     return [_networkService normalizedURLString:urlText];
 }
 
+- (NSString *)barkURLValidationMessageForURLString:(NSString *)urlString {
+    NSURL *url = [NSURL URLWithString:urlString ?: @""];
+    NSString *host = url.host.lowercaseString ?: @"";
+    if (![host isEqualToString:@"api.day.app"] && ![host hasSuffix:@".day.app"]) {
+        return nil;
+    }
+
+    NSString *path = url.path.stringByRemovingPercentEncoding ?: url.path ?: @"";
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    for (NSString *part in [path componentsSeparatedByString:@"/"]) {
+        NSString *trimmed = [self trimmedActionDescription:part];
+        if (trimmed.length > 0) {
+            [parts addObject:trimmed];
+        }
+    }
+    if (parts.count == 0) {
+        return @"Bark缺少Key";
+    }
+    if (parts.count < 2) {
+        return @"Bark缺少推送内容";
+    }
+    NSMutableArray<NSString *> *bodyParts = [NSMutableArray array];
+    for (NSUInteger index = 1; index < parts.count; index++) {
+        [bodyParts addObject:parts[index]];
+    }
+    NSString *bodyText = [bodyParts componentsJoinedByString:@"/"];
+    if ([self trimmedActionDescription:bodyText].length == 0) {
+        return @"Bark缺少推送内容";
+    }
+    return nil;
+}
+
 - (BOOL)networkBody:(NSString *)body matchesRegexPattern:(NSString *)pattern {
     return [_networkService body:body matchesRegexPattern:pattern];
 }
@@ -11267,9 +11359,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                      runGeneration:(NSUInteger)runGeneration
                         completion:(void (^)(BOOL matched, BOOL requestSucceeded, BOOL blocked))completion {
     if (![self panelCanUseCurrentScene]) {
-        _statusLabel.text = @"网络窗口不可用";
-        [self showToast:_statusLabel.text];
-        [self refreshCollapsedButtonTitle];
+        [self setHomeOutputText:@"网络窗口不可用"];
         if (completion) {
             completion(NO, NO, NO);
         }
@@ -11279,9 +11369,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     NSString *contains = [self trimmedActionDescription:task[@"networkContains"]];
     NSString *falseText = [self trimmedActionDescription:task[@"networkFalse"]];
     if (url.length == 0) {
-        _statusLabel.text = @"网络未填链接";
-        [self showToast:@"网络未填链接"];
-        [self refreshCollapsedButtonTitle];
+        [self setHomeOutputText:@"网络未填链接"];
         if (completion) {
             completion(NO, NO, NO);
         }
@@ -11290,9 +11378,16 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 
     NSString *urlString = [self normalizedNetworkURLString:url];
     if (urlString.length == 0) {
-        _statusLabel.text = @"网络链接无效";
-        [self showToast:_statusLabel.text];
-        [self refreshCollapsedButtonTitle];
+        [self setHomeOutputText:@"网络链接无效"];
+        if (completion) {
+            completion(NO, NO, NO);
+        }
+        return;
+    }
+
+    NSString *barkValidationMessage = [self barkURLValidationMessageForURLString:urlString];
+    if (barkValidationMessage.length > 0) {
+        [self setHomeOutputText:barkValidationMessage];
         if (completion) {
             completion(NO, NO, NO);
         }
@@ -11301,9 +11396,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 
     BOOL oneShot = [self networkTaskIsOneShot:task];
     if (!oneShot && ![self networkTaskHasJudgementCondition:task]) {
-        _statusLabel.text = @"网络判断未填条件";
-        [self showToast:_statusLabel.text];
-        [self refreshCollapsedButtonTitle];
+        [self setHomeOutputText:@"网络判断未填条件"];
         if (completion) {
             completion(NO, NO, NO);
         }
@@ -11313,9 +11406,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     NSString *method = [self networkMethodForTask:task];
     NSURL *requestURL = [NSURL URLWithString:urlString];
     NSString *hostText = requestURL.host.length > 0 ? requestURL.host : @"网络";
-    _statusLabel.text = [NSString stringWithFormat:@"%@ %@请求中", method, hostText];
-    [self showToast:_statusLabel.text];
-    [self refreshCollapsedButtonTitle];
+    [self setHomeOutputText:[NSString stringWithFormat:@"%@ %@请求中", method, hostText]];
     NSString *postBody = [self networkPostBodyForTask:task recognitionText:nil];
     [self performNetworkRequestWithURLString:urlString method:method headers:task[@"networkHeaders"] postBody:postBody trueText:contains falseText:falseText defaultExpectedTrue:NO timeout:timeout completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
         if (runGeneration != 0 && (!self->_taskRunActive || runGeneration != self->_taskRunGeneration)) {
@@ -11337,12 +11428,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         }
         NSString *responseText = [self trimmedActionDescription:body];
         if (!requestSucceeded && responseText.length > 0) {
-            NSString *shortBody = responseText.length > 48 ? [[responseText substringToIndex:48] stringByAppendingString:@"..."] : responseText;
+            NSString *shortBody = responseText.length > 96 ? [[responseText substringToIndex:96] stringByAppendingString:@"..."] : responseText;
             statusText = [NSString stringWithFormat:@"%@ %@", statusText, shortBody];
         }
-        self->_statusLabel.text = statusText;
-        [self showToast:self->_statusLabel.text];
-        [self refreshCollapsedButtonTitle];
+        [self setHomeOutputText:statusText];
         if (completion) {
             completion(matched, requestSucceeded, blocked);
         }
