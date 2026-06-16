@@ -51,7 +51,8 @@ static NSString * const AnClickDefaultUserAgent = @"Mozilla/5.0 (iPhone; CPU iPh
     if (path.length > 0) {
         NSMutableCharacterSet *pathAllowed = [NSCharacterSet.URLPathAllowedCharacterSet mutableCopy];
         [pathAllowed removeCharactersInString:@"%"];
-        NSString *encodedPath = [path stringByAddingPercentEncodingWithAllowedCharacters:pathAllowed];
+        NSString *decodedPath = path.stringByRemovingPercentEncoding ?: path;
+        NSString *encodedPath = [decodedPath stringByAddingPercentEncodingWithAllowedCharacters:pathAllowed];
         if (encodedPath.length > 0) {
             components.percentEncodedPath = encodedPath;
         }

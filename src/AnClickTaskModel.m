@@ -171,6 +171,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
         _networkURL = @"";
         _networkMethod = @"GET";
         _networkHeaders = ACDefaultNetworkHeaders();
+        _networkRequestOnly = YES;
         _networkRetryForever = YES;
         _networkRetryLimit = 1;
         _networkTimeout = 8.0;
@@ -255,13 +256,17 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     _networkMethod = ACStringValue(dictionary[@"networkMethod"]).length > 0 ? [ACStringValue(dictionary[@"networkMethod"]) uppercaseString] : @"GET";
     NSDictionary *headers = ACDictionaryValue(dictionary[@"networkHeaders"]);
     _networkHeaders = headers.count > 0 ? headers : ACDefaultNetworkHeaders();
-    _networkRequestOnly = [dictionary[@"networkRequestOnly"] boolValue];
+    BOOL hasExplicitNetworkRequestOnly = dictionary[@"networkRequestOnly"] != nil;
+    _networkRequestOnly = hasExplicitNetworkRequestOnly ? [dictionary[@"networkRequestOnly"] boolValue] : YES;
     _networkUsesPost = [dictionary[@"networkUsesPost"] boolValue];
     _networkRetryForever = dictionary[@"networkRetryForever"] ? [dictionary[@"networkRetryForever"] boolValue] : YES;
     _networkRetryLimit = ACClampedInteger(dictionary[@"networkRetryLimit"], 1, 9999, 1);
     _networkTimeout = ACClampedDouble(dictionary[@"networkTimeout"], 1.0, 60.0, 8.0);
     _networkContains = ACStringValue(dictionary[@"networkContains"]);
     _networkFalse = ACStringValue(dictionary[@"networkFalse"]);
+    if (!hasExplicitNetworkRequestOnly) {
+        _networkRequestOnly = (_networkContains.length == 0 && _networkFalse.length == 0);
+    }
     _networkPostBody = ACStringValue(dictionary[@"networkPostBody"]);
     _networkPostBodyUsesOCRResult = [dictionary[@"networkPostBodyUsesOCRResult"] boolValue];
     _networkPostExtraFields = ACStringValue(dictionary[@"networkPostExtraFields"]);

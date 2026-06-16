@@ -2126,6 +2126,10 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         self.model.networkMethod = @"GET";
     } else if (self.model.networkHeaders.count == 0) {
         self.model.networkHeaders = ACEditorDefaultNetworkHeaders();
+    } else if (!self.model.networkRequestOnly &&
+               self.model.networkContains.length == 0 &&
+               self.model.networkFalse.length == 0) {
+        self.model.networkRequestOnly = YES;
     }
     if (mode != AnClickActionModeJump) {
         self.model.jumpTaskIndex = -1;
@@ -2199,6 +2203,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
                 strongSelf.model.failureActionMode = AnClickActionModeNone;
                 strongSelf.model.successActionConfig = @{};
                 strongSelf.model.failureActionConfig = @{};
+                strongSelf.model.networkRequestOnly = YES;
+                strongSelf.model.networkMethod = @"GET";
+                strongSelf.model.networkUsesPost = NO;
             }
             [strongSelf normalizeModelForCurrentActionMode];
             [strongSelf notifyModelChanged];

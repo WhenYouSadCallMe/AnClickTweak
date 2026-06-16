@@ -1521,7 +1521,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalStartEnabled = NO;
     _globalStopEnabled = NO;
     _globalNetworkGateEnabled = NO;
-    _networkRequestOnly = NO;
+    _networkRequestOnly = YES;
     _networkUsesPost = NO;
     _networkPostBodyUsesOCRResult = NO;
     _networkRetryForever = YES;
@@ -5109,7 +5109,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkFalseText = nil;
     _networkPostBody = nil;
     _networkPostPairs = [NSMutableArray arrayWithObject:[self blankNetworkPostPair]];
-    _networkRequestOnly = NO;
+    _networkRequestOnly = YES;
     _networkUsesPost = NO;
     _networkPostBodyUsesOCRResult = NO;
     _networkRetryForever = YES;
@@ -5356,7 +5356,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     model.networkFalse = _networkFalseText ?: @"";
     model.networkPostBody = _networkPostBody ?: @"";
     model.networkUsesPost = _networkUsesPost;
-    model.networkRequestOnly = _networkRequestOnly;
+    model.networkRequestOnly = _networkRequestOnly ||
+        ((model.networkContains.length == 0) && (model.networkFalse.length == 0));
     model.networkRetryForever = _networkRetryForever;
     model.networkTimeout = _networkTimeout;
     model.networkPostPairs = _networkPostPairs ?: @[];
@@ -11266,6 +11267,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                      runGeneration:(NSUInteger)runGeneration
                         completion:(void (^)(BOOL matched, BOOL requestSucceeded, BOOL blocked))completion {
     if (![self panelCanUseCurrentScene]) {
+        _statusLabel.text = @"网络窗口不可用";
+        [self showToast:_statusLabel.text];
+        [self refreshCollapsedButtonTitle];
         if (completion) {
             completion(NO, NO, NO);
         }
@@ -11277,6 +11281,18 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if (url.length == 0) {
         _statusLabel.text = @"网络未填链接";
         [self showToast:@"网络未填链接"];
+        [self refreshCollapsedButtonTitle];
+        if (completion) {
+            completion(NO, NO, NO);
+        }
+        return;
+    }
+
+    NSString *urlString = [self normalizedNetworkURLString:url];
+    if (urlString.length == 0) {
+        _statusLabel.text = @"网络链接无效";
+        [self showToast:_statusLabel.text];
+        [self refreshCollapsedButtonTitle];
         if (completion) {
             completion(NO, NO, NO);
         }
@@ -11287,16 +11303,21 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if (!oneShot && ![self networkTaskHasJudgementCondition:task]) {
         _statusLabel.text = @"网络判断未填条件";
         [self showToast:_statusLabel.text];
+        [self refreshCollapsedButtonTitle];
         if (completion) {
             completion(NO, NO, NO);
         }
         return;
     }
     NSTimeInterval timeout = [self networkTimeoutForTask:task];
-    [self showToast:oneShot ? @"网络仅请求" : @"网络请求中"];
     NSString *method = [self networkMethodForTask:task];
+    NSURL *requestURL = [NSURL URLWithString:urlString];
+    NSString *hostText = requestURL.host.length > 0 ? requestURL.host : @"网络";
+    _statusLabel.text = [NSString stringWithFormat:@"%@ %@请求中", method, hostText];
+    [self showToast:_statusLabel.text];
+    [self refreshCollapsedButtonTitle];
     NSString *postBody = [self networkPostBodyForTask:task recognitionText:nil];
-    [self performNetworkRequestWithURLString:url method:method headers:task[@"networkHeaders"] postBody:postBody trueText:contains falseText:falseText defaultExpectedTrue:NO timeout:timeout completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
+    [self performNetworkRequestWithURLString:urlString method:method headers:task[@"networkHeaders"] postBody:postBody trueText:contains falseText:falseText defaultExpectedTrue:NO timeout:timeout completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
         if (runGeneration != 0 && (!self->_taskRunActive || runGeneration != self->_taskRunGeneration)) {
             return;
         }
@@ -11306,10 +11327,22 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             return;
         }
         BOOL blocked = !oneShot && requestSucceeded && [self networkBody:body matchesBlockText:falseText defaultExpectedTrue:NO];
-        self->_statusLabel.text = oneShot
-            ? (requestSucceeded ? @"网络请求完成" : [self networkStatusTextWithMatched:NO requestSucceeded:requestSucceeded statusCode:statusCode error:error])
-            : (blocked ? @"命中不运行" : [self networkStatusTextWithMatched:matched requestSucceeded:requestSucceeded statusCode:statusCode error:error]);
+        NSString *statusText = nil;
+        if (oneShot) {
+            statusText = requestSucceeded
+                ? (statusCode > 0 ? [NSString stringWithFormat:@"网络请求完成 %ld", (long)statusCode] : @"网络请求完成")
+                : [self networkStatusTextWithMatched:NO requestSucceeded:requestSucceeded statusCode:statusCode error:error];
+        } else {
+            statusText = blocked ? @"命中不运行" : [self networkStatusTextWithMatched:matched requestSucceeded:requestSucceeded statusCode:statusCode error:error];
+        }
+        NSString *responseText = [self trimmedActionDescription:body];
+        if (!requestSucceeded && responseText.length > 0) {
+            NSString *shortBody = responseText.length > 48 ? [[responseText substringToIndex:48] stringByAppendingString:@"..."] : responseText;
+            statusText = [NSString stringWithFormat:@"%@ %@", statusText, shortBody];
+        }
+        self->_statusLabel.text = statusText;
         [self showToast:self->_statusLabel.text];
+        [self refreshCollapsedButtonTitle];
         if (completion) {
             completion(matched, requestSucceeded, blocked);
         }
