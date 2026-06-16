@@ -82,7 +82,7 @@ static NSString * const AnClickTaskExpandedKey = @"isExpanded";
 static NSString * const AnClickTaskListCellIdentifier = @"AnClickTaskListCell";
 static const NSInteger AnClickTaskListEditButtonTagBase = 51000;
 static const NSInteger AnClickTaskListRunButtonTagBase = 52000;
-static const NSInteger AnClickTaskListCollapseButtonTagBase = 53000;
+static const NSInteger AnClickTaskListNoteButtonTagBase = 53000;
 static const NSInteger AnClickHomeRunLabelTag = 54001;
 static const NSInteger AnClickHomeStopLabelTag = 54002;
 static const NSInteger AnClickHomeRecordLabelTag = 54003;
@@ -268,6 +268,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)showFunctionMenu;
 - (void)showGlobalSettings;
 - (void)showSaveTaskConfigNamePrompt;
+- (void)showTaskNotePromptForTaskAtIndex:(NSInteger)index;
 - (void)showSavedConfigListForDeleting:(BOOL)deleting;
 - (void)showDeleteSavedConfigConfirmationAtIndex:(NSInteger)index name:(NSString *)name taskCount:(NSUInteger)taskCount;
 - (void)registerKeyboardAvoidanceObserversIfNeeded;
@@ -278,6 +279,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)setHomeOutputText:(NSString *)text;
 - (BOOL)homeOutputTextIsError:(NSString *)text;
 - (void)copyHomeOutputText;
+- (void)applyLowPowerEngineSettings;
 - (void)performSelectedActionAtPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow preparePanel:(BOOL)preparePanel;
 - (BOOL)panelCanUseCurrentScene;
 - (void)clearTaskRunPauseState;
@@ -357,6 +359,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_globalStartTimeButton;
     UIButton *_globalStopTimeButton;
     UIButton *_globalNetworkGateButton;
+    UIButton *_globalLowPowerButton;
     UIView *_globalTimePickerView;
     UIPickerView *_globalTimePicker;
     UIScrollView *_configListView;
@@ -370,6 +373,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSInteger _editingTaskIndex;
     NSInteger _draggingTaskIndex;
     NSInteger _pendingConfigDeleteIndex;
+    NSInteger _pendingTaskNoteIndex;
     CGFloat _taskReorderStartLocationY;
     CGFloat _taskReorderStartCenterY;
     BOOL _taskReordering;
@@ -413,6 +417,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _globalStartEnabled;
     BOOL _globalStopEnabled;
     BOOL _globalNetworkGateEnabled;
+    BOOL _globalLowPowerModeEnabled;
     BOOL _networkRequestOnly;
     BOOL _networkUsesPost;
     BOOL _networkPostBodyUsesOCRResult;
@@ -676,6 +681,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return [self themeWarningColor];
         case AnClickActionModeOpenApp:
             return [self themeTealColor];
+        case AnClickActionModeConditionWait:
+            return [self themePurpleColor];
         default:
             return [self themeHighlightColor];
     }
@@ -1532,6 +1539,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalStartEnabled = NO;
     _globalStopEnabled = NO;
     _globalNetworkGateEnabled = NO;
+    _globalLowPowerModeEnabled = YES;
     _networkRequestOnly = YES;
     _networkUsesPost = NO;
     _networkPostBodyUsesOCRResult = NO;
@@ -1563,6 +1571,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _taskEngine.maxJumpVisitsPerRun = AnClickMaxJumpVisitsPerRun;
     _taskEngine.listRefreshMinInterval = AnClickRunListRefreshMinInterval;
     _taskEngine.delegate = self;
+    [self applyLowPowerEngineSettings];
     __weak typeof(self) weakSelf = self;
     _taskEngine.runtimeHandler = ^(__unused NSTimeInterval runtime) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -1579,6 +1588,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _volumeShortcutRunSuppressToasts = NO;
     _ignoreVolumeEventsUntil = 0;
     _pendingConfigDeleteIndex = -1;
+    _pendingTaskNoteIndex = -1;
     [self loadGlobalSettings];
     [self registerVolumeShortcutObserver];
     if (!_recordedSwipePoints) {
@@ -3880,6 +3890,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @"stopSecond": @(_globalStopSecond),
         @"stopMillisecond": @(_globalStopMillisecond),
         @"networkGateEnabled": @(_globalNetworkGateEnabled),
+        @"lowPowerModeEnabled": @(_globalLowPowerModeEnabled),
         @"networkURL": _globalNetworkURL ?: @"",
         @"networkContains": _globalNetworkContainsText ?: @"",
         @"networkFalse": _globalNetworkFalseText ?: @"",
@@ -3913,9 +3924,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalStopSecond = MIN(59, MAX(0, [settings[@"stopSecond"] integerValue]));
     _globalStopMillisecond = MIN(999, MAX(0, [settings[@"stopMillisecond"] integerValue]));
     _globalNetworkGateEnabled = [settings[@"networkGateEnabled"] boolValue];
+    id lowPowerValue = settings[@"lowPowerModeEnabled"];
+    _globalLowPowerModeEnabled = [lowPowerValue respondsToSelector:@selector(boolValue)] ? [lowPowerValue boolValue] : YES;
     _globalNetworkURL = [self trimmedActionDescription:settings[@"networkURL"]];
     _globalNetworkContainsText = [self trimmedActionDescription:settings[@"networkContains"]];
     _globalNetworkFalseText = [self trimmedActionDescription:settings[@"networkFalse"]];
+    [self applyLowPowerEngineSettings];
 }
 
 - (void)loadGlobalSettings {
@@ -3958,6 +3972,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)persistGlobalSettings {
     [self writeGlobalSettings];
     [self scheduleGlobalTimers];
+}
+
+- (void)applyLowPowerEngineSettings {
+    _taskEngine.listRefreshMinInterval = _globalLowPowerModeEnabled ? 2.50 : AnClickRunListRefreshMinInterval;
 }
 
 - (NSDate *)dateTodayWithHour:(NSInteger)hour minute:(NSInteger)minute second:(NSInteger)second millisecond:(NSInteger)millisecond {
@@ -4082,6 +4100,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalStopTimeButton.alpha = _globalStopEnabled ? 1.0 : 0.78;
     [_globalNetworkGateButton setTitle:_globalNetworkGateEnabled ? @"开启" : @"关闭" forState:UIControlStateNormal];
     _globalNetworkGateButton.alpha = _globalNetworkGateEnabled ? 1.0 : 0.78;
+    [_globalLowPowerButton setTitle:_globalLowPowerModeEnabled ? @"开启" : @"关闭" forState:UIControlStateNormal];
+    _globalLowPowerButton.alpha = _globalLowPowerModeEnabled ? 1.0 : 0.78;
     if (_globalNetworkURLField && !_globalNetworkURLField.isFirstResponder) {
         _globalNetworkURLField.text = _globalNetworkURL ?: @"";
     }
@@ -4149,6 +4169,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self persistGlobalSettings];
 }
 
+- (void)toggleGlobalLowPowerMode {
+    [self syncGlobalSettingsFromFields];
+    _globalLowPowerModeEnabled = !_globalLowPowerModeEnabled;
+    [self applyLowPowerEngineSettings];
+    [self refreshGlobalSettingsControls];
+    [self persistGlobalSettings];
+}
+
 - (void)hideGlobalTimePicker {
     [_globalTimePickerView removeFromSuperview];
     _globalTimePickerView = nil;
@@ -4173,6 +4201,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalStartTimeButton = nil;
     _globalStopTimeButton = nil;
     _globalNetworkGateButton = nil;
+    _globalLowPowerButton = nil;
 }
 
 - (void)openBilibiliProfile {
@@ -4305,7 +4334,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return 352.0;
     }
     if (tag == AnClickHomeOptionPanelLoopTag) {
-        return 344.0;
+        return 392.0;
     }
     if (tag == AnClickHomeOptionPanelSaveTag) {
         return 336.0;
@@ -4433,7 +4462,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)showHomeLoopSettings {
-    UIView *panel = [self showHomeOptionPanelWithTitle:@"循环设置" preferredHeight:344.0 tag:AnClickHomeOptionPanelLoopTag];
+    UIView *panel = [self showHomeOptionPanelWithTitle:@"循环设置" preferredHeight:392.0 tag:AnClickHomeOptionPanelLoopTag];
     CGFloat width = panel.bounds.size.width;
     CGFloat side = 14.0;
     CGFloat contentWidth = width - side * 2.0;
@@ -4442,7 +4471,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                  frame:CGRectMake(side, 62.0, contentWidth, 48.0)];
     [panel addSubview:caption];
 
-    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 116.0, contentWidth, 168.0)];
+    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 116.0, contentWidth, 222.0)];
     [panel addSubview:card];
 
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 16.0, contentWidth - 28.0, 22.0)];
@@ -4479,6 +4508,25 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     unitLabel.textColor = [self themeSecondaryTextColor];
     unitLabel.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightSemibold];
     [card addSubview:unitLabel];
+
+    UIView *line2 = [[UIView alloc] initWithFrame:CGRectMake(14.0, 170.0, contentWidth - 28.0, 1.0)];
+    line2.backgroundColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72];
+    [card addSubview:line2];
+
+    UILabel *powerLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 182.0, floor((contentWidth - 42.0) * 0.52), 28.0)];
+    powerLabel.text = @"低功耗挂机";
+    powerLabel.textColor = [self themePrimaryTextColor];
+    powerLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightBold];
+    [card addSubview:powerLabel];
+
+    _globalLowPowerButton = [self globalSettingsValueButtonWithAction:@selector(toggleGlobalLowPowerMode)];
+    _globalLowPowerButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
+    _globalLowPowerButton.titleEdgeInsets = UIEdgeInsetsZero;
+    _globalLowPowerButton.frame = CGRectMake(CGRectGetMaxX(powerLabel.frame) + 8.0,
+                                             176.0,
+                                             contentWidth - CGRectGetMaxX(powerLabel.frame) - 30.0,
+                                             40.0);
+    [card addSubview:_globalLowPowerButton];
 
     UIButton *doneButton = [self configPromptButtonWithTitle:@"完成" action:@selector(hideGlobalSettings) destructive:NO];
     doneButton.frame = CGRectMake(side, CGRectGetMaxY(card.frame) + 14.0, contentWidth, 42.0);
@@ -4933,6 +4981,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _configPromptView = nil;
     _configNameField = nil;
     _pendingConfigDeleteIndex = -1;
+    _pendingTaskNoteIndex = -1;
 }
 
 - (UIView *)showConfigPromptBaseWithTitle:(NSString *)title message:(NSString *)message {
@@ -5012,6 +5061,65 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [self->_configNameField becomeFirstResponder];
         [self->_configNameField selectAll:nil];
     });
+}
+
+- (void)showTaskNotePromptForTaskAtIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)_taskItems.count) {
+        return;
+    }
+
+    AnClickTaskModel *model = [self taskModelAtIndex:(NSUInteger)index];
+    if (!model) {
+        return;
+    }
+
+    UIView *card = [self showConfigPromptBaseWithTitle:@"任务备注" message:@"只影响任务列表显示，方便区分每一步用途。"];
+    _pendingTaskNoteIndex = index;
+    CGFloat width = card.bounds.size.width;
+    _configNameField = [[UITextField alloc] initWithFrame:CGRectMake(16, 98, width - 32, 42)];
+    _configNameField.text = model.taskDescription ?: @"";
+    _configNameField.returnKeyType = UIReturnKeyDone;
+    [self applyObsidianInputStyleToField:_configNameField placeholder:@"可选备注" monospaced:NO];
+    [self configureConfigTextField:_configNameField];
+    [card addSubview:_configNameField];
+
+    CGFloat buttonY = CGRectGetMaxY(_configNameField.frame) + 20.0;
+    CGFloat gap = 12.0;
+    CGFloat buttonWidth = floor((width - 32.0 - gap) / 2.0);
+    UIButton *cancelButton = [self configPromptButtonWithTitle:@"取消" action:@selector(hideConfigPrompt) destructive:NO];
+    cancelButton.frame = CGRectMake(16, buttonY, buttonWidth, 42);
+    [card addSubview:cancelButton];
+
+    UIButton *saveButton = [self configPromptButtonWithTitle:@"保存备注" action:@selector(confirmTaskNotePrompt) destructive:NO];
+    saveButton.frame = CGRectMake(16 + buttonWidth + gap, buttonY, buttonWidth, 42);
+    [self applyObsidian3DStyleToButton:saveButton selected:YES];
+    [card addSubview:saveButton];
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self->_configNameField becomeFirstResponder];
+        [self->_configNameField selectAll:nil];
+    });
+}
+
+- (void)confirmTaskNotePrompt {
+    NSInteger index = _pendingTaskNoteIndex;
+    if (index < 0 || index >= (NSInteger)_taskItems.count) {
+        [self hideConfigPrompt];
+        return;
+    }
+
+    AnClickTaskModel *model = [self taskModelAtIndex:(NSUInteger)index];
+    if (!model) {
+        [self hideConfigPrompt];
+        return;
+    }
+
+    NSString *note = [_configNameField.text ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    model.taskDescription = note;
+    [self persistCurrentTaskList];
+    [self refreshTaskList];
+    [self hideConfigPrompt];
+    _statusLabel.text = @"";
 }
 
 - (NSString *)trimmedConfigNameFromField {
@@ -5451,6 +5559,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return @"延时";
         case AnClickActionModeOpenApp:
             return @"应用切换";
+        case AnClickActionModeConditionWait:
+            return @"条件等待";
         default:
             return @"动作";
     }
@@ -5640,7 +5750,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         mode == AnClickActionModeNetwork ||
         mode == AnClickActionModeJump ||
         mode == AnClickActionModeDelay ||
-        mode == AnClickActionModeOpenApp;
+        mode == AnClickActionModeOpenApp ||
+        mode == AnClickActionModeConditionWait;
 }
 
 - (BOOL)isReusablePointActionMode:(AnClickActionMode)mode {
@@ -5657,6 +5768,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _pickingFailureActionPoint = NO;
     _pickingSwipeEndPoint = NO;
     if (mode != AnClickActionModeNetwork &&
+        mode != AnClickActionModeConditionWait &&
         mode != AnClickActionModeImage &&
         mode != AnClickActionModeOCR &&
         mode != AnClickActionModeColor) {
@@ -5790,6 +5902,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
+        @(AnClickActionModeConditionWait),
         @(AnClickActionModeOpenApp),
         @(AnClickActionModeImage),
         @(AnClickActionModeOCR),
@@ -5820,6 +5933,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
+        @(AnClickActionModeConditionWait),
         @(AnClickActionModeOpenApp),
         @(AnClickActionModeImage),
         @(AnClickActionModeOCR),
@@ -6916,8 +7030,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)taskEngine:(__unused AnClickTaskEngine *)engine showToastForTask:(NSDictionary *)task index:(NSUInteger)index {
     NSString *text = [self toastTextForTask:task index:index];
     _statusLabel.text = text;
-    [self setHomeOutputText:text];
-    if ([self shouldShowRunProgressToastText:text]) {
+    if (!_globalLowPowerModeEnabled || [self homeOutputTextIsError:text]) {
+        [self setHomeOutputText:text];
+    }
+    if (!_globalLowPowerModeEnabled && [self shouldShowRunProgressToastText:text]) {
         [self showToast:text];
     }
 }
@@ -8299,7 +8415,8 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     [self taskListSwipePointSummaryForTask:task index:0],
                     [self taskListSwipePointSummaryForTask:task index:1],
                     [self millisecondsSummaryTextForDuration:[self swipeDurationForTask:task]]];
-        case AnClickActionModeNetwork: {
+        case AnClickActionModeNetwork:
+        case AnClickActionModeConditionWait: {
             NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
             return [NSString stringWithFormat:@"%@ %@ %@", name, [self networkMethodForTask:task], url.length > 0 ? url : @"未填链接"];
         }
@@ -8526,12 +8643,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         subtitle = [self colorPatternSummaryForTask:task];
     } else if (desc.length == 0 && mode == AnClickActionModeImage) {
         subtitle = [NSString stringWithFormat:@"识图 · %@", [self recognitionTargetSummaryForTask:task]];
-    } else if (desc.length == 0 && mode == AnClickActionModeNetwork) {
+    } else if (desc.length == 0 && (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait)) {
         NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
         NSString *contains = [self trimmedActionDescription:task[@"networkContains"]];
         NSString *falseText = [self trimmedActionDescription:task[@"networkFalse"]];
         NSString *method = [self networkMethodForTask:task];
-        BOOL requestOnly = [task[@"networkRequestOnly"] boolValue];
+        BOOL requestOnly = [self networkTaskIsOneShot:task];
         if (url.length == 0) {
             subtitle = @"未设置链接";
         } else if (requestOnly) {
@@ -8559,7 +8676,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         NSString *bundleID = [self configuredTargetBundleIDForTask:task];
         subtitle = bundleID.length > 0 ? [NSString stringWithFormat:@"切换到 %@", bundleID] : @"未填写 Bundle ID";
     }
-    if (mode != AnClickActionModeNetwork) {
+    if (mode != AnClickActionModeNetwork && mode != AnClickActionModeConditionWait) {
         NSString *suffix = [self commonSuffixForTask:task];
         if (suffix.length > 0) {
             subtitle = [subtitle stringByAppendingString:suffix];
@@ -8589,9 +8706,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         detail = [NSString stringWithFormat:@"%lu点同步", (unsigned long)[self storedMultiTapPointsForTask:task].count];
     } else if (detail.length == 0 && mode == AnClickActionModeColor) {
         detail = [self colorPatternSummaryForTask:task];
-    } else if (detail.length == 0 && mode == AnClickActionModeNetwork) {
+    } else if (detail.length == 0 && (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait)) {
         BOOL requestOnly = [self networkTaskIsOneShot:task];
-        detail = [NSString stringWithFormat:@"%@ %@", [self networkMethodForTask:task], requestOnly ? @"仅请求" : @"判断返回"];
+        detail = mode == AnClickActionModeConditionWait
+            ? [NSString stringWithFormat:@"%@ 等待条件", [self networkMethodForTask:task]]
+            : [NSString stringWithFormat:@"%@ %@", [self networkMethodForTask:task], requestOnly ? @"仅请求" : @"判断返回"];
     } else if (detail.length == 0 && mode == AnClickActionModeDelay) {
         detail = [NSString stringWithFormat:@"等待%@", [self millisecondsSummaryTextForDuration:[self delayForTask:task]]];
     } else if (detail.length == 0 && mode == AnClickActionModeOpenApp) {
@@ -8776,6 +8895,8 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             return @"eyedropper.full";
         case AnClickActionModeNetwork:
             return @"network";
+        case AnClickActionModeConditionWait:
+            return @"hourglass";
         case AnClickActionModeOpenApp:
             return @"arrow.triangle.2.circlepath";
         case AnClickActionModeJump:
@@ -9066,6 +9187,8 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             return @"识色参数";
         case AnClickActionModeNetwork:
             return @"网络参数";
+        case AnClickActionModeConditionWait:
+            return @"条件等待";
         case AnClickActionModeOpenApp:
             return @"应用切换";
         case AnClickActionModeJump:
@@ -9178,19 +9301,23 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             [self addTaskListDetailRowWithTitle:@"识别重试" value:[self taskListRecognitionRetrySummaryForTask:task] tint:tint rows:rows];
             break;
         }
-        case AnClickActionModeNetwork: {
+        case AnClickActionModeNetwork:
+        case AnClickActionModeConditionWait: {
             NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
-            [self addTaskListDetailRowWithTitle:@"请求地址" value:url.length > 0 ? url : @"未设置" tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:mode == AnClickActionModeConditionWait ? @"等待地址" : @"请求地址"
+                                          value:url.length > 0 ? url : @"未设置"
+                                           tint:tint
+                                           rows:rows];
             [self addTaskListDetailRowWithTitle:@"请求方法" value:[self networkMethodForTask:task] tint:tint rows:rows];
             BOOL oneShot = [self networkTaskIsOneShot:task];
-            [self addTaskListDetailRowWithTitle:@"执行模式" value:oneShot ? @"仅请求一次" : @"判断返回" tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"执行模式" value:mode == AnClickActionModeConditionWait ? @"等待到命中" : (oneShot ? @"仅请求一次" : @"判断返回") tint:tint rows:rows];
             NSString *contains = [self trimmedActionDescription:task[@"networkContains"]];
             NSString *falseText = [self trimmedActionDescription:task[@"networkFalse"]];
             if (contains.length > 0) {
-                [self addTaskListDetailRowWithTitle:@"成功匹配" value:contains tint:tint rows:rows];
+                [self addTaskListDetailRowWithTitle:mode == AnClickActionModeConditionWait ? @"继续条件" : @"成功匹配" value:contains tint:tint rows:rows];
             }
             if (falseText.length > 0) {
-                [self addTaskListDetailRowWithTitle:@"失败匹配" value:falseText tint:tint rows:rows];
+                [self addTaskListDetailRowWithTitle:mode == AnClickActionModeConditionWait ? @"等待条件" : @"失败匹配" value:falseText tint:tint rows:rows];
             }
             if ([[self networkMethodForTask:task] isEqualToString:@"POST"]) {
                 NSDictionary *pairDictionary = [self networkPostDictionaryFromPairs:task[@"networkPostPairs"] recognitionText:@""];
@@ -9419,13 +9546,13 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                               tag:AnClickTaskListEditButtonTagBase + indexPath.row
                                                            action:@selector(editTaskButtonAtIndex:)
                                                              tint:[self themeHighlightColor]];
-        UIButton *collapseButton = [self taskListSmallButtonWithTitle:@"折叠 ▲"
-                                                                 tag:AnClickTaskListCollapseButtonTagBase + indexPath.row
-                                                               action:@selector(collapseTaskButtonAtIndex:)
-                                                                 tint:[self themeHighlightColor]];
+        UIButton *noteButton = [self taskListSmallButtonWithTitle:@"备注"
+                                                              tag:AnClickTaskListNoteButtonTagBase + indexPath.row
+                                                           action:@selector(noteTaskButtonAtIndex:)
+                                                             tint:[self themeHighlightColor]];
         [cardView addSubview:runButton];
         [cardView addSubview:editButton];
-        [cardView addSubview:collapseButton];
+        [cardView addSubview:noteButton];
 
         UILabel *logicCaption = nil;
         UIView *successLine = nil;
@@ -9460,11 +9587,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             [editButton.leadingAnchor constraintEqualToAnchor:runButton.trailingAnchor constant:gap],
             [editButton.widthAnchor constraintEqualToAnchor:runButton.widthAnchor multiplier:0.62],
             [editButton.heightAnchor constraintEqualToAnchor:runButton.heightAnchor],
-            [collapseButton.topAnchor constraintEqualToAnchor:runButton.topAnchor],
-            [collapseButton.leadingAnchor constraintEqualToAnchor:editButton.trailingAnchor constant:gap],
-            [collapseButton.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
-            [collapseButton.widthAnchor constraintEqualToAnchor:runButton.widthAnchor multiplier:0.62],
-            [collapseButton.heightAnchor constraintEqualToAnchor:runButton.heightAnchor],
+            [noteButton.topAnchor constraintEqualToAnchor:runButton.topAnchor],
+            [noteButton.leadingAnchor constraintEqualToAnchor:editButton.trailingAnchor constant:gap],
+            [noteButton.trailingAnchor constraintEqualToAnchor:cardView.trailingAnchor constant:-side],
+            [noteButton.widthAnchor constraintEqualToAnchor:runButton.widthAnchor multiplier:0.62],
+            [noteButton.heightAnchor constraintEqualToAnchor:runButton.heightAnchor],
         ]];
         if (logicCaption && successLine && failureLine) {
             [constraints addObjectsFromArray:@[
@@ -9693,17 +9820,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     [self selectTaskAtIndex:index];
 }
 
-- (void)collapseTaskButtonAtIndex:(UIButton *)sender {
-    NSInteger index = sender.tag - AnClickTaskListCollapseButtonTagBase;
-    if (index < 0 || index >= (NSInteger)_taskItems.count) {
-        return;
-    }
-    [self taskModelAtIndex:(NSUInteger)index].expanded = NO;
-    NSIndexPath *indexPath = [NSIndexPath indexPathForRow:index inSection:0];
-    [_taskListView performBatchUpdates:^{
-        [_taskListView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationFade];
-    } completion:nil];
-    [self persistCurrentTaskList];
+- (void)noteTaskButtonAtIndex:(UIButton *)sender {
+    NSInteger index = sender.tag - AnClickTaskListNoteButtonTagBase;
+    [self showTaskNotePromptForTaskAtIndex:index];
 }
 
 - (void)runSingleTaskTestButtonAtIndex:(UIButton *)sender {
@@ -10258,7 +10377,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if (mode == AnClickActionModeColor) {
         return 1.20;
     }
-    if (mode == AnClickActionModeNetwork) {
+    if (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait) {
         return 0.85;
     }
     if (mode == AnClickActionModeJump) {
@@ -10283,7 +10402,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if (actionMode == AnClickActionModeNone || actionMode == AnClickActionModeJump) {
         return 0.0;
     }
-    if (actionMode == AnClickActionModeNetwork) {
+    if (actionMode == AnClickActionModeNetwork || actionMode == AnClickActionModeConditionWait) {
         return [self networkTimeoutForTask:task] + 0.25;
     }
     if ([self modeIsRecognitionTask:actionMode]) {
@@ -10316,7 +10435,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         NSTimeInterval successDuration = [self estimatedActionDurationForTask:task success:YES actionMode:successMode depth:depth];
         NSTimeInterval failureDuration = [self estimatedActionDurationForTask:task success:NO actionMode:failureMode depth:depth];
         duration = baseDuration + MAX(successDuration, failureDuration);
-    } else if (mode == AnClickActionModeNetwork) {
+    } else if (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait) {
         duration = 0.85;
     } else if (mode == AnClickActionModeMacro) {
         NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
@@ -10515,7 +10634,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (BOOL)modeIsJudgementTask:(AnClickActionMode)mode {
-    return [self modeIsRecognitionTask:mode] || mode == AnClickActionModeNetwork;
+    return [self modeIsRecognitionTask:mode] ||
+        mode == AnClickActionModeNetwork ||
+        mode == AnClickActionModeConditionWait;
 }
 
 - (BOOL)modeCanUseRecognitionPoint:(AnClickActionMode)mode {
@@ -10548,12 +10669,13 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     } mutableCopy];
     if (mode == AnClickActionModeDelay) {
         task[@"delay"] = @0.50;
-    } else if (mode == AnClickActionModeNetwork) {
+    } else if (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait) {
         task[@"networkMethod"] = @"GET";
         task[@"networkHeaders"] = AnClickDefaultNetworkHeaders();
         task[@"networkTimeout"] = @8.0;
         task[@"networkRetryForever"] = @YES;
         task[@"networkRetryLimit"] = @3;
+        task[@"networkRequestOnly"] = @(mode == AnClickActionModeNetwork);
     } else if (mode == AnClickActionModeSwipe) {
         task[@"swipeDuration"] = @0.30;
         task[@"swipeStep"] = @1.0;
@@ -11431,7 +11553,8 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (BOOL)networkTaskIsOneShot:(NSDictionary *)task {
-    return [task[@"networkRequestOnly"] boolValue];
+    return [self modeForTask:task] == AnClickActionModeNetwork &&
+        [task[@"networkRequestOnly"] boolValue];
 }
 
 - (BOOL)networkTaskHasJudgementCondition:(NSDictionary *)task {
@@ -11488,7 +11611,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 
     BOOL oneShot = [self networkTaskIsOneShot:task];
     if (!oneShot && ![self networkTaskHasJudgementCondition:task]) {
-        [self setHomeOutputText:@"网络判断未填条件"];
+        [self setHomeOutputText:[self modeForTask:task] == AnClickActionModeConditionWait ? @"条件等待缺少命中条件" : @"网络判断未填条件"];
         if (completion) {
             completion(NO, NO, NO);
         }
@@ -13089,22 +13212,22 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         }
         return YES;
     }
-    if (mode == AnClickActionModeNetwork) {
+    if (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait) {
         NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
         if (url.length == 0) {
-            _statusLabel.text = @"任务网络未填链接";
+            _statusLabel.text = mode == AnClickActionModeConditionWait ? @"条件等待未填链接" : @"任务网络未填链接";
             return NO;
         }
         if (![self normalizedNetworkURLString:url]) {
-            _statusLabel.text = @"任务网络链接无效";
+            _statusLabel.text = mode == AnClickActionModeConditionWait ? @"条件等待链接无效" : @"任务网络链接无效";
             return NO;
         }
         if (![self networkTaskIsOneShot:task] && ![self networkTaskHasJudgementCondition:task]) {
-            _statusLabel.text = @"任务网络缺少判断条件";
+            _statusLabel.text = mode == AnClickActionModeConditionWait ? @"条件等待缺少命中条件" : @"任务网络缺少判断条件";
             return NO;
         }
         if (![self networkTaskHasPostPayload:task]) {
-            _statusLabel.text = @"任务POST键值未填写";
+            _statusLabel.text = mode == AnClickActionModeConditionWait ? @"条件等待POST键值未填写" : @"任务POST键值未填写";
             return NO;
         }
         return YES;
@@ -13246,7 +13369,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
         NSTimeInterval actionDuration = [self estimatedActionDurationForTask:task success:YES actionMode:actionMode depth:0];
         duration = 0.75 + actionDuration;
-    } else if (mode == AnClickActionModeNetwork) {
+    } else if (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait) {
         duration = 0.85;
     } else if (mode == AnClickActionModeMacro) {
         NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
@@ -13352,7 +13475,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 [strongSelf performOCRTask:task inWindow:currentHostWindow runGeneration:runGeneration];
             } else if (mode == AnClickActionModeColor) {
                 [strongSelf performColorTask:task inWindow:currentHostWindow runGeneration:runGeneration];
-            } else if (mode == AnClickActionModeNetwork) {
+            } else if (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait) {
                 [strongSelf performNetworkRequestTask:task runGeneration:runGeneration completion:nil];
             } else if (mode == AnClickActionModeMacro) {
                 NSArray<NSDictionary *> *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];

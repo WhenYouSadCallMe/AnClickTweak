@@ -345,7 +345,7 @@
     }
 
     [self resetJumpGuard];
-    if (mode == AnClickActionModeNetwork) {
+    if (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait) {
         if (![delegate taskEngine:self taskModelIsComplete:taskModel]) {
             NSString *status = [delegate taskEngineCurrentStatus:self] ?: @"任务数据无效";
             [delegate taskEngine:self finishWithStatus:(status.length > 0 ? status : @"任务数据无效") showToast:YES restorePanel:YES];
@@ -520,7 +520,7 @@
     }
 
     id currentHost = [delegate taskEngine:self currentHostWithFallback:host];
-    [delegate taskEngine:self setStatus:@"网络请求"];
+    [delegate taskEngine:self setStatus:(model.actionMode == AnClickActionModeConditionWait ? @"条件等待" : @"网络请求")];
     NSTimeInterval delay = MAX(0.0, model.delay);
     __weak typeof(self) weakSelf = self;
     [self scheduleAfter:delay guard:^BOOL{

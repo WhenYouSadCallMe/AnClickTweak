@@ -689,6 +689,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @{@"title": @"🔀 跳转", @"mode": @(AnClickActionModeJump)},
             @{@"title": @"⏱ 延时", @"mode": @(AnClickActionModeDelay)},
             @{@"title": @"⇄ 应用切换", @"mode": @(AnClickActionModeOpenApp)},
+            @{@"title": @"⌛ 条件等待", @"mode": @(AnClickActionModeConditionWait)},
         ];
         NSMutableArray *buttons = [NSMutableArray array];
         UIStackView *outer = [[UIStackView alloc] initWithFrame:CGRectZero];
@@ -962,6 +963,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             return @"识色参数";
         case AnClickActionModeNetwork:
             return @"网络请求";
+        case AnClickActionModeConditionWait:
+            return @"等待条件";
         case AnClickActionModeJump:
             return @"跳转目标";
         case AnClickActionModeOpenApp:
@@ -992,6 +995,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             return @"识别重试";
         case AnClickActionModeNetwork:
             return @"重试与超时";
+        case AnClickActionModeConditionWait:
+            return @"等待策略";
         case AnClickActionModeMacro:
             return @"回放设置";
         case AnClickActionModeDelay:
@@ -1006,7 +1011,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 - (NSArray<NSNumber *> *)rowsForSection:(NSInteger)section {
     switch (section) {
         case 0:
-            return [self isEditingBranchActionConfig] ? @[] : @[@(ACEditorRowKindActionGrid)];
+            return [self isEditingBranchActionConfig]
+                ? @[]
+                : @[@(ACEditorRowKindActionGrid)];
         case 1:
             return [self parameterRows];
         case 2:
@@ -1141,7 +1148,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 }
 
 - (NSArray<NSNumber *> *)networkPostPairRows {
-    if (self.model.actionMode != AnClickActionModeNetwork ||
+    if (![self networkLikeMainMode] ||
         ![[self.model.networkMethod uppercaseString] isEqualToString:@"POST"]) {
         return @[];
     }
@@ -1221,6 +1228,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         mode == AnClickActionModeDelay ||
         mode == AnClickActionModeOpenApp ||
         mode == AnClickActionModeJump;
+}
+
+- (BOOL)networkLikeMainMode {
+    return self.model.actionMode == AnClickActionModeNetwork ||
+        self.model.actionMode == AnClickActionModeConditionWait;
 }
 
 - (BOOL)branchActionModeUsesRecognitionResultAction:(AnClickActionMode)mode {
@@ -1309,6 +1321,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case AnClickActionModeOCR: return @"识字";
         case AnClickActionModeColor: return @"识色";
         case AnClickActionModeNetwork: return @"网络";
+        case AnClickActionModeConditionWait: return @"条件等待";
         case AnClickActionModeJump: return @"跳转";
         case AnClickActionModeDelay: return @"延时";
         case AnClickActionModeOpenApp: return @"应用切换";
@@ -1785,8 +1798,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             return mode == AnClickActionModeOCR;
         case ACEditorRowKindNetworkURL:
         case ACEditorRowKindNetworkMethod:
-        case ACEditorRowKindNetworkRequestMode:
         case ACEditorRowKindNetworkTimeout:
+            return [self networkLikeMainMode];
+        case ACEditorRowKindNetworkRequestMode:
             return mode == AnClickActionModeNetwork;
         case ACEditorRowKindNetworkHeaders:
             return NO;
@@ -1794,14 +1808,14 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindNetworkRetryLimit:
         case ACEditorRowKindNetworkContains:
         case ACEditorRowKindNetworkFalse:
-            return mode == AnClickActionModeNetwork && !self.model.networkRequestOnly;
+            return [self networkLikeMainMode] && !self.model.networkRequestOnly;
         case ACEditorRowKindNetworkBody:
             return NO;
         case ACEditorRowKindNetworkAddPostPair:
-            return mode == AnClickActionModeNetwork &&
+            return [self networkLikeMainMode] &&
                 [[self.model.networkMethod uppercaseString] isEqualToString:@"POST"];
         case ACEditorRowKindNetworkPostPairBase:
-            return mode == AnClickActionModeNetwork &&
+            return [self networkLikeMainMode] &&
                 [[self.model.networkMethod uppercaseString] isEqualToString:@"POST"] &&
                 self.model.networkPostPairs.count > 0;
         case ACEditorRowKindJumpTarget:
@@ -2144,7 +2158,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         self.model.colorPoints = @[];
         self.model.colorPointScreenSize = nil;
     }
-    if (mode != AnClickActionModeNetwork) {
+    if (mode != AnClickActionModeNetwork && mode != AnClickActionModeConditionWait) {
         self.model.networkURL = @"";
         self.model.networkHeaders = ACEditorDefaultNetworkHeaders();
         self.model.networkPostBody = @"";
@@ -2156,7 +2170,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         self.model.networkMethod = @"GET";
     } else if (self.model.networkHeaders.count == 0) {
         self.model.networkHeaders = ACEditorDefaultNetworkHeaders();
-    } else if (!self.model.networkRequestOnly &&
+    }
+    if (mode == AnClickActionModeConditionWait) {
+        self.model.networkRequestOnly = NO;
+        self.model.networkRetryForever = YES;
+    } else if (mode == AnClickActionModeNetwork &&
+               !self.model.networkRequestOnly &&
                self.model.networkContains.length == 0 &&
                self.model.networkFalse.length == 0) {
         self.model.networkRequestOnly = YES;
@@ -2175,13 +2194,14 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     if (mode != AnClickActionModeImage &&
         mode != AnClickActionModeOCR &&
         mode != AnClickActionModeColor &&
-        mode != AnClickActionModeNetwork) {
+        mode != AnClickActionModeNetwork &&
+        mode != AnClickActionModeConditionWait) {
         self.model.successBranchIndex = -1;
         self.model.failureBranchIndex = -1;
         self.model.successActionMode = AnClickActionModeTap;
         self.model.failureActionMode = AnClickActionModeNone;
         self.model.recognitionRetryUntilFound = NO;
-    } else if (mode == AnClickActionModeNetwork) {
+    } else if (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait) {
         self.model.successBranchIndex = -1;
         self.model.failureBranchIndex = -1;
         self.model.successActionMode = AnClickActionModeNone;
@@ -2193,7 +2213,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         self.model.recognitionRetryUntilFound = NO;
     } else {
         if (![self branchActionMode:self.model.successActionMode isAllowedForSuccess:YES]) {
-            self.model.successActionMode = mode == AnClickActionModeNetwork ? AnClickActionModeNone : AnClickActionModeTap;
+            self.model.successActionMode = (mode == AnClickActionModeNetwork ||
+                mode == AnClickActionModeConditionWait) ? AnClickActionModeNone : AnClickActionModeTap;
             self.model.successActionConfig = @{};
             self.model.successRecognitionActionConfig = @{};
         }
@@ -2231,14 +2252,15 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             strongSelf.model.actionMode = mode;
             if (recognitionMode) {
                 strongSelf.model.useMatchPoint = YES;
-            } else if (mode == AnClickActionModeNetwork) {
+            } else if (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait) {
                 strongSelf.model.successActionMode = AnClickActionModeNone;
                 strongSelf.model.failureActionMode = AnClickActionModeNone;
                 strongSelf.model.successActionConfig = @{};
                 strongSelf.model.failureActionConfig = @{};
-                strongSelf.model.networkRequestOnly = YES;
+                strongSelf.model.networkRequestOnly = mode == AnClickActionModeNetwork;
                 strongSelf.model.networkMethod = @"GET";
                 strongSelf.model.networkUsesPost = NO;
+                strongSelf.model.networkRetryForever = YES;
             }
             [strongSelf normalizeModelForCurrentActionMode];
             [strongSelf notifyModelChanged];
@@ -2809,7 +2831,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         }
         case ACEditorRowKindNetworkURL:
             cell.iconLabel.text = @"🌐";
-            cell.titleLabel.text = @"请求地址";
+            cell.titleLabel.text = self.model.actionMode == AnClickActionModeConditionWait ? @"等待接口地址" : @"请求地址";
             cell.textField.text = self.model.networkURL;
             cell.textField.keyboardType = UIKeyboardTypeURL;
             break;
@@ -2861,7 +2883,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindNetworkContains:
             cell.iconLabel.text = @"✓";
             cell.iconLabel.textColor = UIColor.systemGreenColor;
-            cell.titleLabel.text = @"成功匹配内容";
+            cell.titleLabel.text = self.model.actionMode == AnClickActionModeConditionWait ? @"继续运行条件" : @"成功匹配内容";
             cell.textField.text = self.model.networkContains;
             break;
         case ACEditorRowKindSuccessBranchNetworkContains:
@@ -2876,7 +2898,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindNetworkFalse:
             cell.iconLabel.text = @"✕";
             cell.iconLabel.textColor = UIColor.systemRedColor;
-            cell.titleLabel.text = @"失败匹配内容";
+            cell.titleLabel.text = self.model.actionMode == AnClickActionModeConditionWait ? @"继续等待条件" : @"失败匹配内容";
             cell.textField.text = self.model.networkFalse;
             break;
         case ACEditorRowKindSuccessBranchNetworkFalse:

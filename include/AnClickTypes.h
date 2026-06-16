@@ -18,7 +18,8 @@ typedef NS_ENUM(NSInteger, AnClickActionMode) {
     AnClickActionModeJump = 13,
     AnClickActionModeDelay = 14,
     AnClickActionModeOpenApp = 15,
-    AnClickActionModeCount = 16,
+    AnClickActionModeConditionWait = 16,
+    AnClickActionModeCount = 17,
 };
 
 typedef NS_ENUM(NSInteger, AnClickOCRMode) {
