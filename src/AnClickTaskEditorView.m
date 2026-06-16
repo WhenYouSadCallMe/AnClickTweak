@@ -16,6 +16,7 @@ static NSDictionary *ACEditorDefaultNetworkHeaders(void) {
 static const NSUInteger ACEditorMaxMultiPoints = 32;
 static const NSInteger ACEditorPostPairValueTagOffset = 20000;
 static const NSInteger ACEditorPostPairResultTagOffset = 40000;
+static const NSInteger ACEditorPostPairDeleteTagOffset = 60000;
 
 typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindActionGrid = 0,
@@ -90,6 +91,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindFailureBranchNetworkURL,
     ACEditorRowKindSuccessBranchNetworkMethod,
     ACEditorRowKindFailureBranchNetworkMethod,
+    ACEditorRowKindSuccessBranchNetworkRequestMode,
+    ACEditorRowKindFailureBranchNetworkRequestMode,
     ACEditorRowKindSuccessBranchNetworkHeaders,
     ACEditorRowKindFailureBranchNetworkHeaders,
     ACEditorRowKindSuccessBranchNetworkBody,
@@ -98,6 +101,10 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindFailureBranchNetworkAddPostPair,
     ACEditorRowKindSuccessBranchNetworkTimeout,
     ACEditorRowKindFailureBranchNetworkTimeout,
+    ACEditorRowKindSuccessBranchNetworkContains,
+    ACEditorRowKindFailureBranchNetworkContains,
+    ACEditorRowKindSuccessBranchNetworkFalse,
+    ACEditorRowKindFailureBranchNetworkFalse,
     ACEditorRowKindSuccessBranchDelay,
     ACEditorRowKindFailureBranchDelay,
     ACEditorRowKindSuccessBranchThreshold,
@@ -220,6 +227,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 @property (nonatomic, strong) UITextField *valueField;
 @property (nonatomic, strong) UIButton *resultButton;
 @property (nonatomic, strong) UILabel *resultBadgeLabel;
+@property (nonatomic, strong) UIButton *deleteButton;
 @end
 
 @implementation ACEditorPostPairCell
@@ -268,12 +276,21 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         _resultBadgeLabel.text = @"OCR";
         _resultBadgeLabel.translatesAutoresizingMaskIntoConstraints = NO;
 
+        _deleteButton = [UIButton buttonWithType:UIButtonTypeSystem];
+        _deleteButton.titleLabel.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightBold];
+        [_deleteButton setTitle:@"删" forState:UIControlStateNormal];
+        [_deleteButton setTitleColor:UIColor.systemRedColor forState:UIControlStateNormal];
+        _deleteButton.backgroundColor = [UIColor.systemRedColor colorWithAlphaComponent:0.10];
+        _deleteButton.layer.cornerRadius = 7.0;
+        _deleteButton.translatesAutoresizingMaskIntoConstraints = NO;
+
         [self.contentView addSubview:_iconLabel];
         [self.contentView addSubview:_titleLabel];
         [self.contentView addSubview:_keyField];
         [self.contentView addSubview:_valueField];
         [self.contentView addSubview:_resultButton];
         [self.contentView addSubview:_resultBadgeLabel];
+        [self.contentView addSubview:_deleteButton];
 
         [NSLayoutConstraint activateConstraints:@[
             [_iconLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16.0],
@@ -294,13 +311,18 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             [_valueField.widthAnchor constraintEqualToAnchor:_keyField.widthAnchor],
             [_valueField.heightAnchor constraintEqualToAnchor:_keyField.heightAnchor],
 
-            [_resultButton.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-14.0],
+            [_resultButton.trailingAnchor constraintEqualToAnchor:_deleteButton.leadingAnchor constant:-6.0],
             [_resultButton.centerYAnchor constraintEqualToAnchor:_keyField.centerYAnchor],
             [_resultButton.widthAnchor constraintEqualToConstant:46.0],
             [_resultButton.heightAnchor constraintEqualToConstant:32.0],
 
             [_resultBadgeLabel.trailingAnchor constraintEqualToAnchor:_resultButton.trailingAnchor],
             [_resultBadgeLabel.bottomAnchor constraintEqualToAnchor:_resultButton.topAnchor constant:-2.0],
+
+            [_deleteButton.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-14.0],
+            [_deleteButton.centerYAnchor constraintEqualToAnchor:_keyField.centerYAnchor],
+            [_deleteButton.widthAnchor constraintEqualToConstant:34.0],
+            [_deleteButton.heightAnchor constraintEqualToConstant:32.0],
 
             [self.contentView.heightAnchor constraintGreaterThanOrEqualToConstant:58.0],
         ]];
@@ -315,9 +337,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     self.keyField.delegate = nil;
     self.valueField.delegate = nil;
     [self.resultButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
+    [self.deleteButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
     self.keyField.tag = 0;
     self.valueField.tag = 0;
     self.resultButton.tag = 0;
+    self.deleteButton.tag = 0;
     self.keyField.text = @"";
     self.valueField.text = @"";
     self.keyField.placeholder = @"键";
@@ -330,6 +354,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     self.valueField.autocorrectionType = UITextAutocorrectionTypeNo;
     self.resultButton.hidden = NO;
     self.resultBadgeLabel.hidden = NO;
+    self.deleteButton.hidden = NO;
 }
 
 @end
@@ -1069,12 +1094,21 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     return [self isNetworkPostPairRow:(ACEditorRowKind)keyTag];
 }
 
+- (BOOL)isNetworkPostPairDeleteTag:(NSInteger)tag {
+    NSInteger keyTag = tag - ACEditorPostPairDeleteTagOffset;
+    return [self isNetworkPostPairRow:(ACEditorRowKind)keyTag];
+}
+
 - (ACEditorRowKind)networkPostPairRowForValueTag:(NSInteger)tag {
     return (ACEditorRowKind)(tag - ACEditorPostPairValueTagOffset);
 }
 
 - (ACEditorRowKind)networkPostPairRowForResultTag:(NSInteger)tag {
     return (ACEditorRowKind)(tag - ACEditorPostPairResultTagOffset);
+}
+
+- (ACEditorRowKind)networkPostPairRowForDeleteTag:(NSInteger)tag {
+    return (ACEditorRowKind)(tag - ACEditorPostPairDeleteTagOffset);
 }
 
 - (NSUInteger)networkPostPairIndexForRow:(ACEditorRowKind)row {
@@ -1372,6 +1406,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     return [value isKindOfClass:NSString.class] ? value : @"";
 }
 
+- (BOOL)branchInlineBoolValueForSuccess:(BOOL)success key:(NSString *)key defaultValue:(BOOL)defaultValue {
+    NSDictionary *config = [self branchPointActionConfigForSuccess:success];
+    id value = config[key];
+    return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : defaultValue;
+}
+
 - (void)storeBranchInlineValue:(id)value key:(NSString *)key success:(BOOL)success {
     NSMutableDictionary *config = [[self branchPointActionConfigForSuccess:success] mutableCopy];
     if (value) {
@@ -1600,6 +1640,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         config[@"delay"] = @0.50;
     } else if (mode == AnClickActionModeNetwork) {
         config[@"networkMethod"] = @"GET";
+        config[@"networkRequestOnly"] = @YES;
         config[@"networkTimeout"] = @8.0;
         config[@"networkRetryForever"] = @YES;
         config[@"networkRetryLimit"] = @3;
@@ -1820,6 +1861,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             return judgementMode && failureInlineMode == AnClickActionModeSwipe;
         case ACEditorRowKindSuccessBranchNetworkURL:
         case ACEditorRowKindSuccessBranchNetworkMethod:
+        case ACEditorRowKindSuccessBranchNetworkRequestMode:
         case ACEditorRowKindSuccessBranchNetworkTimeout:
             return judgementMode && successInlineMode == AnClickActionModeNetwork;
         case ACEditorRowKindSuccessBranchNetworkAddPostPair:
@@ -1836,8 +1878,14 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
                 successInlineMode == AnClickActionModeNetwork &&
                 [[[self branchInlineStringValueForSuccess:YES key:@"networkMethod"] uppercaseString] isEqualToString:@"POST"] &&
                 [self branchNetworkPostPairsForSuccess:YES].count > 0;
+        case ACEditorRowKindSuccessBranchNetworkContains:
+        case ACEditorRowKindSuccessBranchNetworkFalse:
+            return judgementMode &&
+                successInlineMode == AnClickActionModeNetwork &&
+                ![self branchInlineBoolValueForSuccess:YES key:@"networkRequestOnly" defaultValue:YES];
         case ACEditorRowKindFailureBranchNetworkURL:
         case ACEditorRowKindFailureBranchNetworkMethod:
+        case ACEditorRowKindFailureBranchNetworkRequestMode:
         case ACEditorRowKindFailureBranchNetworkTimeout:
             return judgementMode && failureInlineMode == AnClickActionModeNetwork;
         case ACEditorRowKindFailureBranchNetworkAddPostPair:
@@ -1853,6 +1901,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
                 failureInlineMode == AnClickActionModeNetwork &&
                 [[[self branchInlineStringValueForSuccess:NO key:@"networkMethod"] uppercaseString] isEqualToString:@"POST"] &&
                 [self branchNetworkPostPairsForSuccess:NO].count > 0;
+        case ACEditorRowKindFailureBranchNetworkContains:
+        case ACEditorRowKindFailureBranchNetworkFalse:
+            return judgementMode &&
+                failureInlineMode == AnClickActionModeNetwork &&
+                ![self branchInlineBoolValueForSuccess:NO key:@"networkRequestOnly" defaultValue:YES];
         case ACEditorRowKindSuccessBranchDelay:
             return judgementMode && successInlineMode == AnClickActionModeDelay;
         case ACEditorRowKindFailureBranchDelay:
@@ -1922,8 +1975,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @(ACEditorRowKindSuccessBranchSwipeStep),
             @(ACEditorRowKindSuccessBranchNetworkURL),
             @(ACEditorRowKindSuccessBranchNetworkMethod),
+            @(ACEditorRowKindSuccessBranchNetworkRequestMode),
             @(ACEditorRowKindSuccessBranchNetworkAddPostPair),
             @(ACEditorRowKindSuccessBranchNetworkTimeout),
+            @(ACEditorRowKindSuccessBranchNetworkContains),
+            @(ACEditorRowKindSuccessBranchNetworkFalse),
             @(ACEditorRowKindSuccessBranchDelay),
         ];
         for (NSNumber *rowNumber in successInlineRows) {
@@ -1981,8 +2037,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @(ACEditorRowKindFailureBranchSwipeStep),
             @(ACEditorRowKindFailureBranchNetworkURL),
             @(ACEditorRowKindFailureBranchNetworkMethod),
+            @(ACEditorRowKindFailureBranchNetworkRequestMode),
             @(ACEditorRowKindFailureBranchNetworkAddPostPair),
             @(ACEditorRowKindFailureBranchNetworkTimeout),
+            @(ACEditorRowKindFailureBranchNetworkContains),
+            @(ACEditorRowKindFailureBranchNetworkFalse),
             @(ACEditorRowKindFailureBranchDelay),
         ];
         for (NSNumber *rowNumber in failureInlineRows) {
@@ -2383,6 +2442,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         row == ACEditorRowKindSuccessBranchNetworkMethod ||
         row == ACEditorRowKindFailureBranchNetworkMethod ||
         row == ACEditorRowKindNetworkRequestMode ||
+        row == ACEditorRowKindSuccessBranchNetworkRequestMode ||
+        row == ACEditorRowKindFailureBranchNetworkRequestMode ||
         row == ACEditorRowKindNetworkRetryMode ||
         row == ACEditorRowKindRecognitionRetryMode;
 }
@@ -2440,11 +2501,22 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             break;
         }
         case ACEditorRowKindNetworkRequestMode:
+        case ACEditorRowKindSuccessBranchNetworkRequestMode:
+        case ACEditorRowKindFailureBranchNetworkRequestMode: {
+            BOOL branchRow = row == ACEditorRowKindSuccessBranchNetworkRequestMode || row == ACEditorRowKindFailureBranchNetworkRequestMode;
+            BOOL success = row == ACEditorRowKindSuccessBranchNetworkRequestMode;
             cell.iconLabel.text = @"☑";
-            cell.titleLabel.text = @"执行模式";
+            cell.iconLabel.textColor = branchRow ? (success ? UIColor.systemGreenColor : UIColor.systemRedColor) : UIColor.labelColor;
+            cell.titleLabel.text = branchRow
+                ? [NSString stringWithFormat:@"%@分支执行模式", success ? @"成功" : @"失败"]
+                : @"执行模式";
             items = @[@"判断返回", @"仅请求"];
-            selectedIndex = self.model.networkRequestOnly ? 1 : 0;
+            BOOL requestOnly = branchRow
+                ? [self branchInlineBoolValueForSuccess:success key:@"networkRequestOnly" defaultValue:YES]
+                : self.model.networkRequestOnly;
+            selectedIndex = requestOnly ? 1 : 0;
             break;
+        }
         case ACEditorRowKindNetworkRetryMode:
             cell.iconLabel.text = @"↻";
             cell.titleLabel.text = @"重试模式";
@@ -2492,11 +2564,13 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     [cell.keyField removeTarget:nil action:NULL forControlEvents:UIControlEventEditingChanged];
     [cell.valueField removeTarget:nil action:NULL forControlEvents:UIControlEventEditingChanged];
     [cell.resultButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
+    [cell.deleteButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
     cell.keyField.delegate = self;
     cell.valueField.delegate = self;
     cell.keyField.tag = row;
     cell.valueField.tag = row + ACEditorPostPairValueTagOffset;
     cell.resultButton.tag = row + ACEditorPostPairResultTagOffset;
+    cell.deleteButton.tag = row + ACEditorPostPairDeleteTagOffset;
     cell.keyField.text = key;
     cell.valueField.text = value;
     cell.keyField.placeholder = @"键";
@@ -2510,6 +2584,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     [cell.keyField addTarget:self action:@selector(handleTextFieldChanged:) forControlEvents:UIControlEventEditingChanged];
     [cell.valueField addTarget:self action:@selector(handleTextFieldChanged:) forControlEvents:UIControlEventEditingChanged];
     [cell.resultButton addTarget:self action:@selector(handlePostPairResultButton:) forControlEvents:UIControlEventTouchUpInside];
+    [cell.deleteButton addTarget:self action:@selector(handlePostPairDeleteButton:) forControlEvents:UIControlEventTouchUpInside];
     cell.resultButton.hidden = !showOCRResult;
     cell.resultBadgeLabel.hidden = !showOCRResult;
 }
@@ -2740,12 +2815,30 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             cell.titleLabel.text = @"成功匹配内容";
             cell.textField.text = self.model.networkContains;
             break;
+        case ACEditorRowKindSuccessBranchNetworkContains:
+        case ACEditorRowKindFailureBranchNetworkContains: {
+            BOOL success = row == ACEditorRowKindSuccessBranchNetworkContains;
+            cell.iconLabel.text = success ? @"✓" : @"✕";
+            cell.iconLabel.textColor = success ? UIColor.systemGreenColor : UIColor.systemRedColor;
+            cell.titleLabel.text = success ? @"成功分支匹配成功内容" : @"失败分支匹配成功内容";
+            cell.textField.text = [self branchInlineStringValueForSuccess:success key:@"networkContains"];
+            break;
+        }
         case ACEditorRowKindNetworkFalse:
             cell.iconLabel.text = @"✕";
             cell.iconLabel.textColor = UIColor.systemRedColor;
             cell.titleLabel.text = @"失败匹配内容";
             cell.textField.text = self.model.networkFalse;
             break;
+        case ACEditorRowKindSuccessBranchNetworkFalse:
+        case ACEditorRowKindFailureBranchNetworkFalse: {
+            BOOL success = row == ACEditorRowKindSuccessBranchNetworkFalse;
+            cell.iconLabel.text = success ? @"✓" : @"✕";
+            cell.iconLabel.textColor = success ? UIColor.systemGreenColor : UIColor.systemRedColor;
+            cell.titleLabel.text = success ? @"成功分支匹配失败内容" : @"失败分支匹配失败内容";
+            cell.textField.text = [self branchInlineStringValueForSuccess:success key:@"networkFalse"];
+            break;
+        }
         case ACEditorRowKindJumpTarget:
             cell.iconLabel.text = @"🔀";
             cell.titleLabel.text = @"跳转任务 ID";
@@ -2987,8 +3080,20 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindNetworkContains:
             self.model.networkContains = text;
             break;
+        case ACEditorRowKindSuccessBranchNetworkContains:
+            [self storeBranchInlineValue:text key:@"networkContains" success:YES];
+            break;
+        case ACEditorRowKindFailureBranchNetworkContains:
+            [self storeBranchInlineValue:text key:@"networkContains" success:NO];
+            break;
         case ACEditorRowKindNetworkFalse:
             self.model.networkFalse = text;
+            break;
+        case ACEditorRowKindSuccessBranchNetworkFalse:
+            [self storeBranchInlineValue:text key:@"networkFalse" success:YES];
+            break;
+        case ACEditorRowKindFailureBranchNetworkFalse:
+            [self storeBranchInlineValue:text key:@"networkFalse" success:NO];
             break;
         case ACEditorRowKindJumpTarget:
             self.model.jumpTaskIndex = text.length > 0 ? MAX(0, text.integerValue - 1) : -1;
@@ -3178,6 +3283,22 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     [self reloadForm];
 }
 
+- (void)handlePostPairDeleteButton:(UIButton *)button {
+    if (![self isNetworkPostPairDeleteTag:button.tag]) {
+        return;
+    }
+    ACEditorRowKind row = [self networkPostPairRowForDeleteTag:button.tag];
+    NSUInteger index = [self networkPostPairIndexForRow:row];
+    NSMutableArray *pairs = [[self networkPostPairsForRow:row] mutableCopy] ?: [NSMutableArray array];
+    if (index >= pairs.count) {
+        return;
+    }
+    [pairs removeObjectAtIndex:index];
+    [self storeNetworkPostPairs:pairs forRow:row];
+    [self notifyModelChanged];
+    [self reloadForm];
+}
+
 - (void)handleSegmentChanged:(UISegmentedControl *)segmentedControl {
     NSInteger selected = segmentedControl.selectedSegmentIndex;
     switch ((ACEditorRowKind)segmentedControl.tag) {
@@ -3212,6 +3333,14 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             break;
         case ACEditorRowKindNetworkRequestMode:
             self.model.networkRequestOnly = selected == 1;
+            [self reloadForm];
+            break;
+        case ACEditorRowKindSuccessBranchNetworkRequestMode:
+            [self storeBranchInlineValue:@(selected == 1) key:@"networkRequestOnly" success:YES];
+            [self reloadForm];
+            break;
+        case ACEditorRowKindFailureBranchNetworkRequestMode:
+            [self storeBranchInlineValue:@(selected == 1) key:@"networkRequestOnly" success:NO];
             [self reloadForm];
             break;
         case ACEditorRowKindNetworkRetryMode:

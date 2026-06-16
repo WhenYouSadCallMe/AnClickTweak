@@ -10436,6 +10436,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if ([fullConfig isKindOfClass:NSDictionary.class] &&
         [self modeForTask:(NSDictionary *)fullConfig] == expectedMode) {
         NSDictionary *fullConfigDictionary = (NSDictionary *)fullConfig;
+        if (expectedMode == AnClickActionModeNetwork && fullConfigDictionary[@"networkRequestOnly"] == nil) {
+            NSMutableDictionary *normalizedConfig = [fullConfigDictionary mutableCopy];
+            normalizedConfig[@"networkRequestOnly"] = @YES;
+            fullConfigDictionary = normalizedConfig;
+        }
         if ([self modeCanUseRecognitionPoint:expectedMode]) {
             if (expectedMode == AnClickActionModeTwoFingerTap &&
                 [self storedMultiTapPointsForTask:fullConfigDictionary].count >= 2) {
@@ -10457,7 +10462,13 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     id config = task[[self recognitionActionConfigKeyForSuccess:success]];
     if ([config isKindOfClass:NSDictionary.class] &&
         [self modeForTask:(NSDictionary *)config] == expectedMode) {
-        return (NSDictionary *)config;
+        NSDictionary *configDictionary = (NSDictionary *)config;
+        if (expectedMode == AnClickActionModeNetwork && configDictionary[@"networkRequestOnly"] == nil) {
+            NSMutableDictionary *normalizedConfig = [configDictionary mutableCopy];
+            normalizedConfig[@"networkRequestOnly"] = @YES;
+            configDictionary = normalizedConfig;
+        }
+        return configDictionary;
     }
     return nil;
 }
