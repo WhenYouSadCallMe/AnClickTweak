@@ -92,7 +92,6 @@ static AnClickActionMode ACSupportedActionMode(id value) {
         case AnClickActionModeJump:
         case AnClickActionModeDelay:
         case AnClickActionModeOpenApp:
-        case AnClickActionModeConditionWait:
             return mode;
         default:
             return AnClickActionModeNone;
@@ -230,8 +229,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     BOOL hasExplicitFailureActionMode = dictionary[@"failureActionMode"] != nil;
     _successActionMode = ACSupportedActionMode(dictionary[@"imageActionMode"]);
     if (_successActionMode == AnClickActionModeNone &&
-        _actionMode != AnClickActionModeNetwork &&
-        _actionMode != AnClickActionModeConditionWait) {
+        _actionMode != AnClickActionModeNetwork) {
         _successActionMode = AnClickActionModeTap;
     }
     _failureActionMode = ACSupportedActionMode(dictionary[@"failureActionMode"]);
@@ -271,10 +269,6 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     _networkFalse = ACStringValue(dictionary[@"networkFalse"]);
     if (!hasExplicitNetworkRequestOnly) {
         _networkRequestOnly = (_networkContains.length == 0 && _networkFalse.length == 0);
-    }
-    if (_actionMode == AnClickActionModeConditionWait) {
-        _networkRequestOnly = NO;
-        _networkRetryForever = YES;
     }
     _networkPostBody = ACStringValue(dictionary[@"networkPostBody"]);
     _networkPostBodyUsesOCRResult = [dictionary[@"networkPostBodyUsesOCRResult"] boolValue];
@@ -358,8 +352,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     AnClickActionMode successActionMode = ACSupportedActionMode(@(self.successActionMode));
     AnClickActionMode failureActionMode = ACSupportedActionMode(@(self.failureActionMode));
     if (successActionMode == AnClickActionModeNone &&
-        actionMode != AnClickActionModeNetwork &&
-        actionMode != AnClickActionModeConditionWait) {
+        actionMode != AnClickActionModeNetwork) {
         successActionMode = AnClickActionModeTap;
     }
     dictionary[ACKeyMode] = @(actionMode);
@@ -431,11 +424,10 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     }
     NSString *method = self.networkMethod.length > 0 ? [self.networkMethod uppercaseString] : (self.networkUsesPost ? @"POST" : @"GET");
     dictionary[@"networkMethod"] = [method isEqualToString:@"POST"] ? @"POST" : @"GET";
-    if ((actionMode == AnClickActionModeNetwork || actionMode == AnClickActionModeConditionWait) &&
-        self.networkHeaders.count > 0) {
+    if (actionMode == AnClickActionModeNetwork && self.networkHeaders.count > 0) {
         dictionary[@"networkHeaders"] = self.networkHeaders;
     }
-    dictionary[@"networkRequestOnly"] = @(actionMode == AnClickActionModeConditionWait ? NO : self.networkRequestOnly);
+    dictionary[@"networkRequestOnly"] = @(self.networkRequestOnly);
     dictionary[@"networkUsesPost"] = @([[dictionary objectForKey:@"networkMethod"] isEqualToString:@"POST"] || self.networkUsesPost);
     dictionary[@"networkRetryForever"] = @(self.networkRetryForever);
     dictionary[@"networkRetryLimit"] = @(MAX(1, self.networkRetryLimit));

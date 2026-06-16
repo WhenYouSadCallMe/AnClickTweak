@@ -681,8 +681,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return [self themeWarningColor];
         case AnClickActionModeOpenApp:
             return [self themeTealColor];
-        case AnClickActionModeConditionWait:
-            return [self themePurpleColor];
         default:
             return [self themeHighlightColor];
     }
@@ -1473,20 +1471,49 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)attachPanelWindowToActiveSceneIfNeeded {
     if (@available(iOS 13.0, *)) {
-        if (_panelWindow.windowScene) {
+        UIWindowScene *scene = [self activeWindowScene];
+        if (!scene) {
             return;
         }
-        UIWindowScene *scene = [self activeWindowScene];
-        if (scene) {
-            _panelWindow.windowScene = scene;
+        UIWindowScene *currentScene = _panelWindow.windowScene;
+        if (currentScene == scene) {
+            return;
         }
+        if (currentScene && currentScene.activationState == UISceneActivationStateForegroundActive) {
+            return;
+        }
+        BOOL wasHidden = _panelWindow.hidden;
+        _panelWindow.hidden = YES;
+        _panelWindow.windowScene = scene;
+        _panelWindow.hidden = wasHidden;
     }
 }
 
 - (void)handleScreenGeometryChanged {
     void (^geometryBlock)(void) = ^{
         NSUInteger generation = ++self->_screenGeometryRefreshGeneration;
+        BOOL hadCollapsedFrame = self->_hasCollapsedPanelFrame;
+        BOOL hadCollapsedRatio = self->_hasCollapsedPanelOriginRatio;
+        CGRect collapsedFrame = self->_collapsedPanelFrame;
+        CGPoint collapsedRatio = self->_collapsedPanelOriginRatio;
+        CGSize collapsedScreenSize = self->_collapsedPanelScreenSize;
+        BOOL hadExpandedFrame = self->_hasExpandedPanelFrame;
+        BOOL hadExpandedRatio = self->_hasExpandedPanelOriginRatio;
+        CGRect expandedFrame = self->_expandedPanelFrame;
+        CGPoint expandedRatio = self->_expandedPanelOriginRatio;
+        CGSize expandedScreenSize = self->_expandedPanelScreenSize;
+
         [self applyScreenGeometryRefreshAllowHeavyRefresh:NO];
+        self->_hasCollapsedPanelFrame = hadCollapsedFrame;
+        self->_hasCollapsedPanelOriginRatio = hadCollapsedRatio;
+        self->_collapsedPanelFrame = collapsedFrame;
+        self->_collapsedPanelOriginRatio = collapsedRatio;
+        self->_collapsedPanelScreenSize = collapsedScreenSize;
+        self->_hasExpandedPanelFrame = hadExpandedFrame;
+        self->_hasExpandedPanelOriginRatio = hadExpandedRatio;
+        self->_expandedPanelFrame = expandedFrame;
+        self->_expandedPanelOriginRatio = expandedRatio;
+        self->_expandedPanelScreenSize = expandedScreenSize;
 
         __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.22 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -3304,7 +3331,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                        preferredHeight:[self homeFloatingPanelPreferredHeightForTag:_functionMenuView.tag
                                                                            fallback:CGRectGetHeight(_functionMenuView.bounds)]];
     }
-    _configPromptView.frame = _functionMenuView.bounds;
+    if (_configPromptView) {
+        _configPromptView.frame = _configPromptView.superview ? _configPromptView.superview.bounds : CGRectZero;
+    }
 }
 
 - (void)reclampPanelWindowForCurrentScreen {
@@ -5029,6 +5058,52 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return card;
 }
 
+- (UIView *)showPanelPromptBaseWithTitle:(NSString *)title message:(NSString *)message {
+    if (!_panelView) {
+        return nil;
+    }
+    [self hideConfigPrompt];
+
+    UIView *overlay = [[UIView alloc] initWithFrame:_panelView.bounds];
+    overlay.backgroundColor = [UIColor colorWithWhite:0 alpha:0.50];
+    overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [_panelView addSubview:overlay];
+    [_panelView bringSubviewToFront:overlay];
+    _configPromptView = overlay;
+
+    CGFloat side = 18.0;
+    CGFloat width = overlay.bounds.size.width - side * 2.0;
+    CGFloat cardHeight = 236.0;
+    CGFloat cardY = MAX(78.0, (overlay.bounds.size.height - cardHeight) * 0.44);
+    UIView *card = [[UIView alloc] initWithFrame:CGRectMake(side, cardY, width, cardHeight)];
+    card.backgroundColor = [self themeSurfaceColor];
+    card.layer.cornerRadius = 12;
+    card.layer.borderWidth = 1.0;
+    card.layer.borderColor = [self themeSeparatorColor].CGColor;
+    card.layer.shadowColor = UIColor.blackColor.CGColor;
+    card.layer.shadowOpacity = 0.18;
+    card.layer.shadowRadius = 14.0;
+    card.layer.shadowOffset = CGSizeMake(0, 8);
+    [overlay addSubview:card];
+
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 14, width - 32, 28)];
+    titleLabel.text = title;
+    titleLabel.textColor = [self themePrimaryTextColor];
+    titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
+    titleLabel.adjustsFontSizeToFitWidth = YES;
+    titleLabel.minimumScaleFactor = 0.72;
+    [card addSubview:titleLabel];
+
+    UILabel *messageLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 48, width - 32, 44)];
+    messageLabel.text = message;
+    messageLabel.textColor = [self themeSecondaryTextColor];
+    messageLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+    messageLabel.numberOfLines = 2;
+    [card addSubview:messageLabel];
+
+    return card;
+}
+
 - (void)showSaveTaskConfigNamePrompt {
     if (_taskItems.count == 0) {
         [self hideFunctionMenu];
@@ -5073,7 +5148,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    UIView *card = [self showConfigPromptBaseWithTitle:@"任务备注" message:@"只影响任务列表显示，方便区分每一步用途。"];
+    UIView *card = [self showPanelPromptBaseWithTitle:@"任务备注" message:@"只影响任务列表显示，方便区分每一步用途。"];
+    if (!card) {
+        return;
+    }
     _pendingTaskNoteIndex = index;
     CGFloat width = card.bounds.size.width;
     _configNameField = [[UITextField alloc] initWithFrame:CGRectMake(16, 98, width - 32, 42)];
@@ -5559,8 +5637,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return @"延时";
         case AnClickActionModeOpenApp:
             return @"应用切换";
-        case AnClickActionModeConditionWait:
-            return @"条件等待";
         default:
             return @"动作";
     }
@@ -5750,8 +5826,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         mode == AnClickActionModeNetwork ||
         mode == AnClickActionModeJump ||
         mode == AnClickActionModeDelay ||
-        mode == AnClickActionModeOpenApp ||
-        mode == AnClickActionModeConditionWait;
+        mode == AnClickActionModeOpenApp;
 }
 
 - (BOOL)isReusablePointActionMode:(AnClickActionMode)mode {
@@ -5768,7 +5843,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _pickingFailureActionPoint = NO;
     _pickingSwipeEndPoint = NO;
     if (mode != AnClickActionModeNetwork &&
-        mode != AnClickActionModeConditionWait &&
         mode != AnClickActionModeImage &&
         mode != AnClickActionModeOCR &&
         mode != AnClickActionModeColor) {
@@ -5902,7 +5976,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
-        @(AnClickActionModeConditionWait),
         @(AnClickActionModeOpenApp),
         @(AnClickActionModeImage),
         @(AnClickActionModeOCR),
@@ -5933,7 +6006,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
-        @(AnClickActionModeConditionWait),
         @(AnClickActionModeOpenApp),
         @(AnClickActionModeImage),
         @(AnClickActionModeOCR),
@@ -7498,6 +7570,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 
 - (void)handleApplicationDidBecomeActive {
     [self show];
+    [self handleScreenGeometryChanged];
     if (!_taskRunPausedForForeground) {
         return;
     }
@@ -7510,6 +7583,13 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (void)handleApplicationWillLeaveForeground {
+    if (_panelWindow) {
+        if (_panelExpanded) {
+            [self rememberExpandedPanelFrame:_panelWindow.frame];
+        } else {
+            [self rememberCollapsedPanelFrame:_panelWindow.frame];
+        }
+    }
     BOOL wasRunning = _taskRunActive;
     if (wasRunning) {
         [self pauseTaskRunForForegroundLoss];
@@ -8415,8 +8495,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     [self taskListSwipePointSummaryForTask:task index:0],
                     [self taskListSwipePointSummaryForTask:task index:1],
                     [self millisecondsSummaryTextForDuration:[self swipeDurationForTask:task]]];
-        case AnClickActionModeNetwork:
-        case AnClickActionModeConditionWait: {
+        case AnClickActionModeNetwork: {
             NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
             return [NSString stringWithFormat:@"%@ %@ %@", name, [self networkMethodForTask:task], url.length > 0 ? url : @"未填链接"];
         }
@@ -8643,7 +8722,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         subtitle = [self colorPatternSummaryForTask:task];
     } else if (desc.length == 0 && mode == AnClickActionModeImage) {
         subtitle = [NSString stringWithFormat:@"识图 · %@", [self recognitionTargetSummaryForTask:task]];
-    } else if (desc.length == 0 && (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait)) {
+    } else if (desc.length == 0 && mode == AnClickActionModeNetwork) {
         NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
         NSString *contains = [self trimmedActionDescription:task[@"networkContains"]];
         NSString *falseText = [self trimmedActionDescription:task[@"networkFalse"]];
@@ -8676,7 +8755,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         NSString *bundleID = [self configuredTargetBundleIDForTask:task];
         subtitle = bundleID.length > 0 ? [NSString stringWithFormat:@"切换到 %@", bundleID] : @"未填写 Bundle ID";
     }
-    if (mode != AnClickActionModeNetwork && mode != AnClickActionModeConditionWait) {
+    if (mode != AnClickActionModeNetwork) {
         NSString *suffix = [self commonSuffixForTask:task];
         if (suffix.length > 0) {
             subtitle = [subtitle stringByAppendingString:suffix];
@@ -8706,11 +8785,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         detail = [NSString stringWithFormat:@"%lu点同步", (unsigned long)[self storedMultiTapPointsForTask:task].count];
     } else if (detail.length == 0 && mode == AnClickActionModeColor) {
         detail = [self colorPatternSummaryForTask:task];
-    } else if (detail.length == 0 && (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait)) {
+    } else if (detail.length == 0 && mode == AnClickActionModeNetwork) {
         BOOL requestOnly = [self networkTaskIsOneShot:task];
-        detail = mode == AnClickActionModeConditionWait
-            ? [NSString stringWithFormat:@"%@ 等待条件", [self networkMethodForTask:task]]
-            : [NSString stringWithFormat:@"%@ %@", [self networkMethodForTask:task], requestOnly ? @"仅请求" : @"判断返回"];
+        detail = [NSString stringWithFormat:@"%@ %@", [self networkMethodForTask:task], requestOnly ? @"仅请求" : @"判断返回"];
     } else if (detail.length == 0 && mode == AnClickActionModeDelay) {
         detail = [NSString stringWithFormat:@"等待%@", [self millisecondsSummaryTextForDuration:[self delayForTask:task]]];
     } else if (detail.length == 0 && mode == AnClickActionModeOpenApp) {
@@ -8895,8 +8972,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             return @"eyedropper.full";
         case AnClickActionModeNetwork:
             return @"network";
-        case AnClickActionModeConditionWait:
-            return @"hourglass";
         case AnClickActionModeOpenApp:
             return @"arrow.triangle.2.circlepath";
         case AnClickActionModeJump:
@@ -9187,8 +9262,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             return @"识色参数";
         case AnClickActionModeNetwork:
             return @"网络参数";
-        case AnClickActionModeConditionWait:
-            return @"条件等待";
         case AnClickActionModeOpenApp:
             return @"应用切换";
         case AnClickActionModeJump:
@@ -9301,23 +9374,19 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             [self addTaskListDetailRowWithTitle:@"识别重试" value:[self taskListRecognitionRetrySummaryForTask:task] tint:tint rows:rows];
             break;
         }
-        case AnClickActionModeNetwork:
-        case AnClickActionModeConditionWait: {
+        case AnClickActionModeNetwork: {
             NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
-            [self addTaskListDetailRowWithTitle:mode == AnClickActionModeConditionWait ? @"等待地址" : @"请求地址"
-                                          value:url.length > 0 ? url : @"未设置"
-                                           tint:tint
-                                           rows:rows];
+            [self addTaskListDetailRowWithTitle:@"请求地址" value:url.length > 0 ? url : @"未设置" tint:tint rows:rows];
             [self addTaskListDetailRowWithTitle:@"请求方法" value:[self networkMethodForTask:task] tint:tint rows:rows];
             BOOL oneShot = [self networkTaskIsOneShot:task];
-            [self addTaskListDetailRowWithTitle:@"执行模式" value:mode == AnClickActionModeConditionWait ? @"等待到命中" : (oneShot ? @"仅请求一次" : @"判断返回") tint:tint rows:rows];
+            [self addTaskListDetailRowWithTitle:@"执行模式" value:oneShot ? @"仅请求一次" : @"判断返回" tint:tint rows:rows];
             NSString *contains = [self trimmedActionDescription:task[@"networkContains"]];
             NSString *falseText = [self trimmedActionDescription:task[@"networkFalse"]];
             if (contains.length > 0) {
-                [self addTaskListDetailRowWithTitle:mode == AnClickActionModeConditionWait ? @"继续条件" : @"成功匹配" value:contains tint:tint rows:rows];
+                [self addTaskListDetailRowWithTitle:@"成功匹配" value:contains tint:tint rows:rows];
             }
             if (falseText.length > 0) {
-                [self addTaskListDetailRowWithTitle:mode == AnClickActionModeConditionWait ? @"等待条件" : @"失败匹配" value:falseText tint:tint rows:rows];
+                [self addTaskListDetailRowWithTitle:@"失败匹配" value:falseText tint:tint rows:rows];
             }
             if ([[self networkMethodForTask:task] isEqualToString:@"POST"]) {
                 NSDictionary *pairDictionary = [self networkPostDictionaryFromPairs:task[@"networkPostPairs"] recognitionText:@""];
@@ -10377,7 +10446,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if (mode == AnClickActionModeColor) {
         return 1.20;
     }
-    if (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait) {
+    if (mode == AnClickActionModeNetwork) {
         return 0.85;
     }
     if (mode == AnClickActionModeJump) {
@@ -10402,7 +10471,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if (actionMode == AnClickActionModeNone || actionMode == AnClickActionModeJump) {
         return 0.0;
     }
-    if (actionMode == AnClickActionModeNetwork || actionMode == AnClickActionModeConditionWait) {
+    if (actionMode == AnClickActionModeNetwork) {
         return [self networkTimeoutForTask:task] + 0.25;
     }
     if ([self modeIsRecognitionTask:actionMode]) {
@@ -10435,7 +10504,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         NSTimeInterval successDuration = [self estimatedActionDurationForTask:task success:YES actionMode:successMode depth:depth];
         NSTimeInterval failureDuration = [self estimatedActionDurationForTask:task success:NO actionMode:failureMode depth:depth];
         duration = baseDuration + MAX(successDuration, failureDuration);
-    } else if (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait) {
+    } else if (mode == AnClickActionModeNetwork) {
         duration = 0.85;
     } else if (mode == AnClickActionModeMacro) {
         NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
@@ -10635,8 +10704,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 
 - (BOOL)modeIsJudgementTask:(AnClickActionMode)mode {
     return [self modeIsRecognitionTask:mode] ||
-        mode == AnClickActionModeNetwork ||
-        mode == AnClickActionModeConditionWait;
+        mode == AnClickActionModeNetwork;
 }
 
 - (BOOL)modeCanUseRecognitionPoint:(AnClickActionMode)mode {
@@ -10669,13 +10737,13 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     } mutableCopy];
     if (mode == AnClickActionModeDelay) {
         task[@"delay"] = @0.50;
-    } else if (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait) {
+    } else if (mode == AnClickActionModeNetwork) {
         task[@"networkMethod"] = @"GET";
         task[@"networkHeaders"] = AnClickDefaultNetworkHeaders();
         task[@"networkTimeout"] = @8.0;
         task[@"networkRetryForever"] = @YES;
         task[@"networkRetryLimit"] = @3;
-        task[@"networkRequestOnly"] = @(mode == AnClickActionModeNetwork);
+        task[@"networkRequestOnly"] = @YES;
     } else if (mode == AnClickActionModeSwipe) {
         task[@"swipeDuration"] = @0.30;
         task[@"swipeStep"] = @1.0;
@@ -11611,7 +11679,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 
     BOOL oneShot = [self networkTaskIsOneShot:task];
     if (!oneShot && ![self networkTaskHasJudgementCondition:task]) {
-        [self setHomeOutputText:[self modeForTask:task] == AnClickActionModeConditionWait ? @"条件等待缺少命中条件" : @"网络判断未填条件"];
+        [self setHomeOutputText:@"网络判断未填条件"];
         if (completion) {
             completion(NO, NO, NO);
         }
@@ -13212,22 +13280,22 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         }
         return YES;
     }
-    if (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait) {
+    if (mode == AnClickActionModeNetwork) {
         NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
         if (url.length == 0) {
-            _statusLabel.text = mode == AnClickActionModeConditionWait ? @"条件等待未填链接" : @"任务网络未填链接";
+            _statusLabel.text = @"任务网络未填链接";
             return NO;
         }
         if (![self normalizedNetworkURLString:url]) {
-            _statusLabel.text = mode == AnClickActionModeConditionWait ? @"条件等待链接无效" : @"任务网络链接无效";
+            _statusLabel.text = @"任务网络链接无效";
             return NO;
         }
         if (![self networkTaskIsOneShot:task] && ![self networkTaskHasJudgementCondition:task]) {
-            _statusLabel.text = mode == AnClickActionModeConditionWait ? @"条件等待缺少命中条件" : @"任务网络缺少判断条件";
+            _statusLabel.text = @"任务网络缺少判断条件";
             return NO;
         }
         if (![self networkTaskHasPostPayload:task]) {
-            _statusLabel.text = mode == AnClickActionModeConditionWait ? @"条件等待POST键值未填写" : @"任务POST键值未填写";
+            _statusLabel.text = @"任务POST键值未填写";
             return NO;
         }
         return YES;
@@ -13369,7 +13437,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
         NSTimeInterval actionDuration = [self estimatedActionDurationForTask:task success:YES actionMode:actionMode depth:0];
         duration = 0.75 + actionDuration;
-    } else if (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait) {
+    } else if (mode == AnClickActionModeNetwork) {
         duration = 0.85;
     } else if (mode == AnClickActionModeMacro) {
         NSArray *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
@@ -13475,7 +13543,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 [strongSelf performOCRTask:task inWindow:currentHostWindow runGeneration:runGeneration];
             } else if (mode == AnClickActionModeColor) {
                 [strongSelf performColorTask:task inWindow:currentHostWindow runGeneration:runGeneration];
-            } else if (mode == AnClickActionModeNetwork || mode == AnClickActionModeConditionWait) {
+            } else if (mode == AnClickActionModeNetwork) {
                 [strongSelf performNetworkRequestTask:task runGeneration:runGeneration completion:nil];
             } else if (mode == AnClickActionModeMacro) {
                 NSArray<NSDictionary *> *events = [task[@"events"] isKindOfClass:NSArray.class] ? task[@"events"] : @[];
