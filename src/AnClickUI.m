@@ -3873,10 +3873,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @"stopMinute": @(_globalStopMinute),
         @"stopSecond": @(_globalStopSecond),
         @"stopMillisecond": @(_globalStopMillisecond),
-        @"networkGateEnabled": @NO,
-        @"networkURL": @"",
-        @"networkContains": @"",
-        @"networkFalse": @"",
+        @"networkGateEnabled": @(_globalNetworkGateEnabled),
+        @"networkURL": _globalNetworkURL ?: @"",
+        @"networkContains": _globalNetworkContainsText ?: @"",
+        @"networkFalse": _globalNetworkFalseText ?: @"",
     };
 }
 
@@ -3906,10 +3906,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalStopMinute = MIN(59, MAX(0, [settings[@"stopMinute"] integerValue]));
     _globalStopSecond = MIN(59, MAX(0, [settings[@"stopSecond"] integerValue]));
     _globalStopMillisecond = MIN(999, MAX(0, [settings[@"stopMillisecond"] integerValue]));
-    _globalNetworkGateEnabled = NO;
-    _globalNetworkURL = nil;
-    _globalNetworkContainsText = nil;
-    _globalNetworkFalseText = nil;
+    _globalNetworkGateEnabled = [settings[@"networkGateEnabled"] boolValue];
+    _globalNetworkURL = [self trimmedActionDescription:settings[@"networkURL"]];
+    _globalNetworkContainsText = [self trimmedActionDescription:settings[@"networkContains"]];
+    _globalNetworkFalseText = [self trimmedActionDescription:settings[@"networkFalse"]];
 }
 
 - (void)loadGlobalSettings {
@@ -3930,6 +3930,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     [self applyGlobalSettingsDictionary:(NSDictionary *)object];
+    [self scheduleGlobalTimers];
 }
 
 - (void)writeGlobalSettings {
