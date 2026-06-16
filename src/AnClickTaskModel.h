@@ -56,6 +56,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) NSString *networkPostExtraFields;
 
 @property (nonatomic, assign) NSInteger jumpTaskIndex;
+@property (nonatomic, copy) NSString *targetBundleID;
 
 @property (nonatomic, assign) double macroSpeed;
 

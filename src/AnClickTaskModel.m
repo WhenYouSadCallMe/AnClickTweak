@@ -91,6 +91,7 @@ static AnClickActionMode ACSupportedActionMode(id value) {
         case AnClickActionModeNetwork:
         case AnClickActionModeJump:
         case AnClickActionModeDelay:
+        case AnClickActionModeOpenApp:
             return mode;
         default:
             return AnClickActionModeNone;
@@ -180,6 +181,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
         _networkPostBody = @"";
         _networkPostExtraFields = @"";
         _jumpTaskIndex = -1;
+        _targetBundleID = @"";
         _macroSpeed = 1.0;
         _recognitionRetryUntilFound = NO;
         _recognitionRetryInterval = 1.0;
@@ -273,6 +275,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
 
     id jumpValue = dictionary[@"jumpTaskIndex"] ?: dictionary[@"jumpTaskId"] ?: dictionary[@"targetTaskIndex"];
     _jumpTaskIndex = ACClampedInteger(jumpValue, -1, NSIntegerMax, -1);
+    _targetBundleID = ACStringValue(dictionary[@"targetBundleID"] ?: dictionary[@"bundleID"] ?: dictionary[@"applicationBundleID"]);
 
     _macroSpeed = ACClampedDouble(dictionary[@"macroSpeed"], 0.1, 10.0, 1.0);
 
@@ -439,6 +442,9 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     }
     if (self.jumpTaskIndex >= 0) {
         dictionary[@"jumpTaskIndex"] = @(self.jumpTaskIndex);
+    }
+    if (self.targetBundleID.length > 0) {
+        dictionary[@"targetBundleID"] = self.targetBundleID;
     }
     dictionary[@"macroSpeed"] = @(MIN(10.0, MAX(0.1, self.macroSpeed)));
     dictionary[@"recognitionRetryUntilFound"] = @(self.recognitionRetryUntilFound);

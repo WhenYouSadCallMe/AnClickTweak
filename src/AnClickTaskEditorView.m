@@ -49,6 +49,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindNetworkContains,
     ACEditorRowKindNetworkFalse,
     ACEditorRowKindJumpTarget,
+    ACEditorRowKindAppBundleID,
     ACEditorRowKindMacroRecord,
     ACEditorRowKindMacroSummary,
     ACEditorRowKindMacroSpeed,
@@ -681,6 +682,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @{@"title": @"🌐 网络", @"mode": @(AnClickActionModeNetwork)},
             @{@"title": @"🔀 跳转", @"mode": @(AnClickActionModeJump)},
             @{@"title": @"⏱ 延时", @"mode": @(AnClickActionModeDelay)},
+            @{@"title": @"▣ 切应用", @"mode": @(AnClickActionModeOpenApp)},
         ];
         NSMutableArray *buttons = [NSMutableArray array];
         UIStackView *outer = [[UIStackView alloc] initWithFrame:CGRectZero];
@@ -956,6 +958,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             return @"网络请求";
         case AnClickActionModeJump:
             return @"跳转目标";
+        case AnClickActionModeOpenApp:
+            return @"应用切换";
         case AnClickActionModeMacro:
             return @"录制参数";
         case AnClickActionModeDelay:
@@ -986,6 +990,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             return @"回放设置";
         case AnClickActionModeDelay:
             return @"延时设置";
+        case AnClickActionModeOpenApp:
+            return @"切换设置";
         default:
             return @"动作设置";
     }
@@ -1030,6 +1036,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @(ACEditorRowKindNetworkContains),
         @(ACEditorRowKindNetworkFalse),
         @(ACEditorRowKindJumpTarget),
+        @(ACEditorRowKindAppBundleID),
         @(ACEditorRowKindMacroRecord),
         @(ACEditorRowKindMacroSummary),
     ];
@@ -1295,6 +1302,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case AnClickActionModeNetwork: return @"网络";
         case AnClickActionModeJump: return @"跳转";
         case AnClickActionModeDelay: return @"延时";
+        case AnClickActionModeOpenApp: return @"切应用";
         default: return @"动作";
     }
 }
@@ -1784,6 +1792,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
                 self.model.networkPostPairs.count > 0;
         case ACEditorRowKindJumpTarget:
             return mode == AnClickActionModeJump;
+        case ACEditorRowKindAppBundleID:
+            return mode == AnClickActionModeOpenApp;
         case ACEditorRowKindMacroRecord:
         case ACEditorRowKindMacroSummary:
         case ACEditorRowKindMacroSpeed:
@@ -2133,6 +2143,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     }
     if (mode != AnClickActionModeJump) {
         self.model.jumpTaskIndex = -1;
+    }
+    if (mode != AnClickActionModeOpenApp) {
+        self.model.targetBundleID = @"";
     }
     if (mode != AnClickActionModeMacro) {
         self.model.events = @[];
@@ -2861,6 +2874,13 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             cell.textField.text = self.model.jumpTaskIndex >= 0 ? [NSString stringWithFormat:@"%ld", (long)self.model.jumpTaskIndex + 1] : @"";
             cell.textField.keyboardType = UIKeyboardTypeNumberPad;
             break;
+        case ACEditorRowKindAppBundleID:
+            cell.iconLabel.text = @"▣";
+            cell.titleLabel.text = @"目标应用 Bundle ID";
+            cell.textField.text = self.model.targetBundleID;
+            cell.textField.placeholder = @"留空自动查找 Alook";
+            cell.textField.keyboardType = UIKeyboardTypeASCIICapable;
+            break;
         case ACEditorRowKindMacroSummary:
             cell.iconLabel.text = @"●";
             cell.titleLabel.text = @"录制内容";
@@ -3113,6 +3133,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             break;
         case ACEditorRowKindJumpTarget:
             self.model.jumpTaskIndex = text.length > 0 ? MAX(0, text.integerValue - 1) : -1;
+            break;
+        case ACEditorRowKindAppBundleID:
+            self.model.targetBundleID = text;
             break;
         case ACEditorRowKindMacroSpeed:
             self.model.macroSpeed = MIN(10.0, MAX(0.1, text.doubleValue));

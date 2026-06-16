@@ -4,6 +4,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <MediaPlayer/MediaPlayer.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <sys/proc.h>
 #import <sys/sysctl.h>
 #import <unistd.h>
@@ -289,6 +290,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (NSTimeInterval)estimatedActionDurationForTaskModel:(AnClickTaskModel *)model success:(BOOL)success actionMode:(AnClickActionMode)actionMode depth:(NSUInteger)depth;
 - (NSTimeInterval)estimatedTaskDurationForTask:(NSDictionary *)task depth:(NSUInteger)depth;
 - (NSTimeInterval)estimatedTaskDurationForTaskModel:(AnClickTaskModel *)model depth:(NSUInteger)depth;
+- (NSString *)configuredTargetBundleIDForTask:(NSDictionary *)task;
+- (NSString *)targetBundleIDForTask:(NSDictionary *)task;
+- (BOOL)switchToApplicationForTask:(NSDictionary *)task errorMessage:(NSString **)errorMessage;
 @end
 
 @implementation AnClickUI {
@@ -670,6 +674,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return [UIColor colorWithRed:0.44 green:0.42 blue:0.86 alpha:1.0];
         case AnClickActionModeDelay:
             return [self themeWarningColor];
+        case AnClickActionModeOpenApp:
+            return [self themeTealColor];
         default:
             return [self themeHighlightColor];
     }
@@ -5439,6 +5445,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             return @"跳转";
         case AnClickActionModeDelay:
             return @"延时";
+        case AnClickActionModeOpenApp:
+            return @"切应用";
         default:
             return @"动作";
     }
@@ -5627,7 +5635,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         mode == AnClickActionModeColor ||
         mode == AnClickActionModeNetwork ||
         mode == AnClickActionModeJump ||
-        mode == AnClickActionModeDelay;
+        mode == AnClickActionModeDelay ||
+        mode == AnClickActionModeOpenApp;
 }
 
 - (BOOL)isReusablePointActionMode:(AnClickActionMode)mode {
@@ -8286,6 +8295,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             NSString *url = [self trimmedActionDescription:task[@"networkURL"]];
             return [NSString stringWithFormat:@"%@ %@ %@", name, [self networkMethodForTask:task], url.length > 0 ? url : @"未填链接"];
         }
+        case AnClickActionModeOpenApp: {
+            NSString *bundleID = [self configuredTargetBundleIDForTask:task];
+            return bundleID.length > 0 ? [NSString stringWithFormat:@"%@ %@", name, bundleID] : @"切应用 Alook";
+        }
         case AnClickActionModeDelay:
             return [NSString stringWithFormat:@"%@ %@", name, [self millisecondsSummaryTextForDuration:[self delayForTask:task]]];
         case AnClickActionModeMacro: {
@@ -8534,6 +8547,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         subtitle = [subtitle stringByAppendingFormat:@" · 超时%.0f秒", [self networkTimeoutForTask:task]];
     } else if (desc.length == 0 && mode == AnClickActionModeDelay) {
         subtitle = [NSString stringWithFormat:@"等待%@", [self millisecondsSummaryTextForDuration:[self delayForTask:task]]];
+    } else if (desc.length == 0 && mode == AnClickActionModeOpenApp) {
+        NSString *bundleID = [self configuredTargetBundleIDForTask:task];
+        subtitle = bundleID.length > 0 ? [NSString stringWithFormat:@"切换到 %@", bundleID] : @"切换到 Alook";
     }
     if (mode != AnClickActionModeNetwork) {
         NSString *suffix = [self commonSuffixForTask:task];
@@ -8570,6 +8586,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         detail = [NSString stringWithFormat:@"%@ %@", [self networkMethodForTask:task], requestOnly ? @"仅请求" : @"判断返回"];
     } else if (detail.length == 0 && mode == AnClickActionModeDelay) {
         detail = [NSString stringWithFormat:@"等待%@", [self millisecondsSummaryTextForDuration:[self delayForTask:task]]];
+    } else if (detail.length == 0 && mode == AnClickActionModeOpenApp) {
+        NSString *bundleID = [self configuredTargetBundleIDForTask:task];
+        detail = bundleID.length > 0 ? bundleID : @"Alook";
     }
 
     NSString *prefix = [NSString stringWithFormat:@"任务%lu/%lu %@",
@@ -8749,6 +8768,8 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             return @"eyedropper.full";
         case AnClickActionModeNetwork:
             return @"network";
+        case AnClickActionModeOpenApp:
+            return @"app.fill";
         case AnClickActionModeJump:
             return @"arrow.triangle.branch";
         case AnClickActionModeDelay:
@@ -9037,6 +9058,8 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             return @"识色参数";
         case AnClickActionModeNetwork:
             return @"网络参数";
+        case AnClickActionModeOpenApp:
+            return @"切换应用";
         case AnClickActionModeJump:
             return @"跳转参数";
         case AnClickActionModeDelay:
@@ -9180,6 +9203,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             id value = task[@"jumpTaskIndex"] ?: task[@"targetTaskIndex"] ?: task[@"jumpTaskId"];
             NSInteger targetIndex = [value respondsToSelector:@selector(integerValue)] ? [value integerValue] : -1;
             [self addTaskListDetailRowWithTitle:@"跳转目标" value:targetIndex >= 0 ? [NSString stringWithFormat:@"任务%ld", (long)targetIndex + 1] : @"未设置" tint:tint rows:rows];
+            break;
+        }
+        case AnClickActionModeOpenApp: {
+            NSString *bundleID = [self configuredTargetBundleIDForTask:task];
+            [self addTaskListDetailRowWithTitle:@"目标应用" value:bundleID.length > 0 ? bundleID : @"Alook" tint:tint rows:rows];
             break;
         }
         case AnClickActionModeDelay:
@@ -10227,6 +10255,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     }
     if (mode == AnClickActionModeJump) {
         return 0.0;
+    }
+    if (mode == AnClickActionModeOpenApp) {
+        return 0.10;
     }
     if (mode == AnClickActionModeDelay) {
         return 0.0;
@@ -12763,6 +12794,103 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     return [model isKindOfClass:AnClickTaskModel.class] ? [model dictionaryRepresentation] : nil;
 }
 
+- (NSString *)stringValueForPrivateObject:(id)object keys:(NSArray<NSString *> *)keys {
+    if (!object) {
+        return @"";
+    }
+    for (NSString *key in keys) {
+        id value = nil;
+        @try {
+            value = [object valueForKey:key];
+        } @catch (__unused NSException *exception) {
+            value = nil;
+        }
+        if ([value isKindOfClass:NSString.class] && [value length] > 0) {
+            return value;
+        }
+    }
+    return @"";
+}
+
+- (id)sharedApplicationWorkspace {
+    Class workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
+    SEL selector = NSSelectorFromString(@"defaultWorkspace");
+    if (!workspaceClass || ![workspaceClass respondsToSelector:selector]) {
+        return nil;
+    }
+    return ((id (*)(Class, SEL))objc_msgSend)(workspaceClass, selector);
+}
+
+- (NSString *)bundleIDForInstalledApplicationMatchingName:(NSString *)name {
+    NSString *needle = [self trimmedActionDescription:name];
+    if (needle.length == 0) {
+        return @"";
+    }
+    id workspace = [self sharedApplicationWorkspace];
+    SEL selector = NSSelectorFromString(@"allInstalledApplications");
+    if (!workspace || ![workspace respondsToSelector:selector]) {
+        return @"";
+    }
+    id applicationsObject = ((id (*)(id, SEL))objc_msgSend)(workspace, selector);
+    NSArray *applications = [applicationsObject isKindOfClass:NSSet.class]
+        ? [((NSSet *)applicationsObject) allObjects]
+        : ([applicationsObject isKindOfClass:NSArray.class] ? applicationsObject : nil);
+    if (![applications isKindOfClass:NSArray.class]) {
+        return @"";
+    }
+    for (id application in applications) {
+        NSString *bundleID = [self stringValueForPrivateObject:application
+                                                          keys:@[@"bundleIdentifier", @"applicationIdentifier", @"bundleID"]];
+        if (bundleID.length == 0) {
+            continue;
+        }
+        NSString *displayName = [self stringValueForPrivateObject:application
+                                                             keys:@[@"localizedName", @"itemName", @"applicationName", @"name"]];
+        if ([displayName rangeOfString:needle options:NSCaseInsensitiveSearch].location != NSNotFound ||
+            [bundleID rangeOfString:needle options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            return bundleID;
+        }
+    }
+    return @"";
+}
+
+- (NSString *)targetBundleIDForTask:(NSDictionary *)task {
+    NSString *bundleID = [self configuredTargetBundleIDForTask:task];
+    if (bundleID.length > 0) {
+        return bundleID;
+    }
+    return [self bundleIDForInstalledApplicationMatchingName:@"Alook"];
+}
+
+- (NSString *)configuredTargetBundleIDForTask:(NSDictionary *)task {
+    return [self trimmedActionDescription:task[@"targetBundleID"] ?: task[@"bundleID"] ?: task[@"applicationBundleID"]];
+}
+
+- (BOOL)switchToApplicationForTask:(NSDictionary *)task errorMessage:(NSString **)errorMessage {
+    NSString *bundleID = [self targetBundleIDForTask:task];
+    if (bundleID.length == 0) {
+        if (errorMessage) {
+            *errorMessage = @"未找到 Alook，请填写 Bundle ID";
+        }
+        return NO;
+    }
+
+    id workspace = [self sharedApplicationWorkspace];
+    SEL selector = NSSelectorFromString(@"openApplicationWithBundleID:");
+    if (!workspace || ![workspace respondsToSelector:selector]) {
+        if (errorMessage) {
+            *errorMessage = @"当前系统不支持 Bundle ID 切换";
+        }
+        return NO;
+    }
+
+    BOOL success = ((BOOL (*)(id, SEL, NSString *))objc_msgSend)(workspace, selector, bundleID);
+    if (!success && errorMessage) {
+        *errorMessage = [NSString stringWithFormat:@"切换应用失败：%@", bundleID];
+    }
+    return success;
+}
+
 - (BOOL)taskModelIsComplete:(AnClickTaskModel *)model {
     NSMutableDictionary *task = [self taskDictionaryForModel:model];
     BOOL complete = task ? [self taskIsComplete:task] : NO;
@@ -12974,6 +13102,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         }
         return YES;
     }
+    if (mode == AnClickActionModeOpenApp) {
+        return YES;
+    }
     if (mode == AnClickActionModeDelay) {
         if ([self delayForTask:task] <= 0.001) {
             _statusLabel.text = @"任务延时未设置";
@@ -13046,6 +13177,40 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     NSTimeInterval delay = [self delayForTask:task];
     if (mode == AnClickActionModeDelay) {
         return delay;
+    }
+    if (mode == AnClickActionModeOpenApp) {
+        __weak typeof(self) weakSelf = self;
+        [_taskEngine scheduleAfter:delay guard:^BOOL{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return NO;
+            }
+            return runGeneration == 0 || (strongSelf->_taskRunActive && runGeneration == strongSelf->_taskRunGeneration);
+        } block:^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            NSString *error = nil;
+            BOOL success = [strongSelf switchToApplicationForTask:task errorMessage:&error];
+            NSString *bundleID = [strongSelf targetBundleIDForTask:task];
+            if (success) {
+                strongSelf->_statusLabel.text = bundleID.length > 0
+                    ? [NSString stringWithFormat:@"已切换应用 %@", bundleID]
+                    : @"已切换应用";
+                if (runGeneration != 0) {
+                    [strongSelf finishTaskRunWithStatus:strongSelf->_statusLabel.text showToast:NO restorePanel:NO];
+                }
+            } else {
+                NSString *message = error.length > 0 ? error : @"切换应用失败";
+                strongSelf->_statusLabel.text = message;
+                [strongSelf setHomeOutputText:message];
+                if (runGeneration != 0) {
+                    [strongSelf stopTaskRunWithStatus:message showToast:NO];
+                }
+            }
+        }];
+        return delay + 0.10;
     }
     NSTimeInterval duration = [self durationForTaskMode:mode];
     if (mode == AnClickActionModeImage) {
