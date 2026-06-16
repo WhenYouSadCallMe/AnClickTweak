@@ -11186,7 +11186,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     [self syncGlobalSettingsFromFields];
     NSString *url = [self trimmedActionDescription:_globalNetworkURL];
     NSString *contains = [self trimmedActionDescription:_globalNetworkContainsText];
-    NSString *falseText = [self trimmedActionDescription:_globalNetworkFalseText];
     if (url.length == 0) {
         return @"网络判断未填链接";
     }
