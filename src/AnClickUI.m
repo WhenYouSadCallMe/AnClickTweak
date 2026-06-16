@@ -6898,6 +6898,10 @@ continueAfterNetworkTaskModel:(AnClickTaskModel *)model
         [self stopTaskRunWithStatus:@"任务数据无效" showToast:YES];
         return;
     }
+    if (model.networkRequestOnly) {
+        [self continueTaskRunAfterIndex:index inWindow:(UIWindow *)host generation:generation];
+        return;
+    }
     [self scheduleTaskContinuationAfterRecognitionTask:task
                                                atIndex:index
                                               inWindow:(UIWindow *)host
@@ -12567,16 +12571,8 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (BOOL)networkTaskHasPostPayload:(NSDictionary *)task {
-    if (![[self networkMethodForTask:task] isEqualToString:@"POST"]) {
-        return YES;
-    }
-    if ([self networkPostDictionaryFromPairs:task[@"networkPostPairs"] recognitionText:@""].count > 0) {
-        return YES;
-    }
-    if ([self networkPostDictionaryFromKeyValueText:[self networkPostKeyValueTextForTask:task] recognitionText:@""].count > 0) {
-        return YES;
-    }
-    return NO;
+    (void)task;
+    return YES;
 }
 
 - (NSMutableDictionary *)taskDictionaryForModel:(AnClickTaskModel *)model {
