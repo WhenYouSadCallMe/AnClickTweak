@@ -146,9 +146,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         _titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
         _titleLabel.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightSemibold];
         _titleLabel.textColor = UIColor.labelColor;
+        _titleLabel.numberOfLines = 2;
         _titleLabel.adjustsFontSizeToFitWidth = YES;
-        _titleLabel.minimumScaleFactor = 0.78;
+        _titleLabel.minimumScaleFactor = 0.62;
+        _titleLabel.lineBreakMode = NSLineBreakByWordWrapping;
         _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        [_titleLabel setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
 
         _textField = [[UITextField alloc] initWithFrame:CGRectZero];
         _textField.font = [UIFont monospacedDigitSystemFontOfSize:14.0 weight:UIFontWeightMedium];
@@ -156,6 +159,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         _textField.borderStyle = UITextBorderStyleRoundedRect;
         _textField.clearButtonMode = UITextFieldViewModeWhileEditing;
         _textField.translatesAutoresizingMaskIntoConstraints = NO;
+        [_textField setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
 
         _unitLabel = [[UILabel alloc] initWithFrame:CGRectZero];
         _unitLabel.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium];
@@ -194,7 +198,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 
             [_textField.trailingAnchor constraintEqualToAnchor:_swatchView.leadingAnchor constant:-8.0],
             [_textField.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
-            [_textField.widthAnchor constraintGreaterThanOrEqualToConstant:94.0],
+            [_textField.widthAnchor constraintGreaterThanOrEqualToConstant:82.0],
             [_textField.heightAnchor constraintEqualToConstant:34.0],
 
             [self.contentView.heightAnchor constraintGreaterThanOrEqualToConstant:54.0],
@@ -2892,7 +2896,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             break;
         case ACEditorRowKindAppBundleID:
             cell.iconLabel.text = @"⇄";
-            cell.titleLabel.text = @"目标应用 Bundle ID";
+            cell.titleLabel.text = @"应用 Bundle ID";
             cell.textField.text = self.model.targetBundleID;
             cell.textField.placeholder = @"例如 com.vendor.app";
             cell.textField.keyboardType = UIKeyboardTypeASCIICapable;
@@ -2902,7 +2906,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             BOOL success = row == ACEditorRowKindSuccessBranchAppBundleID;
             cell.iconLabel.text = success ? @"↳" : @"↯";
             cell.iconLabel.textColor = success ? UIColor.systemGreenColor : UIColor.systemRedColor;
-            cell.titleLabel.text = success ? @"成功分支应用 Bundle ID" : @"失败分支应用 Bundle ID";
+            cell.titleLabel.text = success ? @"成功应用 Bundle ID" : @"失败应用 Bundle ID";
             cell.textField.text = [self branchInlineStringValueForSuccess:success key:@"targetBundleID"];
             cell.textField.placeholder = @"必须填写 Bundle ID";
             cell.textField.keyboardType = UIKeyboardTypeASCIICapable;
