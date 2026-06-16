@@ -11157,7 +11157,8 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (NSString *)networkPostBodyForTask:(NSDictionary *)task recognitionText:(NSString *)recognitionText {
-    if ([task[@"networkPostPairs"] isKindOfClass:NSArray.class]) {
+    NSArray *postPairs = [task[@"networkPostPairs"] isKindOfClass:NSArray.class] ? task[@"networkPostPairs"] : nil;
+    if (postPairs.count > 0) {
         NSDictionary *postDictionary = [self networkPostDictionaryFromPairs:task[@"networkPostPairs"]
                                                             recognitionText:recognitionText];
         if (!postDictionary) {
@@ -11166,6 +11167,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         }
         NSString *jsonBody = postDictionary ? [self networkPostJSONStringFromDictionary:postDictionary] : nil;
         return jsonBody.length > 0 ? jsonBody : @"";
+    }
+
+    NSString *rawBody = [self trimmedActionDescription:task[@"networkPostBody"]];
+    if (rawBody.length > 0) {
+        return [self postBody:rawBody applyingRecognitionText:recognitionText];
     }
 
     NSDictionary *legacyDictionary = [self networkPostDictionaryFromKeyValueText:[self networkPostKeyValueTextForTask:task]
@@ -11260,6 +11266,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                      runGeneration:(NSUInteger)runGeneration
                         completion:(void (^)(BOOL matched, BOOL requestSucceeded, BOOL blocked))completion {
     if (![self panelCanUseCurrentScene]) {
+        if (completion) {
+            completion(NO, NO, NO);
+        }
         return;
     }
     NSString *url = [self trimmedActionDescription:task[@"networkURL"]];

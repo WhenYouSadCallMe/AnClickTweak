@@ -49,7 +49,9 @@ static NSString * const AnClickDefaultUserAgent = @"Mozilla/5.0 (iPhone; CPU iPh
     }
     NSString *path = components.path ?: @"";
     if (path.length > 0) {
-        NSString *encodedPath = [path stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLPathAllowedCharacterSet];
+        NSMutableCharacterSet *pathAllowed = [NSCharacterSet.URLPathAllowedCharacterSet mutableCopy];
+        [pathAllowed removeCharactersInString:@"%"];
+        NSString *encodedPath = [path stringByAddingPercentEncodingWithAllowedCharacters:pathAllowed];
         if (encodedPath.length > 0) {
             components.percentEncodedPath = encodedPath;
         }
@@ -230,7 +232,8 @@ static NSString * const AnClickDefaultUserAgent = @"Mozilla/5.0 (iPhone; CPU iPh
         return @"命中运行";
     }
     if (error) {
-        return @"网络请求失败";
+        NSString *message = [self trimmedText:error.localizedDescription];
+        return message.length > 0 ? [NSString stringWithFormat:@"网络失败:%@", message] : @"网络请求失败";
     }
     if (!requestSucceeded && statusCode > 0) {
         return [NSString stringWithFormat:@"网络状态%ld", (long)statusCode];
