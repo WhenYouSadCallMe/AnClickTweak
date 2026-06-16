@@ -10816,6 +10816,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (BOOL)validateSuccessRecognitionActionTaskForTask:(NSDictionary *)task {
+    if ([self modeForTask:task] == AnClickActionModeNetwork && [self networkTaskIsOneShot:task]) {
+        return YES;
+    }
     AnClickActionMode successMode = [self successActionModeForTask:task];
     NSDictionary *config = [self branchActionConfigForTask:task success:YES expectedMode:successMode];
     if (config) {
@@ -10835,6 +10838,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (BOOL)validateFailureRecognitionActionTaskForTask:(NSDictionary *)task {
+    if ([self modeForTask:task] == AnClickActionModeNetwork && [self networkTaskIsOneShot:task]) {
+        return YES;
+    }
     AnClickActionMode failureMode = [self failureActionModeForTask:task];
     NSDictionary *config = [self branchActionConfigForTask:task success:NO expectedMode:failureMode];
     if (config) {
