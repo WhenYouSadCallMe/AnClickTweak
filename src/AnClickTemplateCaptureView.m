@@ -123,12 +123,17 @@ typedef NS_OPTIONS(NSInteger, AnClickCaptureSelectionEditMode) {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     [button setTitle:title forState:UIControlStateNormal];
     BOOL primary = [title isEqualToString:@"保存"];
-    [button setTitleColor:(primary ? UIColor.whiteColor : UIColor.whiteColor) forState:UIControlStateNormal];
+    UIColor *fillColor = primary ? UIColor.systemBlueColor : UIColor.systemRedColor;
+    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
     button.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    button.backgroundColor = primary ? [UIColor systemBlueColor] : [[UIColor whiteColor] colorWithAlphaComponent:0.12];
+    button.backgroundColor = fillColor;
     button.layer.cornerRadius = 8.0;
     button.layer.borderWidth = 1.0;
-    button.layer.borderColor = [[UIColor whiteColor] colorWithAlphaComponent:0.16].CGColor;
+    button.layer.borderColor = [fillColor colorWithAlphaComponent:0.90].CGColor;
+    button.layer.shadowColor = UIColor.blackColor.CGColor;
+    button.layer.shadowOffset = CGSizeMake(0.0, 3.0);
+    button.layer.shadowRadius = 8.0;
+    button.layer.shadowOpacity = 0.34;
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return button;
 }
@@ -187,9 +192,11 @@ typedef NS_OPTIONS(NSInteger, AnClickCaptureSelectionEditMode) {
     CGFloat gap = 12.0;
     CGFloat buttonWidth = 86.0;
     CGFloat buttonHeight = 44.0;
-    CGFloat bottomY = self.bounds.size.height - buttonHeight - MAX(margin, insets.bottom + margin);
+    CGFloat bottomPadding = MAX(26.0, insets.bottom + 24.0);
+    CGFloat bottomY = self.bounds.size.height - buttonHeight - bottomPadding;
     CGFloat cancelX = self.bounds.size.width - insets.right - margin - buttonWidth;
     self.cancelButton.frame = CGRectMake(cancelX, bottomY, buttonWidth, buttonHeight);
+    self.cancelButton.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:self.cancelButton.bounds cornerRadius:self.cancelButton.layer.cornerRadius].CGPath;
 
     if (self.selectionView.hidden || CGRectIsEmpty(self.selectionView.frame)) {
         self.saveButton.hidden = YES;
@@ -206,11 +213,13 @@ typedef NS_OPTIONS(NSInteger, AnClickCaptureSelectionEditMode) {
     CGFloat belowY = CGRectGetMaxY(selectionFrame) + margin;
     CGFloat aboveY = CGRectGetMinY(selectionFrame) - buttonHeight - margin;
     CGFloat minY = MAX(margin, insets.top + margin);
-    CGFloat maxY = self.bounds.size.height - buttonHeight - MAX(margin, insets.bottom + margin);
+    CGFloat maxY = self.bounds.size.height - buttonHeight - bottomPadding;
     CGFloat y = belowY <= maxY ? belowY : (aboveY >= minY ? aboveY : maxY);
 
     self.saveButton.frame = CGRectMake(x, y, buttonWidth, buttonHeight);
     self.cancelButton.frame = CGRectMake(x + buttonWidth + gap, y, buttonWidth, buttonHeight);
+    self.saveButton.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:self.saveButton.bounds cornerRadius:self.saveButton.layer.cornerRadius].CGPath;
+    self.cancelButton.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:self.cancelButton.bounds cornerRadius:self.cancelButton.layer.cornerRadius].CGPath;
     self.saveButton.hidden = NO;
     self.cancelButton.hidden = NO;
 }

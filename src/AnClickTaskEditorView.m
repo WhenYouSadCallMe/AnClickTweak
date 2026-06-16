@@ -1,9 +1,21 @@
 #import "AnClickTaskEditorView.h"
-
-static const NSTimeInterval ACFastDoubleTapInterval = 0.06;
 #import <math.h>
 
+static const NSTimeInterval ACFastDoubleTapInterval = 0.06;
+static NSString * const ACEditorDefaultNetworkContentType = @"application/json; charset=utf-8";
+static NSString * const ACEditorDefaultNetworkUserAgent = @"Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1";
+
+static NSDictionary *ACEditorDefaultNetworkHeaders(void) {
+    return @{
+        @"Content-Type": ACEditorDefaultNetworkContentType,
+        @"Accept": @"application/json, text/plain, */*",
+        @"User-Agent": ACEditorDefaultNetworkUserAgent,
+    };
+}
+
 static const NSUInteger ACEditorMaxMultiPoints = 32;
+static const NSInteger ACEditorPostPairValueTagOffset = 20000;
+static const NSInteger ACEditorPostPairResultTagOffset = 40000;
 
 typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindActionGrid = 0,
@@ -82,6 +94,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindFailureBranchNetworkHeaders,
     ACEditorRowKindSuccessBranchNetworkBody,
     ACEditorRowKindFailureBranchNetworkBody,
+    ACEditorRowKindSuccessBranchNetworkAddPostPair,
+    ACEditorRowKindFailureBranchNetworkAddPostPair,
     ACEditorRowKindSuccessBranchNetworkTimeout,
     ACEditorRowKindFailureBranchNetworkTimeout,
     ACEditorRowKindSuccessBranchDelay,
@@ -97,6 +111,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindSingleStep,
     ACEditorRowKindDelete,
     ACEditorRowKindNetworkPostPairBase = 1000,
+    ACEditorRowKindSuccessBranchNetworkPostPairBase = 1100,
+    ACEditorRowKindFailureBranchNetworkPostPairBase = 1200,
 };
 
 @interface ACEditorInputCell : UITableViewCell
@@ -175,6 +191,145 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         ]];
     }
     return self;
+}
+
+- (void)prepareForReuse {
+    [super prepareForReuse];
+    self.iconLabel.text = @"";
+    self.iconLabel.textColor = UIColor.labelColor;
+    self.titleLabel.text = @"";
+    self.textField.delegate = nil;
+    self.textField.tag = 0;
+    self.textField.text = @"";
+    self.textField.placeholder = nil;
+    self.textField.keyboardType = UIKeyboardTypeDefault;
+    self.textField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    self.textField.autocorrectionType = UITextAutocorrectionTypeNo;
+    self.textField.enabled = YES;
+    self.unitLabel.text = @"";
+    self.swatchView.hidden = YES;
+    self.swatchView.backgroundColor = UIColor.clearColor;
+}
+
+@end
+
+@interface ACEditorPostPairCell : UITableViewCell
+@property (nonatomic, strong) UILabel *iconLabel;
+@property (nonatomic, strong) UILabel *titleLabel;
+@property (nonatomic, strong) UITextField *keyField;
+@property (nonatomic, strong) UITextField *valueField;
+@property (nonatomic, strong) UIButton *resultButton;
+@property (nonatomic, strong) UILabel *resultBadgeLabel;
+@end
+
+@implementation ACEditorPostPairCell
+
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
+    self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
+    if (self) {
+        self.selectionStyle = UITableViewCellSelectionStyleNone;
+        _iconLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+        _iconLabel.font = [UIFont systemFontOfSize:18.0 weight:UIFontWeightSemibold];
+        _iconLabel.textColor = UIColor.systemBlueColor;
+        _iconLabel.translatesAutoresizingMaskIntoConstraints = NO;
+
+        _titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+        _titleLabel.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightSemibold];
+        _titleLabel.textColor = UIColor.labelColor;
+        _titleLabel.adjustsFontSizeToFitWidth = YES;
+        _titleLabel.minimumScaleFactor = 0.75;
+        _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+
+        _keyField = [[UITextField alloc] initWithFrame:CGRectZero];
+        _keyField.font = [UIFont monospacedDigitSystemFontOfSize:13.0 weight:UIFontWeightMedium];
+        _keyField.borderStyle = UITextBorderStyleRoundedRect;
+        _keyField.clearButtonMode = UITextFieldViewModeWhileEditing;
+        _keyField.placeholder = @"键";
+        _keyField.translatesAutoresizingMaskIntoConstraints = NO;
+
+        _valueField = [[UITextField alloc] initWithFrame:CGRectZero];
+        _valueField.font = [UIFont monospacedDigitSystemFontOfSize:13.0 weight:UIFontWeightMedium];
+        _valueField.borderStyle = UITextBorderStyleRoundedRect;
+        _valueField.clearButtonMode = UITextFieldViewModeWhileEditing;
+        _valueField.placeholder = @"值";
+        _valueField.translatesAutoresizingMaskIntoConstraints = NO;
+
+        _resultButton = [UIButton buttonWithType:UIButtonTypeSystem];
+        _resultButton.titleLabel.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightSemibold];
+        [_resultButton setTitle:@"识字" forState:UIControlStateNormal];
+        _resultButton.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.12];
+        _resultButton.layer.cornerRadius = 7.0;
+        _resultButton.translatesAutoresizingMaskIntoConstraints = NO;
+
+        _resultBadgeLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+        _resultBadgeLabel.font = [UIFont systemFontOfSize:10.0 weight:UIFontWeightSemibold];
+        _resultBadgeLabel.textColor = UIColor.systemBlueColor;
+        _resultBadgeLabel.textAlignment = NSTextAlignmentCenter;
+        _resultBadgeLabel.text = @"OCR";
+        _resultBadgeLabel.translatesAutoresizingMaskIntoConstraints = NO;
+
+        [self.contentView addSubview:_iconLabel];
+        [self.contentView addSubview:_titleLabel];
+        [self.contentView addSubview:_keyField];
+        [self.contentView addSubview:_valueField];
+        [self.contentView addSubview:_resultButton];
+        [self.contentView addSubview:_resultBadgeLabel];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [_iconLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16.0],
+            [_iconLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:15.0],
+            [_iconLabel.widthAnchor constraintEqualToConstant:26.0],
+
+            [_titleLabel.leadingAnchor constraintEqualToAnchor:_iconLabel.trailingAnchor constant:8.0],
+            [_titleLabel.centerYAnchor constraintEqualToAnchor:_iconLabel.centerYAnchor],
+            [_titleLabel.widthAnchor constraintEqualToConstant:78.0],
+
+            [_keyField.leadingAnchor constraintEqualToAnchor:_titleLabel.trailingAnchor constant:8.0],
+            [_keyField.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+            [_keyField.heightAnchor constraintEqualToConstant:34.0],
+
+            [_valueField.leadingAnchor constraintEqualToAnchor:_keyField.trailingAnchor constant:8.0],
+            [_valueField.trailingAnchor constraintEqualToAnchor:_resultButton.leadingAnchor constant:-8.0],
+            [_valueField.centerYAnchor constraintEqualToAnchor:_keyField.centerYAnchor],
+            [_valueField.widthAnchor constraintEqualToAnchor:_keyField.widthAnchor],
+            [_valueField.heightAnchor constraintEqualToAnchor:_keyField.heightAnchor],
+
+            [_resultButton.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-14.0],
+            [_resultButton.centerYAnchor constraintEqualToAnchor:_keyField.centerYAnchor],
+            [_resultButton.widthAnchor constraintEqualToConstant:46.0],
+            [_resultButton.heightAnchor constraintEqualToConstant:32.0],
+
+            [_resultBadgeLabel.trailingAnchor constraintEqualToAnchor:_resultButton.trailingAnchor],
+            [_resultBadgeLabel.bottomAnchor constraintEqualToAnchor:_resultButton.topAnchor constant:-2.0],
+
+            [self.contentView.heightAnchor constraintGreaterThanOrEqualToConstant:58.0],
+        ]];
+    }
+    return self;
+}
+
+- (void)prepareForReuse {
+    [super prepareForReuse];
+    self.iconLabel.text = @"";
+    self.titleLabel.text = @"";
+    self.keyField.delegate = nil;
+    self.valueField.delegate = nil;
+    [self.resultButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
+    self.keyField.tag = 0;
+    self.valueField.tag = 0;
+    self.resultButton.tag = 0;
+    self.keyField.text = @"";
+    self.valueField.text = @"";
+    self.keyField.placeholder = @"键";
+    self.valueField.placeholder = @"值";
+    self.keyField.keyboardType = UIKeyboardTypeDefault;
+    self.valueField.keyboardType = UIKeyboardTypeDefault;
+    self.keyField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    self.valueField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    self.keyField.autocorrectionType = UITextAutocorrectionTypeNo;
+    self.valueField.autocorrectionType = UITextAutocorrectionTypeNo;
+    self.resultButton.hidden = NO;
+    self.resultBadgeLabel.hidden = NO;
 }
 
 @end
@@ -649,6 +804,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     _tableView.translatesAutoresizingMaskIntoConstraints = NO;
     [_tableView registerClass:ACEditorActionGridCell.class forCellReuseIdentifier:@"ActionGrid"];
     [_tableView registerClass:ACEditorInputCell.class forCellReuseIdentifier:@"Input"];
+    [_tableView registerClass:ACEditorPostPairCell.class forCellReuseIdentifier:@"PostPair"];
     [_tableView registerClass:ACEditorSliderCell.class forCellReuseIdentifier:@"Slider"];
     [_tableView registerClass:ACEditorSegmentedCell.class forCellReuseIdentifier:@"Segmented"];
     [_tableView registerClass:ACEditorActionChoiceCell.class forCellReuseIdentifier:@"ActionChoice"];
@@ -845,8 +1001,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @(ACEditorRowKindNetworkURL),
         @(ACEditorRowKindNetworkMethod),
         @(ACEditorRowKindNetworkRequestMode),
-        @(ACEditorRowKindNetworkHeaders),
-        @(ACEditorRowKindNetworkBody),
         @(ACEditorRowKindNetworkAddPostPair),
         @(ACEditorRowKindNetworkContains),
         @(ACEditorRowKindNetworkFalse),
@@ -858,7 +1012,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     for (NSNumber *row in candidates) {
         if ([self shouldShowRowForKind:(ACEditorRowKind)row.integerValue]) {
             [rows addObject:row];
-            if (row.integerValue == ACEditorRowKindNetworkBody) {
+            if (row.integerValue == ACEditorRowKindNetworkAddPostPair) {
                 [rows addObjectsFromArray:[self networkPostPairRows]];
             }
         }
@@ -897,12 +1051,46 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 }
 
 - (BOOL)isNetworkPostPairRow:(ACEditorRowKind)row {
-    return row >= ACEditorRowKindNetworkPostPairBase &&
-        row < ACEditorRowKindNetworkPostPairBase + 100;
+    return (row >= ACEditorRowKindNetworkPostPairBase &&
+        row < ACEditorRowKindNetworkPostPairBase + 100) ||
+        (row >= ACEditorRowKindSuccessBranchNetworkPostPairBase &&
+        row < ACEditorRowKindSuccessBranchNetworkPostPairBase + 100) ||
+        (row >= ACEditorRowKindFailureBranchNetworkPostPairBase &&
+        row < ACEditorRowKindFailureBranchNetworkPostPairBase + 100);
+}
+
+- (BOOL)isNetworkPostPairValueTag:(NSInteger)tag {
+    NSInteger keyTag = tag - ACEditorPostPairValueTagOffset;
+    return [self isNetworkPostPairRow:(ACEditorRowKind)keyTag];
+}
+
+- (BOOL)isNetworkPostPairResultTag:(NSInteger)tag {
+    NSInteger keyTag = tag - ACEditorPostPairResultTagOffset;
+    return [self isNetworkPostPairRow:(ACEditorRowKind)keyTag];
+}
+
+- (ACEditorRowKind)networkPostPairRowForValueTag:(NSInteger)tag {
+    return (ACEditorRowKind)(tag - ACEditorPostPairValueTagOffset);
+}
+
+- (ACEditorRowKind)networkPostPairRowForResultTag:(NSInteger)tag {
+    return (ACEditorRowKind)(tag - ACEditorPostPairResultTagOffset);
 }
 
 - (NSUInteger)networkPostPairIndexForRow:(ACEditorRowKind)row {
+    if (row >= ACEditorRowKindSuccessBranchNetworkPostPairBase &&
+        row < ACEditorRowKindSuccessBranchNetworkPostPairBase + 100) {
+        return (NSUInteger)(row - ACEditorRowKindSuccessBranchNetworkPostPairBase);
+    }
+    if (row >= ACEditorRowKindFailureBranchNetworkPostPairBase &&
+        row < ACEditorRowKindFailureBranchNetworkPostPairBase + 100) {
+        return (NSUInteger)(row - ACEditorRowKindFailureBranchNetworkPostPairBase);
+    }
     return (NSUInteger)(row - ACEditorRowKindNetworkPostPairBase);
+}
+
+- (NSUInteger)networkPostPairIndexForValueTag:(NSInteger)tag {
+    return [self networkPostPairIndexForRow:[self networkPostPairRowForValueTag:tag]];
 }
 
 - (NSArray<NSNumber *> *)networkPostPairRows {
@@ -914,6 +1102,57 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     NSUInteger count = MIN((NSUInteger)8, self.model.networkPostPairs.count);
     for (NSUInteger index = 0; index < count; index++) {
         [rows addObject:@(ACEditorRowKindNetworkPostPairBase + (NSInteger)index)];
+    }
+    return rows;
+}
+
+- (NSArray *)branchNetworkPostPairsForSuccess:(BOOL)success {
+    NSDictionary *config = [self branchPointActionConfigForSuccess:success];
+    NSArray *pairs = [config[@"networkPostPairs"] isKindOfClass:NSArray.class] ? config[@"networkPostPairs"] : @[];
+    return pairs ?: @[];
+}
+
+- (void)setBranchNetworkPostPairs:(NSArray *)pairs success:(BOOL)success {
+    [self storeBranchInlineValue:pairs ?: @[] key:@"networkPostPairs" success:success];
+}
+
+- (NSArray *)networkPostPairsForRow:(ACEditorRowKind)row {
+    if (row >= ACEditorRowKindSuccessBranchNetworkPostPairBase &&
+        row < ACEditorRowKindSuccessBranchNetworkPostPairBase + 100) {
+        return [self branchNetworkPostPairsForSuccess:YES];
+    }
+    if (row >= ACEditorRowKindFailureBranchNetworkPostPairBase &&
+        row < ACEditorRowKindFailureBranchNetworkPostPairBase + 100) {
+        return [self branchNetworkPostPairsForSuccess:NO];
+    }
+    return self.model.networkPostPairs ?: @[];
+}
+
+- (BOOL)networkPostPairRowBelongsToBranch:(ACEditorRowKind)row success:(BOOL *)success {
+    if (row >= ACEditorRowKindSuccessBranchNetworkPostPairBase &&
+        row < ACEditorRowKindSuccessBranchNetworkPostPairBase + 100) {
+        if (success) *success = YES;
+        return YES;
+    }
+    if (row >= ACEditorRowKindFailureBranchNetworkPostPairBase &&
+        row < ACEditorRowKindFailureBranchNetworkPostPairBase + 100) {
+        if (success) *success = NO;
+        return YES;
+    }
+    return NO;
+}
+
+- (NSArray<NSNumber *> *)branchNetworkPostPairRowsForSuccess:(BOOL)success {
+    NSString *method = [self branchInlineStringValueForSuccess:success key:@"networkMethod"];
+    if (![[method uppercaseString] isEqualToString:@"POST"]) {
+        return @[];
+    }
+    NSArray *pairs = [self branchNetworkPostPairsForSuccess:success];
+    NSMutableArray<NSNumber *> *rows = [NSMutableArray array];
+    NSUInteger count = MIN((NSUInteger)8, pairs.count);
+    NSInteger base = success ? ACEditorRowKindSuccessBranchNetworkPostPairBase : ACEditorRowKindFailureBranchNetworkPostPairBase;
+    for (NSUInteger index = 0; index < count; index++) {
+        [rows addObject:@(base + (NSInteger)index)];
     }
     return rows;
 }
@@ -1484,15 +1723,17 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindNetworkURL:
         case ACEditorRowKindNetworkMethod:
         case ACEditorRowKindNetworkRequestMode:
-        case ACEditorRowKindNetworkHeaders:
         case ACEditorRowKindNetworkTimeout:
             return mode == AnClickActionModeNetwork;
+        case ACEditorRowKindNetworkHeaders:
+            return NO;
         case ACEditorRowKindNetworkRetryMode:
         case ACEditorRowKindNetworkRetryLimit:
         case ACEditorRowKindNetworkContains:
         case ACEditorRowKindNetworkFalse:
             return mode == AnClickActionModeNetwork && !self.model.networkRequestOnly;
         case ACEditorRowKindNetworkBody:
+            return NO;
         case ACEditorRowKindNetworkAddPostPair:
             return mode == AnClickActionModeNetwork &&
                 [[self.model.networkMethod uppercaseString] isEqualToString:@"POST"];
@@ -1579,20 +1820,39 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             return judgementMode && failureInlineMode == AnClickActionModeSwipe;
         case ACEditorRowKindSuccessBranchNetworkURL:
         case ACEditorRowKindSuccessBranchNetworkMethod:
-        case ACEditorRowKindSuccessBranchNetworkHeaders:
         case ACEditorRowKindSuccessBranchNetworkTimeout:
             return judgementMode && successInlineMode == AnClickActionModeNetwork;
-        case ACEditorRowKindSuccessBranchNetworkBody:
-            return judgementMode && successInlineMode == AnClickActionModeNetwork &&
+        case ACEditorRowKindSuccessBranchNetworkAddPostPair:
+            return judgementMode &&
+                successInlineMode == AnClickActionModeNetwork &&
+                [[self branchInlineStringValueForSuccess:YES key:@"networkMethod"] uppercaseString].length > 0 &&
                 [[[self branchInlineStringValueForSuccess:YES key:@"networkMethod"] uppercaseString] isEqualToString:@"POST"];
+        case ACEditorRowKindSuccessBranchNetworkHeaders:
+            return NO;
+        case ACEditorRowKindSuccessBranchNetworkBody:
+            return NO;
+        case ACEditorRowKindSuccessBranchNetworkPostPairBase:
+            return judgementMode &&
+                successInlineMode == AnClickActionModeNetwork &&
+                [[[self branchInlineStringValueForSuccess:YES key:@"networkMethod"] uppercaseString] isEqualToString:@"POST"] &&
+                [self branchNetworkPostPairsForSuccess:YES].count > 0;
         case ACEditorRowKindFailureBranchNetworkURL:
         case ACEditorRowKindFailureBranchNetworkMethod:
-        case ACEditorRowKindFailureBranchNetworkHeaders:
         case ACEditorRowKindFailureBranchNetworkTimeout:
             return judgementMode && failureInlineMode == AnClickActionModeNetwork;
-        case ACEditorRowKindFailureBranchNetworkBody:
-            return judgementMode && failureInlineMode == AnClickActionModeNetwork &&
+        case ACEditorRowKindFailureBranchNetworkAddPostPair:
+            return judgementMode &&
+                failureInlineMode == AnClickActionModeNetwork &&
                 [[[self branchInlineStringValueForSuccess:NO key:@"networkMethod"] uppercaseString] isEqualToString:@"POST"];
+        case ACEditorRowKindFailureBranchNetworkHeaders:
+            return NO;
+        case ACEditorRowKindFailureBranchNetworkBody:
+            return NO;
+        case ACEditorRowKindFailureBranchNetworkPostPairBase:
+            return judgementMode &&
+                failureInlineMode == AnClickActionModeNetwork &&
+                [[[self branchInlineStringValueForSuccess:NO key:@"networkMethod"] uppercaseString] isEqualToString:@"POST"] &&
+                [self branchNetworkPostPairsForSuccess:NO].count > 0;
         case ACEditorRowKindSuccessBranchDelay:
             return judgementMode && successInlineMode == AnClickActionModeDelay;
         case ACEditorRowKindFailureBranchDelay:
@@ -1662,14 +1922,16 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @(ACEditorRowKindSuccessBranchSwipeStep),
             @(ACEditorRowKindSuccessBranchNetworkURL),
             @(ACEditorRowKindSuccessBranchNetworkMethod),
-            @(ACEditorRowKindSuccessBranchNetworkHeaders),
-            @(ACEditorRowKindSuccessBranchNetworkBody),
+            @(ACEditorRowKindSuccessBranchNetworkAddPostPair),
             @(ACEditorRowKindSuccessBranchNetworkTimeout),
             @(ACEditorRowKindSuccessBranchDelay),
         ];
         for (NSNumber *rowNumber in successInlineRows) {
             if ([self shouldShowRowForKind:(ACEditorRowKind)rowNumber.integerValue]) {
                 [rows addObject:rowNumber];
+                if (rowNumber.integerValue == ACEditorRowKindSuccessBranchNetworkAddPostPair) {
+                    [rows addObjectsFromArray:[self branchNetworkPostPairRowsForSuccess:YES]];
+                }
             }
         }
         if ([self shouldShowRowForKind:ACEditorRowKindSuccessBranchThreshold]) {
@@ -1719,14 +1981,16 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @(ACEditorRowKindFailureBranchSwipeStep),
             @(ACEditorRowKindFailureBranchNetworkURL),
             @(ACEditorRowKindFailureBranchNetworkMethod),
-            @(ACEditorRowKindFailureBranchNetworkHeaders),
-            @(ACEditorRowKindFailureBranchNetworkBody),
+            @(ACEditorRowKindFailureBranchNetworkAddPostPair),
             @(ACEditorRowKindFailureBranchNetworkTimeout),
             @(ACEditorRowKindFailureBranchDelay),
         ];
         for (NSNumber *rowNumber in failureInlineRows) {
             if ([self shouldShowRowForKind:(ACEditorRowKind)rowNumber.integerValue]) {
                 [rows addObject:rowNumber];
+                if (rowNumber.integerValue == ACEditorRowKindFailureBranchNetworkAddPostPair) {
+                    [rows addObjectsFromArray:[self branchNetworkPostPairRowsForSuccess:NO]];
+                }
             }
         }
         if ([self shouldShowRowForKind:ACEditorRowKindFailureBranchThreshold]) {
@@ -1794,7 +2058,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     }
     if (mode != AnClickActionModeNetwork) {
         self.model.networkURL = @"";
-        self.model.networkHeaders = @{};
+        self.model.networkHeaders = ACEditorDefaultNetworkHeaders();
         self.model.networkPostBody = @"";
         self.model.networkPostPairs = @[];
         self.model.networkContains = @"";
@@ -1802,6 +2066,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         self.model.networkRequestOnly = NO;
         self.model.networkUsesPost = NO;
         self.model.networkMethod = @"GET";
+    } else if (self.model.networkHeaders.count == 0) {
+        self.model.networkHeaders = ACEditorDefaultNetworkHeaders();
     }
     if (mode != AnClickActionModeJump) {
         self.model.jumpTaskIndex = -1;
@@ -1843,8 +2109,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     ACEditorRowKind row = [self rowsForSection:indexPath.section][(NSUInteger)indexPath.row].integerValue;
     if ([self isNetworkPostPairRow:row]) {
-        ACEditorInputCell *cell = [tableView dequeueReusableCellWithIdentifier:@"Input" forIndexPath:indexPath];
-        [self configureInputCell:cell row:row];
+        ACEditorPostPairCell *cell = [tableView dequeueReusableCellWithIdentifier:@"PostPair" forIndexPath:indexPath];
+        [self configurePostPairCell:cell row:row];
         return cell;
     }
     if (row == ACEditorRowKindActionGrid) {
@@ -1974,6 +2240,8 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     if (row == ACEditorRowKindPointPick ||
         row == ACEditorRowKindColorPick ||
         row == ACEditorRowKindNetworkAddPostPair ||
+        row == ACEditorRowKindSuccessBranchNetworkAddPostPair ||
+        row == ACEditorRowKindFailureBranchNetworkAddPostPair ||
         row == ACEditorRowKindTemplate ||
         row == ACEditorRowKindMacroRecord ||
         row == ACEditorRowKindSuccessActionConfig ||
@@ -2008,8 +2276,16 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         } else if (row == ACEditorRowKindColorPick) {
             title = @"⌖ 在屏幕上拾取颜色及坐标";
         } else if (row == ACEditorRowKindNetworkAddPostPair) {
-            title = self.model.networkPostPairs.count >= 8 ? @"POST 键值最多 8 组" : @"+ 添加 POST 键值";
+            title = self.model.networkPostPairs.count >= 8 ? @"JSON 参数最多 8 组" : @"+ 添加 JSON 参数";
             titleColor = self.model.networkPostPairs.count >= 8 ? UIColor.secondaryLabelColor : UIColor.systemBlueColor;
+        } else if (row == ACEditorRowKindSuccessBranchNetworkAddPostPair ||
+                   row == ACEditorRowKindFailureBranchNetworkAddPostPair) {
+            BOOL success = row == ACEditorRowKindSuccessBranchNetworkAddPostPair;
+            NSUInteger count = [self branchNetworkPostPairsForSuccess:success].count;
+            title = count >= 8
+                ? [NSString stringWithFormat:@"%@分支 JSON 参数最多 8 组", success ? @"成功" : @"失败"]
+                : [NSString stringWithFormat:@"+ 添加%@分支 JSON 参数", success ? @"成功" : @"失败"];
+            titleColor = count >= 8 ? UIColor.secondaryLabelColor : UIColor.systemBlueColor;
         } else if (row == ACEditorRowKindTemplate) {
             title = self.model.templatePath.length > 0 ? @"🖼 重新截图选择识别图像" : @"🖼 截图选择识别图像";
         } else if (row == ACEditorRowKindMacroRecord) {
@@ -2192,28 +2468,69 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     [cell.segmentedControl addTarget:self action:@selector(handleSegmentChanged:) forControlEvents:UIControlEventValueChanged];
 }
 
+- (void)configurePostPairCell:(ACEditorPostPairCell *)cell row:(ACEditorRowKind)row {
+    NSUInteger index = [self networkPostPairIndexForRow:row];
+    BOOL successBranch = NO;
+    BOOL branchRow = [self networkPostPairRowBelongsToBranch:row success:&successBranch];
+    NSArray *pairs = branchRow ? [self branchNetworkPostPairsForSuccess:successBranch] : (self.model.networkPostPairs ?: @[]);
+    NSDictionary *pair = index < pairs.count && [pairs[index] isKindOfClass:NSDictionary.class] ? pairs[index] : @{};
+    NSString *key = [pair[@"key"] isKindOfClass:NSString.class] ? pair[@"key"] : @"";
+    BOOL useResult = [pair[@"useResult"] boolValue];
+    NSString *value = useResult
+        ? @"{识字结果}"
+        : ([pair[@"value"] isKindOfClass:NSString.class] ? pair[@"value"] : @"");
+
+    cell.iconLabel.text = @"＋";
+    cell.iconLabel.textColor = UIColor.systemBlueColor;
+    if (branchRow) {
+        cell.titleLabel.text = [NSString stringWithFormat:@"%@分支 POST #%lu", successBranch ? @"成功" : @"失败", (unsigned long)index + 1];
+    } else {
+        cell.titleLabel.text = [NSString stringWithFormat:@"POST #%lu", (unsigned long)index + 1];
+    }
+    BOOL showOCRResult = self.model.actionMode == AnClickActionModeOCR;
+
+    [cell.keyField removeTarget:nil action:NULL forControlEvents:UIControlEventEditingChanged];
+    [cell.valueField removeTarget:nil action:NULL forControlEvents:UIControlEventEditingChanged];
+    [cell.resultButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
+    cell.keyField.delegate = self;
+    cell.valueField.delegate = self;
+    cell.keyField.tag = row;
+    cell.valueField.tag = row + ACEditorPostPairValueTagOffset;
+    cell.resultButton.tag = row + ACEditorPostPairResultTagOffset;
+    cell.keyField.text = key;
+    cell.valueField.text = value;
+    cell.keyField.placeholder = @"键";
+    cell.valueField.placeholder = @"值";
+    cell.keyField.keyboardType = UIKeyboardTypeDefault;
+    cell.valueField.keyboardType = UIKeyboardTypeDefault;
+    cell.keyField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    cell.valueField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    cell.keyField.autocorrectionType = UITextAutocorrectionTypeNo;
+    cell.valueField.autocorrectionType = UITextAutocorrectionTypeNo;
+    [cell.keyField addTarget:self action:@selector(handleTextFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+    [cell.valueField addTarget:self action:@selector(handleTextFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+    [cell.resultButton addTarget:self action:@selector(handlePostPairResultButton:) forControlEvents:UIControlEventTouchUpInside];
+    cell.resultButton.hidden = !showOCRResult;
+    cell.resultBadgeLabel.hidden = !showOCRResult;
+}
+
 - (void)configureInputCell:(ACEditorInputCell *)cell row:(ACEditorRowKind)row {
     cell.textField.delegate = self;
     cell.textField.tag = row;
     [cell.textField removeTarget:nil action:NULL forControlEvents:UIControlEventEditingChanged];
     [cell.textField addTarget:self action:@selector(handleTextFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+    cell.iconLabel.text = @"";
     cell.iconLabel.textColor = UIColor.labelColor;
+    cell.titleLabel.text = @"";
+    cell.textField.text = @"";
+    cell.textField.placeholder = nil;
     cell.swatchView.hidden = YES;
+    cell.swatchView.backgroundColor = UIColor.clearColor;
     cell.unitLabel.text = @"";
     cell.textField.keyboardType = UIKeyboardTypeDefault;
     cell.textField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     cell.textField.autocorrectionType = UITextAutocorrectionTypeNo;
     cell.textField.enabled = YES;
-    if ([self isNetworkPostPairRow:row]) {
-        NSUInteger index = [self networkPostPairIndexForRow:row];
-        cell.iconLabel.text = @"＋";
-        cell.iconLabel.textColor = UIColor.systemBlueColor;
-        cell.titleLabel.text = [NSString stringWithFormat:@"POST 键值 #%lu", (unsigned long)index + 1];
-        cell.textField.text = [self networkPostPairTextAtIndex:index];
-        cell.textField.placeholder = @"key=value，值可填 {识字结果}";
-        cell.textField.keyboardType = UIKeyboardTypeDefault;
-        return;
-    }
     switch (row) {
         case ACEditorRowKindCoordinate: {
             CGPoint point = self.model.point ? self.model.point.CGPointValue : CGPointZero;
@@ -2380,36 +2697,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             cell.titleLabel.text = success ? @"成功分支网络地址" : @"失败分支网络地址";
             cell.textField.text = [self branchInlineStringValueForSuccess:success key:@"networkURL"];
             cell.textField.keyboardType = UIKeyboardTypeURL;
-            break;
-        }
-        case ACEditorRowKindNetworkHeaders:
-            cell.iconLabel.text = @"☰";
-            cell.titleLabel.text = @"请求头";
-            cell.textField.text = [self headersText:self.model.networkHeaders];
-            break;
-        case ACEditorRowKindSuccessBranchNetworkHeaders:
-        case ACEditorRowKindFailureBranchNetworkHeaders: {
-            BOOL success = row == ACEditorRowKindSuccessBranchNetworkHeaders;
-            NSDictionary *config = [self branchPointActionConfigForSuccess:success];
-            NSDictionary *headers = [config[@"networkHeaders"] isKindOfClass:NSDictionary.class] ? config[@"networkHeaders"] : @{};
-            cell.iconLabel.text = success ? @"↳" : @"↯";
-            cell.iconLabel.textColor = success ? UIColor.systemGreenColor : UIColor.systemRedColor;
-            cell.titleLabel.text = success ? @"成功分支请求头" : @"失败分支请求头";
-            cell.textField.text = [self headersText:[headers isKindOfClass:NSDictionary.class] ? headers : @{}];
-            break;
-        }
-        case ACEditorRowKindNetworkBody:
-            cell.iconLabel.text = @"{}";
-            cell.titleLabel.text = @"请求体";
-            cell.textField.text = self.model.networkPostBody;
-            break;
-        case ACEditorRowKindSuccessBranchNetworkBody:
-        case ACEditorRowKindFailureBranchNetworkBody: {
-            BOOL success = row == ACEditorRowKindSuccessBranchNetworkBody;
-            cell.iconLabel.text = success ? @"↳" : @"↯";
-            cell.iconLabel.textColor = success ? UIColor.systemGreenColor : UIColor.systemRedColor;
-            cell.titleLabel.text = success ? @"成功分支请求体" : @"失败分支请求体";
-            cell.textField.text = [self branchInlineStringValueForSuccess:success key:@"networkPostBody"];
             break;
         }
         case ACEditorRowKindNetworkRetryLimit:
@@ -2583,9 +2870,15 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 
 - (void)handleTextFieldChanged:(UITextField *)textField {
     NSString *text = textField.text ?: @"";
+    NSInteger rawTag = textField.tag;
+    if ([self isNetworkPostPairValueTag:rawTag]) {
+        [self updateNetworkPostPairForRow:[self networkPostPairRowForValueTag:rawTag] valueText:text];
+        [self notifyModelChanged];
+        return;
+    }
     ACEditorRowKind rowKind = (ACEditorRowKind)textField.tag;
     if ([self isNetworkPostPairRow:rowKind]) {
-        [self updateNetworkPostPairAtIndex:[self networkPostPairIndexForRow:rowKind] text:text];
+        [self updateNetworkPostPairForRow:rowKind keyText:text];
         [self notifyModelChanged];
         return;
     }
@@ -2875,6 +3168,16 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     [self notifyModelChanged];
 }
 
+- (void)handlePostPairResultButton:(UIButton *)button {
+    if (![self isNetworkPostPairResultTag:button.tag]) {
+        return;
+    }
+    ACEditorRowKind row = [self networkPostPairRowForResultTag:button.tag];
+    [self updateNetworkPostPairForRow:row valueText:@"{识字结果}"];
+    [self notifyModelChanged];
+    [self reloadForm];
+}
+
 - (void)handleSegmentChanged:(UISegmentedControl *)segmentedControl {
     NSInteger selected = segmentedControl.selectedSegmentIndex;
     switch ((ACEditorRowKind)segmentedControl.tag) {
@@ -2901,9 +3204,11 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             break;
         case ACEditorRowKindSuccessBranchNetworkMethod:
             [self storeBranchInlineValue:(selected == 1 ? @"POST" : @"GET") key:@"networkMethod" success:YES];
+            [self reloadForm];
             break;
         case ACEditorRowKindFailureBranchNetworkMethod:
             [self storeBranchInlineValue:(selected == 1 ? @"POST" : @"GET") key:@"networkMethod" success:NO];
+            [self reloadForm];
             break;
         case ACEditorRowKindNetworkRequestMode:
             self.model.networkRequestOnly = selected == 1;
@@ -2932,6 +3237,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             break;
         case ACEditorRowKindNetworkAddPostPair:
             [self addNetworkPostPairRow];
+            break;
+        case ACEditorRowKindSuccessBranchNetworkAddPostPair:
+            [self addBranchNetworkPostPairRowForSuccess:YES];
+            break;
+        case ACEditorRowKindFailureBranchNetworkAddPostPair:
+            [self addBranchNetworkPostPairRowForSuccess:NO];
             break;
         case ACEditorRowKindTemplate:
             [self.delegate taskEditorViewDidRequestTemplateCapture:self];
@@ -3112,39 +3423,47 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     return headers;
 }
 
-- (NSString *)networkPostPairTextAtIndex:(NSUInteger)index {
-    if (index >= self.model.networkPostPairs.count) {
-        return @"";
+- (void)storeNetworkPostPairs:(NSArray *)pairs forRow:(ACEditorRowKind)row {
+    BOOL success = NO;
+    if ([self networkPostPairRowBelongsToBranch:row success:&success]) {
+        [self setBranchNetworkPostPairs:pairs success:success];
+    } else {
+        self.model.networkPostPairs = pairs;
     }
-    NSDictionary *pair = [self.model.networkPostPairs[index] isKindOfClass:NSDictionary.class] ? self.model.networkPostPairs[index] : nil;
-    NSString *key = [pair[@"key"] isKindOfClass:NSString.class] ? pair[@"key"] : @"";
-    BOOL useResult = [pair[@"useResult"] boolValue];
-    NSString *value = useResult ? @"{识字结果}" : ([pair[@"value"] isKindOfClass:NSString.class] ? pair[@"value"] : @"");
-    if (key.length == 0 && value.length == 0) {
-        return @"";
-    }
-    return [NSString stringWithFormat:@"%@=%@", key, value];
 }
 
-- (void)updateNetworkPostPairAtIndex:(NSUInteger)index text:(NSString *)text {
+- (void)updateNetworkPostPairForRow:(ACEditorRowKind)row keyText:(NSString *)keyText {
+    NSUInteger index = [self networkPostPairIndexForRow:row];
     if (index >= 8) {
         return;
     }
-    NSMutableArray *pairs = [self.model.networkPostPairs mutableCopy] ?: [NSMutableArray array];
+    NSMutableArray *pairs = [[self networkPostPairsForRow:row] mutableCopy] ?: [NSMutableArray array];
     while (pairs.count <= index) {
         [pairs addObject:@{}];
     }
-    NSString *raw = [text ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    NSRange separator = [raw rangeOfString:@"="];
-    if (separator.location == NSNotFound) {
-        separator = [raw rangeOfString:@":"];
+    NSDictionary *oldPair = [pairs[index] isKindOfClass:NSDictionary.class] ? pairs[index] : @{};
+    NSString *value = [oldPair[@"value"] isKindOfClass:NSString.class] ? oldPair[@"value"] : @"";
+    BOOL useResult = [oldPair[@"useResult"] boolValue];
+    pairs[index] = @{
+        @"key": [keyText ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet],
+        @"value": value ?: @"",
+        @"useResult": @(useResult),
+    };
+    [self storeNetworkPostPairs:pairs forRow:row];
+}
+
+- (void)updateNetworkPostPairForRow:(ACEditorRowKind)row valueText:(NSString *)valueText {
+    NSUInteger index = [self networkPostPairIndexForRow:row];
+    if (index >= 8) {
+        return;
     }
-    NSString *key = separator.location == NSNotFound
-        ? raw
-        : [[raw substringToIndex:separator.location] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    NSString *value = separator.location == NSNotFound
-        ? @""
-        : [[raw substringFromIndex:NSMaxRange(separator)] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSMutableArray *pairs = [[self networkPostPairsForRow:row] mutableCopy] ?: [NSMutableArray array];
+    while (pairs.count <= index) {
+        [pairs addObject:@{}];
+    }
+    NSDictionary *oldPair = [pairs[index] isKindOfClass:NSDictionary.class] ? pairs[index] : @{};
+    NSString *key = [oldPair[@"key"] isKindOfClass:NSString.class] ? oldPair[@"key"] : @"";
+    NSString *value = [valueText ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *lowerValue = value.lowercaseString;
     BOOL useResult = [value isEqualToString:@"{识字结果}"] ||
         [value isEqualToString:@"{{ocr}}"] ||
@@ -3155,7 +3474,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @"value": useResult ? @"" : (value ?: @""),
         @"useResult": @(useResult),
     };
-    self.model.networkPostPairs = pairs;
+    [self storeNetworkPostPairs:pairs forRow:row];
 }
 
 - (void)addNetworkPostPairRow {
@@ -3165,6 +3484,17 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     }
     [pairs addObject:@{@"key": @"", @"value": @"", @"useResult": @NO}];
     self.model.networkPostPairs = pairs;
+    [self notifyModelChanged];
+    [self reloadForm];
+}
+
+- (void)addBranchNetworkPostPairRowForSuccess:(BOOL)success {
+    NSMutableArray *pairs = [[self branchNetworkPostPairsForSuccess:success] mutableCopy] ?: [NSMutableArray array];
+    if (pairs.count >= 8) {
+        return;
+    }
+    [pairs addObject:@{@"key": @"", @"value": @"", @"useResult": @NO}];
+    [self setBranchNetworkPostPairs:pairs success:success];
     [self notifyModelChanged];
     [self reloadForm];
 }

@@ -98,6 +98,8 @@ static const NSInteger AnClickHomeOptionPanelMonitorTag = 54104;
 static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.045;
 static const NSTimeInterval AnClickVisualRecognitionCaptureDelay = 0.040;
 static const NSTimeInterval AnClickColorRecognitionCaptureDelay = 0.030;
+static NSString * const AnClickDefaultNetworkContentType = @"application/json; charset=utf-8";
+static NSString * const AnClickDefaultNetworkUserAgent = @"Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1";
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
 static void (*AnClickOriginalSpringBoardHandlePhysicalButtonEvent)(id self, SEL _cmd, id event);
 
@@ -190,6 +192,14 @@ static void AnClickHardenLocalRuntime(void) {
     dispatch_once(&onceToken, ^{
         (void)ptrace(PT_DENY_ATTACH, 0, NULL, 0);
     });
+}
+
+static NSDictionary *AnClickDefaultNetworkHeaders(void) {
+    return @{
+        @"Content-Type": AnClickDefaultNetworkContentType,
+        @"Accept": @"application/json, text/plain, */*",
+        @"User-Agent": AnClickDefaultNetworkUserAgent,
+    };
 }
 
 @class AnClickUI;
@@ -4272,16 +4282,17 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)showHomeTimeSettings {
-    UIView *panel = [self showHomeOptionPanelWithTitle:@"定时设置" preferredHeight:352.0 tag:AnClickHomeOptionPanelTimeTag];
+    UIView *panel = [self showHomeOptionPanelWithTitle:@"定时设置" preferredHeight:372.0 tag:AnClickHomeOptionPanelTimeTag];
     CGFloat width = panel.bounds.size.width;
     CGFloat side = 14.0;
     CGFloat contentWidth = width - side * 2.0;
 
-    UILabel *caption = [self homeOptionCaptionWithText:@"只设置任务列表的定时运行和定时结束，精确到毫秒。"
-                                                 frame:CGRectMake(side, 62.0, contentWidth, 30.0)];
+    UILabel *caption = [self homeOptionCaptionWithText:@"设置任务列表的定时运行和定时结束，时间精确到毫秒。"
+                                                 frame:CGRectMake(side, 62.0, contentWidth, 46.0)];
+    caption.font = [UIFont systemFontOfSize:12.8 weight:UIFontWeightSemibold];
     [panel addSubview:caption];
 
-    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 98.0, contentWidth, 248.0)];
+    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 114.0, contentWidth, 248.0)];
     [panel addSubview:card];
 
     _globalStartTimeButton = [self globalSettingsValueButtonWithAction:@selector(showGlobalStartTimePicker)];
@@ -4397,7 +4408,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalNetworkURLField.frame = CGRectMake(14.0, 76.0, contentWidth - 28.0, 40.0);
     [card addSubview:_globalNetworkURLField];
 
-    _globalNetworkContainsField = [self globalSettingsNetworkTextFieldWithPlaceholder:@"命中运行内容，可留空"];
+    _globalNetworkContainsField = [self globalSettingsNetworkTextFieldWithPlaceholder:@"必须命中的运行内容"];
     _globalNetworkContainsField.keyboardType = UIKeyboardTypeDefault;
     _globalNetworkContainsField.frame = CGRectMake(14.0, 126.0, floor((contentWidth - 36.0) * 0.5), 40.0);
     [card addSubview:_globalNetworkContainsField];
@@ -4411,7 +4422,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [card addSubview:_globalNetworkFalseField];
 
     UILabel *hintLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 174.0, contentWidth - 28.0, 28.0)];
-    hintLabel.text = @"运行内容为空时，请求成功且未命中不运行内容也会启动任务。";
+    hintLabel.text = @"必须命中运行内容才会启动任务；返回为空、请求失败或命中不运行内容都会继续监控。";
     hintLabel.textColor = [self themeSecondaryTextColor];
     hintLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightMedium];
     hintLabel.numberOfLines = 2;
@@ -6817,6 +6828,12 @@ performGlobalNetworkGateRequestWithGeneration:(NSUInteger)generation
     NSString *url = _globalNetworkURL;
     NSString *contains = _globalNetworkContainsText;
     NSString *falseText = _globalNetworkFalseText;
+    if ([self trimmedActionDescription:contains].length == 0) {
+        if (completion) {
+            completion(NO, @"网络监控必须填写运行条件");
+        }
+        return;
+    }
     __weak typeof(self) weakSelf = self;
     [self performNetworkRequestWithURLString:url
                                       method:@"GET"
@@ -6834,14 +6851,15 @@ performGlobalNetworkGateRequestWithGeneration:(NSUInteger)generation
         if (![strongSelf taskRunIsStillValidWithGeneration:generation fallbackWindow:nil status:@"窗口变化停止"]) {
             return;
         }
-        NSString *runRule = [strongSelf trimmedActionDescription:contains];
-        BOOL blocked = requestSucceeded && [strongSelf networkBody:body matchesBlockText:falseText defaultExpectedTrue:NO];
-        BOOL shouldRun = runRule.length > 0 ? matched : (requestSucceeded && !blocked);
+        NSString *response = [strongSelf trimmedActionDescription:body];
+        BOOL hasBody = response.length > 0;
+        BOOL blocked = requestSucceeded && hasBody && [strongSelf networkBody:body matchesBlockText:falseText defaultExpectedTrue:NO];
+        BOOL shouldRun = requestSucceeded && hasBody && matched && !blocked;
         NSString *status = blocked
             ? @"命中不运行 继续监控"
-            : (requestSucceeded
-                ? @"未命中运行 继续监控"
-                : [strongSelf networkStatusTextWithMatched:NO requestSucceeded:requestSucceeded statusCode:statusCode error:error]);
+            : (!requestSucceeded
+                ? [strongSelf networkStatusTextWithMatched:NO requestSucceeded:requestSucceeded statusCode:statusCode error:error]
+                : (!hasBody ? @"网络返回为空 继续监控" : @"未命中运行 继续监控"));
         completion(shouldRun, status);
     }];
 }
@@ -6920,6 +6938,7 @@ performRecognitionBranchActionForModel:(AnClickTaskModel *)model
                                         success:success
                                        inWindow:(UIWindow *)host
                                      generation:generation
+                               recognitionText:nil
                                      completion:completion];
 }
 
@@ -9025,10 +9044,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 [self addTaskListDetailRowWithTitle:@"失败匹配" value:falseText tint:tint rows:rows];
             }
             if ([[self networkMethodForTask:task] isEqualToString:@"POST"]) {
-                NSUInteger pairCount = [task[@"networkPostPairs"] isKindOfClass:NSArray.class] ? [(NSArray *)task[@"networkPostPairs"] count] : 0;
+                NSDictionary *pairDictionary = [self networkPostDictionaryFromPairs:task[@"networkPostPairs"] recognitionText:@""];
+                NSDictionary *legacyDictionary = [self networkPostDictionaryFromKeyValueText:[self networkPostKeyValueTextForTask:task] recognitionText:@""];
+                NSUInteger pairCount = pairDictionary.count > 0 ? pairDictionary.count : legacyDictionary.count;
                 NSString *postSummary = pairCount > 0
-                    ? [NSString stringWithFormat:@"%lu组键值", (unsigned long)pairCount]
-                    : ([self networkPostBodyForTask:task].length > 0 ? @"自定义请求体" : @"未设置");
+                    ? [NSString stringWithFormat:@"%lu组JSON键值", (unsigned long)pairCount]
+                    : @"未设置";
                 [self addTaskListDetailRowWithTitle:@"POST参数" value:postSummary tint:tint rows:rows];
             }
             [self addTaskListDetailRowWithTitle:@"重试" value:[self networkRetryForeverForTask:task] ? @"一直判断" : [NSString stringWithFormat:@"%ld次", (long)[self networkRetryLimitForTask:task]] tint:tint rows:rows];
@@ -10372,6 +10393,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         task[@"delay"] = @0.50;
     } else if (mode == AnClickActionModeNetwork) {
         task[@"networkMethod"] = @"GET";
+        task[@"networkHeaders"] = AnClickDefaultNetworkHeaders();
         task[@"networkTimeout"] = @8.0;
         task[@"networkRetryForever"] = @YES;
         task[@"networkRetryLimit"] = @3;
@@ -10992,7 +11014,18 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 
 - (id)networkPostJSONValueFromText:(NSString *)text recognitionText:(NSString *)recognitionText {
     NSString *value = [self postBody:[self unquotedNetworkPostText:text] applyingRecognitionText:recognitionText];
-    NSString *lower = [[self trimmedActionDescription:value] lowercaseString];
+    NSString *trimmed = [self trimmedActionDescription:value];
+    NSData *jsonData = [trimmed dataUsingEncoding:NSUTF8StringEncoding];
+    if (jsonData.length > 0) {
+        NSError *jsonError = nil;
+        id jsonObject = [NSJSONSerialization JSONObjectWithData:jsonData
+                                                        options:NSJSONReadingAllowFragments
+                                                          error:&jsonError];
+        if (!jsonError && jsonObject) {
+            return jsonObject;
+        }
+    }
+    NSString *lower = trimmed.lowercaseString;
     if ([lower isEqualToString:@"true"]) {
         return @(YES);
     }
@@ -11104,27 +11137,20 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 
 - (NSString *)networkPostBodyForTask:(NSDictionary *)task recognitionText:(NSString *)recognitionText {
     if ([task[@"networkPostPairs"] isKindOfClass:NSArray.class]) {
-        NSString *appliedRecognitionText = [task[@"networkPostBodyUsesOCRResult"] boolValue] ? recognitionText : @"";
         NSDictionary *postDictionary = [self networkPostDictionaryFromPairs:task[@"networkPostPairs"]
-                                                            recognitionText:appliedRecognitionText];
+                                                            recognitionText:recognitionText];
         if (!postDictionary) {
             postDictionary = [self networkPostDictionaryFromKeyValueText:[self networkPostKeyValueTextForTask:task]
-                                                         recognitionText:appliedRecognitionText];
+                                                         recognitionText:recognitionText];
         }
         NSString *jsonBody = postDictionary ? [self networkPostJSONStringFromDictionary:postDictionary] : nil;
-        if (jsonBody.length > 0) {
-            return jsonBody;
-        }
-        if ([task[@"networkPostBodyUsesOCRResult"] boolValue]) {
-            return [self trimmedActionDescription:recognitionText] ?: @"";
-        }
+        return jsonBody.length > 0 ? jsonBody : @"";
     }
 
-    NSString *postBody = [self networkPostBodyForTask:task];
-    if (postBody.length == 0 || recognitionText.length == 0) {
-        return postBody;
-    }
-    return [self postBody:postBody applyingRecognitionText:recognitionText];
+    NSDictionary *legacyDictionary = [self networkPostDictionaryFromKeyValueText:[self networkPostKeyValueTextForTask:task]
+                                                                 recognitionText:recognitionText];
+    NSString *jsonBody = legacyDictionary ? [self networkPostJSONStringFromDictionary:legacyDictionary] : nil;
+    return jsonBody.length > 0 ? jsonBody : @"";
 }
 
 - (NSString *)normalizedNetworkURLString:(NSString *)urlText {
@@ -11167,8 +11193,8 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if (![self normalizedNetworkURLString:url]) {
         return @"网络判断链接无效";
     }
-    if (contains.length == 0 && falseText.length == 0) {
-        return @"网络判断至少填一个条件";
+    if (contains.length == 0) {
+        return @"网络监控必须填写运行条件";
     }
     return nil;
 }
@@ -11240,7 +11266,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     NSTimeInterval timeout = [self networkTimeoutForTask:task];
     [self showToast:oneShot ? @"网络仅请求" : @"网络请求中"];
     NSString *method = [self networkMethodForTask:task];
-    NSString *postBody = [self networkPostBodyForTask:task];
+    NSString *postBody = [self networkPostBodyForTask:task recognitionText:nil];
     [self performNetworkRequestWithURLString:url method:method headers:task[@"networkHeaders"] postBody:postBody trueText:contains falseText:falseText defaultExpectedTrue:NO timeout:timeout completion:^(BOOL matched, BOOL requestSucceeded, NSString *body, NSInteger statusCode, NSError *error) {
         if (runGeneration != 0 && (!self->_taskRunActive || runGeneration != self->_taskRunGeneration)) {
             return;
@@ -11282,6 +11308,18 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                               inWindow:(UIWindow *)hostWindow
                             generation:(NSUInteger)runGeneration
                             completion:(AnClickTaskEngineRecognitionCompletion)completion {
+    [self performRecognitionNetworkTask:task
+                        recognitionText:nil
+                               inWindow:hostWindow
+                             generation:runGeneration
+                             completion:completion];
+}
+
+- (void)performRecognitionNetworkTask:(NSDictionary *)task
+                       recognitionText:(NSString *)recognitionText
+                              inWindow:(UIWindow *)hostWindow
+                            generation:(NSUInteger)runGeneration
+                            completion:(AnClickTaskEngineRecognitionCompletion)completion {
     AnClickActionMode mode = [self modeForTask:task];
     if (mode == AnClickActionModeImage) {
         [self performImageTask:task inWindow:hostWindow runGeneration:runGeneration completion:completion];
@@ -11289,6 +11327,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         [self performOCRTask:task inWindow:hostWindow runGeneration:runGeneration completion:completion];
     } else if (mode == AnClickActionModeColor) {
         [self performColorTask:task inWindow:hostWindow runGeneration:runGeneration completion:completion];
+    } else if (mode == AnClickActionModeNetwork) {
+        [self performRecognitionNetworkActionForTask:task recognitionText:recognitionText runGeneration:runGeneration completion:^{
+            if (completion) {
+                completion(YES, YES, 0.0);
+            }
+        }];
     } else if (completion) {
         completion(NO, NO, 0.0);
     }
@@ -11382,6 +11426,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                       success:(BOOL)success
                                      inWindow:(UIWindow *)hostWindow
                                    generation:(NSUInteger)runGeneration
+                             recognitionText:(NSString *)recognitionText
                                    completion:(void (^)(NSTimeInterval actionDelay))completion {
     AnClickActionMode actionMode = success ? [self successActionModeForTask:task] : [self failureActionModeForTask:task];
     if (actionMode == AnClickActionModeNone || actionMode == AnClickActionModeJump) {
@@ -11445,6 +11490,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             [singleCheckConfig removeObjectForKey:@"failureRecognitionActionConfig"];
         }
         [self performRecognitionNetworkTask:singleCheckConfig
+                            recognitionText:recognitionText
                                    inWindow:hostWindow
                                  generation:runGeneration
                                  completion:nil];
@@ -11484,6 +11530,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                   success:success
                                                  inWindow:currentHostWindow
                                                generation:runGeneration
+                                               recognitionText:nil
                                                completion:^(NSTimeInterval actionDelay) {
             if (![strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:currentHostWindow status:@"窗口变化停止"]) {
                 return;
@@ -11805,6 +11852,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                                   success:NO
                                                                  inWindow:currentHostWindow
                                                                generation:runGeneration
+                                                               recognitionText:nil
                                                                completion:nil];
                     }
                     return;
@@ -11869,6 +11917,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                                   success:YES
                                                                  inWindow:currentHostWindow
                                                                generation:runGeneration
+                                                               recognitionText:nil
                                                                completion:nil];
                         return;
                     }
@@ -12071,6 +12120,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                                   success:NO
                                                                  inWindow:currentHostWindow
                                                                generation:runGeneration
+                                                               recognitionText:nil
                                                                completion:nil];
                     }
                     return;
@@ -12093,6 +12143,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                                   success:NO
                                                                  inWindow:currentHostWindow
                                                                generation:runGeneration
+                                                               recognitionText:nil
                                                                completion:nil];
                     }
                     return;
@@ -12148,6 +12199,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                                   success:YES
                                                                  inWindow:currentHostWindow
                                                                generation:runGeneration
+                                                               recognitionText:text
                                                                completion:nil];
                         return;
                     }
@@ -12315,6 +12367,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                                   success:NO
                                                                  inWindow:currentHostWindow
                                                                generation:runGeneration
+                                                               recognitionText:nil
                                                                completion:nil];
                     }
                     return;
@@ -12330,6 +12383,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                                   success:NO
                                                                  inWindow:currentHostWindow
                                                                generation:runGeneration
+                                                               recognitionText:nil
                                                                completion:nil];
                     }
                     return;
@@ -12409,6 +12463,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                                   success:YES
                                                                  inWindow:currentHostWindow
                                                                generation:runGeneration
+                                                               recognitionText:nil
                                                                completion:nil];
                         return;
                     }
@@ -12502,10 +12557,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if ([self networkPostDictionaryFromPairs:task[@"networkPostPairs"] recognitionText:@""].count > 0) {
         return YES;
     }
-    if ([self networkPostKeyValueTextForTask:task].length > 0) {
+    if ([self networkPostDictionaryFromKeyValueText:[self networkPostKeyValueTextForTask:task] recognitionText:@""].count > 0) {
         return YES;
     }
-    return [self networkPostBodyForTask:task].length > 0;
+    return NO;
 }
 
 - (NSMutableDictionary *)taskDictionaryForModel:(AnClickTaskModel *)model {

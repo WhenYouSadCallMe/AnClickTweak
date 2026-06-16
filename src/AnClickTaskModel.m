@@ -7,6 +7,16 @@ static NSString * const ACKeyDelay = @"delay";
 static NSString * const ACKeyRepeat = @"repeat";
 static NSString * const ACKeyInterval = @"interval";
 static const NSTimeInterval ACFastDoubleTapInterval = 0.06;
+static NSString * const ACDefaultNetworkContentType = @"application/json; charset=utf-8";
+static NSString * const ACDefaultNetworkUserAgent = @"Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1";
+
+static NSDictionary *ACDefaultNetworkHeaders(void) {
+    return @{
+        @"Content-Type": ACDefaultNetworkContentType,
+        @"Accept": @"application/json, text/plain, */*",
+        @"User-Agent": ACDefaultNetworkUserAgent,
+    };
+}
 static NSString * const ACKeyRandomDelay = @"randomDelay";
 static NSString * const ACKeyJitterRadius = @"jitterRadius";
 static NSString * const ACKeyDescription = @"desc";
@@ -160,7 +170,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
         _colorMatchMode = 0;
         _networkURL = @"";
         _networkMethod = @"GET";
-        _networkHeaders = @{};
+        _networkHeaders = ACDefaultNetworkHeaders();
         _networkRetryForever = YES;
         _networkRetryLimit = 1;
         _networkTimeout = 8.0;
@@ -243,7 +253,8 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
 
     _networkURL = ACStringValue(dictionary[@"networkURL"]);
     _networkMethod = ACStringValue(dictionary[@"networkMethod"]).length > 0 ? [ACStringValue(dictionary[@"networkMethod"]) uppercaseString] : @"GET";
-    _networkHeaders = ACDictionaryValue(dictionary[@"networkHeaders"]);
+    NSDictionary *headers = ACDictionaryValue(dictionary[@"networkHeaders"]);
+    _networkHeaders = headers.count > 0 ? headers : ACDefaultNetworkHeaders();
     _networkRequestOnly = [dictionary[@"networkRequestOnly"] boolValue];
     _networkUsesPost = [dictionary[@"networkUsesPost"] boolValue];
     _networkRetryForever = dictionary[@"networkRetryForever"] ? [dictionary[@"networkRetryForever"] boolValue] : YES;
@@ -403,7 +414,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     }
     NSString *method = self.networkMethod.length > 0 ? [self.networkMethod uppercaseString] : (self.networkUsesPost ? @"POST" : @"GET");
     dictionary[@"networkMethod"] = [method isEqualToString:@"POST"] ? @"POST" : @"GET";
-    if (self.networkHeaders.count > 0) {
+    if (actionMode == AnClickActionModeNetwork && self.networkHeaders.count > 0) {
         dictionary[@"networkHeaders"] = self.networkHeaders;
     }
     dictionary[@"networkRequestOnly"] = @(self.networkRequestOnly);
@@ -416,9 +427,6 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     }
     if (self.networkFalse.length > 0) {
         dictionary[@"networkFalse"] = self.networkFalse;
-    }
-    if (self.networkPostBody.length > 0) {
-        dictionary[@"networkPostBody"] = self.networkPostBody;
     }
     dictionary[@"networkPostBodyUsesOCRResult"] = @(self.networkPostBodyUsesOCRResult);
     if (self.networkPostExtraFields.length > 0) {

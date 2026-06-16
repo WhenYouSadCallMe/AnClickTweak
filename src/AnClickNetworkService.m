@@ -6,6 +6,9 @@
 - (void)untrackTask:(NSURLSessionDataTask *)task;
 @end
 
+static NSString * const AnClickDefaultContentType = @"application/json; charset=utf-8";
+static NSString * const AnClickDefaultUserAgent = @"Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1";
+
 @implementation AnClickNetworkService
 
 - (instancetype)init {
@@ -36,7 +39,36 @@
     if ([trimmed rangeOfString:@"://"].location == NSNotFound) {
         trimmed = [@"https://" stringByAppendingString:trimmed];
     }
-    return [NSURL URLWithString:trimmed] ? trimmed : nil;
+    NSURLComponents *components = [NSURLComponents componentsWithString:trimmed];
+    if (!components) {
+        NSString *encoded = [trimmed stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLFragmentAllowedCharacterSet];
+        components = encoded.length > 0 ? [NSURLComponents componentsWithString:encoded] : nil;
+    }
+    if (!components || components.scheme.length == 0 || components.host.length == 0) {
+        return nil;
+    }
+    NSString *path = components.path ?: @"";
+    if (path.length > 0) {
+        NSString *encodedPath = [path stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLPathAllowedCharacterSet];
+        if (encodedPath.length > 0) {
+            components.percentEncodedPath = encodedPath;
+        }
+    }
+    NSString *query = components.query ?: @"";
+    if (query.length > 0) {
+        NSString *encodedQuery = [query stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
+        if (encodedQuery.length > 0) {
+            components.percentEncodedQuery = encodedQuery;
+        }
+    }
+    NSString *fragment = components.fragment ?: @"";
+    if (fragment.length > 0) {
+        NSString *encodedFragment = [fragment stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLFragmentAllowedCharacterSet];
+        if (encodedFragment.length > 0) {
+            components.percentEncodedFragment = encodedFragment;
+        }
+    }
+    return components.URL.absoluteString;
 }
 
 - (NSString *)stringFromData:(NSData *)data {
@@ -234,25 +266,13 @@
     NSString *normalizedMethod = [self trimmedText:method].uppercaseString;
     BOOL usesPost = [normalizedMethod isEqualToString:@"POST"];
     request.HTTPMethod = usesPost ? @"POST" : @"GET";
-    if ([headers isKindOfClass:NSDictionary.class]) {
-        [headers enumerateKeysAndObjectsUsingBlock:^(id key, id value, __unused BOOL *stop) {
-            if (![key isKindOfClass:NSString.class]) {
-                return;
-            }
-            NSString *headerValue = [value isKindOfClass:NSString.class] ? value : [value description];
-            if (headerValue.length > 0) {
-                [request setValue:headerValue forHTTPHeaderField:key];
-            }
-        }];
-    }
+    [request setValue:AnClickDefaultContentType forHTTPHeaderField:@"Content-Type"];
+    [request setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
+    [request setValue:AnClickDefaultUserAgent forHTTPHeaderField:@"User-Agent"];
+    (void)headers;
     if (usesPost) {
         NSString *bodyText = postBody ?: @"";
         request.HTTPBody = [bodyText dataUsingEncoding:NSUTF8StringEncoding];
-        NSString *trimmedBody = [self trimmedText:bodyText];
-        NSString *contentType = [trimmedBody hasPrefix:@"{"] || [trimmedBody hasPrefix:@"["]
-            ? @"application/json;charset=utf-8"
-            : @"application/x-www-form-urlencoded;charset=utf-8";
-        [request setValue:contentType forHTTPHeaderField:@"Content-Type"];
     }
 
     __block __weak NSURLSessionDataTask *weakTask = nil;
