@@ -847,12 +847,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         [_cancelButton.widthAnchor constraintEqualToConstant:56.0],
         [_cancelButton.heightAnchor constraintEqualToConstant:42.0],
 
-        [_closeButton.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-10.0],
+        [_closeButton.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-14.0],
         [_closeButton.topAnchor constraintEqualToAnchor:_cancelButton.topAnchor],
         [_closeButton.widthAnchor constraintEqualToConstant:38.0],
         [_closeButton.heightAnchor constraintEqualToAnchor:_cancelButton.heightAnchor],
 
-        [_saveButton.trailingAnchor constraintEqualToAnchor:_closeButton.leadingAnchor constant:-4.0],
+        [_saveButton.trailingAnchor constraintEqualToAnchor:_closeButton.leadingAnchor constant:-6.0],
         [_saveButton.topAnchor constraintEqualToAnchor:_cancelButton.topAnchor],
         [_saveButton.widthAnchor constraintEqualToConstant:56.0],
         [_saveButton.heightAnchor constraintEqualToAnchor:_cancelButton.heightAnchor],

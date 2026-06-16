@@ -275,6 +275,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)cleanupScreenInteractionStateRestoringPanel:(BOOL)restorePanel;
 - (void)showToast:(NSString *)message;
 - (void)setHomeOutputText:(NSString *)text;
+- (BOOL)homeOutputTextIsError:(NSString *)text;
 - (void)copyHomeOutputText;
 - (void)performSelectedActionAtPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow preparePanel:(BOOL)preparePanel;
 - (BOOL)panelCanUseCurrentScene;
@@ -316,6 +317,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     AnClickTaskEditorView *_taskEditorView;
     AnClickTaskModel *_editingTaskModel;
     UILabel *_statusLabel;
+    UILabel *_homeErrorLabel;
     UILabel *_toastLabel;
     UILabel *_hostToastLabel;
     UILabel *_toolTitleLabel;
@@ -1754,7 +1756,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _statusLabel.minimumScaleFactor = 0.6;
     _statusLabel.textAlignment = NSTextAlignmentLeft;
     _statusLabel.numberOfLines = 2;
+    _statusLabel.hidden = YES;
     [_homeOutputView addSubview:_statusLabel];
+
+    _homeErrorLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    _homeErrorLabel.text = @"";
+    _homeErrorLabel.textColor = [self themeDangerColor];
+    _homeErrorLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightSemibold];
+    _homeErrorLabel.adjustsFontSizeToFitWidth = YES;
+    _homeErrorLabel.minimumScaleFactor = 0.62;
+    _homeErrorLabel.textAlignment = NSTextAlignmentLeft;
+    _homeErrorLabel.numberOfLines = 2;
+    [_homeOutputView addSubview:_homeErrorLabel];
 
     _homeOutputCopyButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [_homeOutputCopyButton setTitle:@"复制" forState:UIControlStateNormal];
@@ -2679,6 +2692,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     BOOL volumeShortcutToast = [text hasPrefix:@"音量"];
+    if (!volumeShortcutToast) {
+        [self setHomeOutputText:text];
+    }
     if (!volumeShortcutToast && _volumeShortcutRunSuppressToasts) {
         return;
     }
@@ -3551,7 +3567,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                        outputHeight);
     _homeOutputView.backgroundColor = [[self themeControlFillColor] colorWithAlphaComponent:0.76];
     _homeOutputView.layer.borderColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.42].CGColor;
-    _statusLabel.hidden = NO;
+    _statusLabel.hidden = YES;
     CGFloat copyWidth = 44.0;
     CGFloat copyHeight = 22.0;
     CGFloat copyX = CGRectGetWidth(_homeOutputView.bounds) - copyWidth - 6.0;
@@ -3562,10 +3578,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                              copyHeight);
     _homeOutputCopyButton.backgroundColor = [[self themeHighlightColor] colorWithAlphaComponent:0.88];
     _homeOutputCopyButton.titleLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightBold];
-    _statusLabel.frame = CGRectMake(10.0,
-                                    3.0,
-                                    MAX(1.0, copyX - 16.0),
-                                    CGRectGetHeight(_homeOutputView.bounds) - 6.0);
+    _statusLabel.frame = CGRectZero;
+    _homeErrorLabel.hidden = NO;
+    _homeErrorLabel.frame = CGRectMake(10.0,
+                                       3.0,
+                                       MAX(1.0, copyX - 16.0),
+                                       CGRectGetHeight(_homeOutputView.bounds) - 6.0);
+    _homeErrorLabel.textColor = [self themeDangerColor];
+    _homeErrorLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightSemibold];
     _statusLabel.textColor = [self themeSecondaryTextColor];
     _statusLabel.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightSemibold];
 
@@ -4190,16 +4210,44 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)setHomeOutputText:(NSString *)text {
     NSString *safeText = [self trimmedActionDescription:text];
     _statusLabel.text = safeText;
+    if (![self homeOutputTextIsError:safeText]) {
+        return;
+    }
+    _homeErrorLabel.text = safeText;
     [_homeOutputCopyButton setTitle:@"复制" forState:UIControlStateNormal];
     [self refreshCollapsedButtonTitle];
     if (!_taskEditorVisible && _homeOutputView) {
         _homeOutputView.hidden = NO;
+        _homeErrorLabel.hidden = NO;
         _homeOutputCopyButton.hidden = NO;
     }
 }
 
+- (BOOL)homeOutputTextIsError:(NSString *)text {
+    NSString *safeText = [self trimmedActionDescription:text];
+    if (safeText.length == 0) {
+        return NO;
+    }
+
+    NSArray<NSString *> *keywords = @[
+        @"错误", @"失败", @"无效", @"缺少", @"缺失", @"未填", @"未填写",
+        @"未设置", @"未取", @"未截图", @"未录制", @"未找到", @"异常",
+        @"不可用", @"无法", @"不能", @"不存在", @"不足", @"仍存在",
+        @"无窗口", @"无任务", @"无录制", @"无模板", @"屏幕已变化",
+        @"先", @"请重试", @"重试", @"超时",
+        @"400", @"401", @"403", @"404", @"408", @"429", @"500", @"502", @"503", @"504",
+        @"Bad Request", @"body is required", @"invalid", @"error", @"failed"
+    ];
+    for (NSString *keyword in keywords) {
+        if ([safeText rangeOfString:keyword options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
 - (void)copyHomeOutputText {
-    NSString *text = [self trimmedActionDescription:_statusLabel.text];
+    NSString *text = [self trimmedActionDescription:_homeErrorLabel.text];
     if (text.length == 0) {
         [_homeOutputCopyButton setTitle:@"无内容" forState:UIControlStateNormal];
     } else {
@@ -4282,7 +4330,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_globalSettingsView addSubview:titleLabel];
 
     UIButton *closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    closeButton.frame = CGRectMake(width - 52.0, 10.0, 40.0, 40.0);
+    closeButton.frame = CGRectMake(width - 56.0, 10.0, 40.0, 40.0);
     closeButton.layer.cornerRadius = 20.0;
     closeButton.titleLabel.font = [UIFont systemFontOfSize:27.0 weight:UIFontWeightBold];
     [closeButton setTitle:@"×" forState:UIControlStateNormal];
@@ -4664,24 +4712,26 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_globalTimePicker selectRow:MIN(59, MAX(0, second)) inComponent:2 animated:NO];
     [_globalTimePicker selectRow:MIN(999, MAX(0, millisecond)) inComponent:3 animated:NO];
 
-    CGFloat buttonWidth = width / 3.0;
+    CGFloat buttonInset = 16.0;
+    CGFloat buttonWidth = (width - buttonInset * 2.0) / 3.0;
     NSArray<NSString *> *titles = @[@"关闭", @"取消", @"确定"];
     NSArray<NSString *> *selectors = @[@"disableGlobalPickedTime", @"cancelGlobalTimePicker", @"confirmGlobalTimePicker"];
     for (NSUInteger i = 0; i < titles.count; i++) {
         UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-        button.frame = CGRectMake(buttonWidth * i, buttonY, buttonWidth, 66.0);
+        CGFloat buttonX = buttonInset + buttonWidth * i;
+        button.frame = CGRectMake(buttonX, buttonY, buttonWidth, 66.0);
         button.titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
         [button setTitle:titles[i] forState:UIControlStateNormal];
         [button setTitleColor:(i == 2 ? [self themeHighlightColor] : [self themeSecondaryTextColor]) forState:UIControlStateNormal];
         [button addTarget:self action:NSSelectorFromString(selectors[i]) forControlEvents:UIControlEventTouchUpInside];
         [card addSubview:button];
         if (i > 0) {
-            UIView *line = [[UIView alloc] initWithFrame:CGRectMake(buttonWidth * i, buttonY, 1, 66.0)];
+            UIView *line = [[UIView alloc] initWithFrame:CGRectMake(buttonX, buttonY + 8.0, 1, 50.0)];
             line.backgroundColor = [self themeSeparatorColor];
             [card addSubview:line];
         }
     }
-    UIView *topLine = [[UIView alloc] initWithFrame:CGRectMake(0, buttonY, width, 1)];
+    UIView *topLine = [[UIView alloc] initWithFrame:CGRectMake(buttonInset, buttonY, width - buttonInset * 2.0, 1)];
     topLine.backgroundColor = [self themeSeparatorColor];
     [card addSubview:topLine];
 }
@@ -4810,7 +4860,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_functionMenuView addSubview:titleLabel];
 
     UIButton *closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    closeButton.frame = CGRectMake(_functionMenuView.bounds.size.width - 54, 10, 40, 40);
+    closeButton.frame = CGRectMake(_functionMenuView.bounds.size.width - 56, 10, 40, 40);
     closeButton.layer.cornerRadius = 20;
     closeButton.titleLabel.font = [UIFont systemFontOfSize:27 weight:UIFontWeightBold];
     [closeButton setTitle:@"×" forState:UIControlStateNormal];
@@ -6848,6 +6898,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)taskEngine:(__unused AnClickTaskEngine *)engine showToastForTask:(NSDictionary *)task index:(NSUInteger)index {
     NSString *text = [self toastTextForTask:task index:index];
     _statusLabel.text = text;
+    [self setHomeOutputText:text];
     if ([self shouldShowRunProgressToastText:text]) {
         [self showToast:text];
     }
@@ -6855,12 +6906,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)taskEngine:(__unused AnClickTaskEngine *)engine setStatus:(NSString *)status {
     _statusLabel.text = status ?: @"";
+    [self setHomeOutputText:status ?: @""];
 }
 
 - (void)taskEngine:(__unused AnClickTaskEngine *)engine showRunStatus:(NSString *)status {
     _statusLabel.text = status ?: @"";
-    [self showToast:_statusLabel.text];
-    [self refreshCollapsedButtonTitle];
+    [self setHomeOutputText:status ?: @""];
+    [self showToast:status ?: @""];
 }
 
 - (NSString *)taskEngineCurrentStatus:(__unused AnClickTaskEngine *)engine {
@@ -12712,7 +12764,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 
 - (BOOL)taskModelIsComplete:(AnClickTaskModel *)model {
     NSMutableDictionary *task = [self taskDictionaryForModel:model];
-    return task ? [self taskIsComplete:task] : NO;
+    BOOL complete = task ? [self taskIsComplete:task] : NO;
+    if (!complete) {
+        [self setHomeOutputText:_statusLabel.text.length > 0 ? _statusLabel.text : @"任务数据无效"];
+    }
+    return complete;
 }
 
 - (BOOL)taskIsComplete:(NSDictionary *)task {
@@ -12964,9 +13020,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 
 - (NSTimeInterval)performTask:(NSDictionary *)task inWindow:(UIWindow *)hostWindow runGeneration:(NSUInteger)runGeneration {
     if (![self panelCanUseCurrentScene]) {
+        [self setHomeOutputText:@"窗口不可用"];
         return 0;
     }
     if (![self taskIsComplete:task]) {
+        [self setHomeOutputText:_statusLabel.text.length > 0 ? _statusLabel.text : @"任务数据无效"];
         return 0;
     }
 
@@ -13253,7 +13311,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     [_taskEngine resetListRefreshThrottle];
     [self cancelRunningTaskSideEffects];
     [self stopTaskRunRuntimeTimerReset:YES];
-    _statusLabel.text = status.length > 0 ? status : @"已停止";
+    [self setHomeOutputText:(status.length > 0 ? status : @"已停止")];
     if (showToast) {
         [self showToast:_statusLabel.text];
     }
@@ -13263,7 +13321,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         [self restorePanelAfterExternalTap];
     }
     _volumeShortcutRunSuppressToasts = NO;
-    [self refreshCollapsedButtonTitle];
     [self refreshTaskList];
 }
 
