@@ -1938,8 +1938,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 - (NSArray<NSNumber *> *)logicRows {
     if (self.model.actionMode == AnClickActionModeImage ||
         self.model.actionMode == AnClickActionModeOCR ||
-        self.model.actionMode == AnClickActionModeColor ||
-        self.model.actionMode == AnClickActionModeNetwork) {
+        self.model.actionMode == AnClickActionModeColor) {
         NSMutableArray<NSNumber *> *rows = [NSMutableArray arrayWithObject:@(ACEditorRowKindSuccessActionMode)];
         if ([self shouldShowRowForKind:ACEditorRowKindSuccessActionConfig]) {
             [rows addObject:@(ACEditorRowKindSuccessActionConfig)];
@@ -2144,6 +2143,16 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         self.model.failureBranchIndex = -1;
         self.model.successActionMode = AnClickActionModeTap;
         self.model.failureActionMode = AnClickActionModeNone;
+        self.model.recognitionRetryUntilFound = NO;
+    } else if (mode == AnClickActionModeNetwork) {
+        self.model.successBranchIndex = -1;
+        self.model.failureBranchIndex = -1;
+        self.model.successActionMode = AnClickActionModeNone;
+        self.model.failureActionMode = AnClickActionModeNone;
+        self.model.successActionConfig = @{};
+        self.model.failureActionConfig = @{};
+        self.model.successRecognitionActionConfig = @{};
+        self.model.failureRecognitionActionConfig = @{};
         self.model.recognitionRetryUntilFound = NO;
     } else {
         if (![self branchActionMode:self.model.successActionMode isAllowedForSuccess:YES]) {

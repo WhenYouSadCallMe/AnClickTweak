@@ -12775,15 +12775,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             _statusLabel.text = @"任务POST键值未填写";
             return NO;
         }
-        if (![self validateSuccessRecognitionActionTaskForTask:task]) {
-            return NO;
-        }
-        if (![self validateFailureRecognitionActionTaskForTask:task]) {
-            return NO;
-        }
-        if (![self validateRecognitionJumpActionForTask:task]) {
-            return NO;
-        }
         return YES;
     }
     if (mode == AnClickActionModeJump) {

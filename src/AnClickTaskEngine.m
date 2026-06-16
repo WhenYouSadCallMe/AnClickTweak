@@ -165,18 +165,16 @@
                                                                    blocked:(BOOL)blocked
                                                              hasSuccessRule:(BOOL)hasSuccessRule
                                                             hasFailurePath:(BOOL)hasFailurePath {
-    if (!waitsForCondition) {
-        return requestSucceeded
-            ? AnClickTaskEngineNetworkDecisionContinueSuccess
-            : AnClickTaskEngineNetworkDecisionContinueFailure;
-    }
+    (void)hasFailurePath;
 
-    BOOL shouldContinue = hasSuccessRule ? (matched && !blocked) : (requestSucceeded && !blocked);
+    BOOL shouldContinue = waitsForCondition
+        ? (hasSuccessRule ? (matched && !blocked) : (requestSucceeded && !blocked))
+        : requestSucceeded;
     if (shouldContinue) {
         return AnClickTaskEngineNetworkDecisionContinueSuccess;
     }
     if (!retryForever && attempt >= MAX(1, retryLimit)) {
-        return hasFailurePath ? AnClickTaskEngineNetworkDecisionContinueFailure : AnClickTaskEngineNetworkDecisionStop;
+        return AnClickTaskEngineNetworkDecisionStop;
     }
     return AnClickTaskEngineNetworkDecisionRetry;
 }
@@ -571,7 +569,6 @@
             return;
         }
         id currentHost = [callbackDelegate taskEngine:self currentHostWithFallback:host];
-        BOOL hasFailurePath = [callbackDelegate taskEngine:self networkTaskModelHasFailurePath:model];
         AnClickTaskEngineNetworkDecision decision = [self networkDecisionWithWaitsForCondition:waitsForCondition
                                                                                   retryForever:retryForever
                                                                                     retryLimit:retryLimit
@@ -580,7 +577,7 @@
                                                                               requestSucceeded:requestSucceeded
                                                                                        blocked:blocked
                                                                                 hasSuccessRule:[self textHasContent:model.networkContains]
-                                                                                hasFailurePath:hasFailurePath];
+                                                                                hasFailurePath:NO];
         switch (decision) {
             case AnClickTaskEngineNetworkDecisionContinueSuccess:
                 [callbackDelegate taskEngine:self
