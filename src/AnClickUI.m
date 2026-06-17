@@ -56,6 +56,7 @@ static const NSTimeInterval AnClickMaxLongPressDuration = 10.000;
 static const NSTimeInterval AnClickMinInfiniteLoopInterval = 0.100;
 static const NSTimeInterval AnClickRunProgressToastMinInterval = 1.200;
 static const NSTimeInterval AnClickRunTraceMinInterval = 0.300;
+static const NSTimeInterval AnClickGlobalTimerLateFireGrace = 5.000;
 static const NSTimeInterval AnClickMinJumpContinuationInterval = 0.030;
 static const NSUInteger AnClickMaxJumpVisitsPerRun = 96;
 static const CFTimeInterval AnClickRunListRefreshMinInterval = 0.75;
@@ -4045,16 +4046,26 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)handleGlobalStartTimer:(__unused NSTimer *)timer {
+    NSDate *fireDate = timer.fireDate;
+    BOOL lateFire = fireDate && [[NSDate date] timeIntervalSinceDate:fireDate] > AnClickGlobalTimerLateFireGrace;
     _globalStartTimer = nil;
     [self scheduleGlobalTimers];
+    if (lateFire || UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
+        return;
+    }
     if (!_taskRunActive && !_taskRunPausedForForeground) {
         [self startTaskListRunScheduled:YES];
     }
 }
 
 - (void)handleGlobalStopTimer:(__unused NSTimer *)timer {
+    NSDate *fireDate = timer.fireDate;
+    BOOL lateFire = fireDate && [[NSDate date] timeIntervalSinceDate:fireDate] > AnClickGlobalTimerLateFireGrace;
     _globalStopTimer = nil;
     [self scheduleGlobalTimers];
+    if (lateFire || UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
+        return;
+    }
     if (_taskRunActive || _taskRunPausedForForeground) {
         [self stopTaskRunWithStatus:@"定时停止"];
     }
