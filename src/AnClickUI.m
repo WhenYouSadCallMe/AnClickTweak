@@ -306,6 +306,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIView *_homeOutputView;
     UIView *_toastView;
     UIView *_hostToastView;
+    UITapGestureRecognizer *_keyboardDismissTap;
     UIButton *_collapsedButton;
     UIButton *_addTaskButton;
     UIButton *_deleteTaskButton;
@@ -1690,9 +1691,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIPanGestureRecognizer *panelPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelPan:)];
     panelPan.delegate = self;
     [_panelView addGestureRecognizer:panelPan];
-    UITapGestureRecognizer *keyboardDismissTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelTapToDismissKeyboard:)];
-    keyboardDismissTap.cancelsTouchesInView = NO;
-    [_panelView addGestureRecognizer:keyboardDismissTap];
+    _keyboardDismissTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanelTapToDismissKeyboard:)];
+    _keyboardDismissTap.cancelsTouchesInView = NO;
+    _keyboardDismissTap.delegate = self;
+    [_panelView addGestureRecognizer:_keyboardDismissTap];
 
     CGFloat gap = 12.0;
     CGFloat buttonWidth = floor((panelWidth - gap * 5.0) / 4.0);
@@ -6145,6 +6147,31 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_activeConfigTextField == textField) {
         _activeConfigTextField = nil;
     }
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldReceiveTouch:(UITouch *)touch {
+    if (gestureRecognizer != _keyboardDismissTap) {
+        return YES;
+    }
+
+    UIView *view = touch.view;
+    if (!view || _taskEditorVisible) {
+        return NO;
+    }
+
+    for (UIView *current = view; current; current = current.superview) {
+        if ([current isKindOfClass:UIControl.class] ||
+            [current isKindOfClass:UITextField.class] ||
+            [current isKindOfClass:UITextView.class]) {
+            return NO;
+        }
+    }
+
+    if (_taskEditorView && [view isDescendantOfView:_taskEditorView]) {
+        return NO;
+    }
+
+    return YES;
 }
 
 - (void)handlePanelTapToDismissKeyboard:(UITapGestureRecognizer *)recognizer {

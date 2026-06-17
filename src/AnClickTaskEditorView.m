@@ -832,7 +832,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     _tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     _tableView.estimatedRowHeight = 60.0;
     _tableView.rowHeight = UITableViewAutomaticDimension;
-    _tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
+    _tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
     _tableView.backgroundColor = background;
     _tableView.translatesAutoresizingMaskIntoConstraints = NO;
     [_tableView registerClass:ACEditorActionGridCell.class forCellReuseIdentifier:@"ActionGrid"];
