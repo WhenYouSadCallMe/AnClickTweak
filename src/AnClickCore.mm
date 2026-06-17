@@ -247,50 +247,68 @@ static BOOL AnClickImageMatchesWindowPointSize(UIImage *image, UIWindow *window)
     return imageMatches || pixelMatches;
 }
 
-static UIImage *AnClickCaptureActiveWindowImage(UIWindow **capturedWindow) {
+static UIImage *AnClickCaptureWindowHierarchyImage(NSArray<UIWindow *> *windows, UIWindow *window) {
+    if (!window || CGRectIsEmpty(window.bounds)) {
+        return nil;
+    }
+
+    CGSize size = window.bounds.size;
+    CGFloat scale = window.screen.scale > 0 ? window.screen.scale : UIScreen.mainScreen.scale;
+    UIGraphicsBeginImageContextWithOptions(size, NO, scale);
+    CGContextRef context = UIGraphicsGetCurrentContext();
+    UIImage *image = nil;
+    if (context) {
+        for (UIWindow *captureWindow in windows) {
+            if (!AnClickWindowCanBeCaptured(captureWindow)) {
+                continue;
+            }
+            CGPoint origin = [captureWindow convertPoint:CGPointZero toWindow:window];
+            CGContextSaveGState(context);
+            CGContextTranslateCTM(context, origin.x, origin.y);
+            BOOL drawn = [captureWindow drawViewHierarchyInRect:captureWindow.bounds afterScreenUpdates:YES];
+            if (!drawn) {
+                [captureWindow.layer renderInContext:context];
+            }
+            CGContextRestoreGState(context);
+        }
+        image = UIGraphicsGetImageFromCurrentImageContext();
+    }
+    UIGraphicsEndImageContext();
+    return image;
+}
+
+static UIImage *AnClickCaptureSingleAttempt(UIWindow **capturedWindow, BOOL *capturedImageIsUsable) {
     __block UIImage *image = nil;
     __block UIWindow *window = nil;
     void (^captureBlock)(void) = ^{
         NSArray<UIWindow *> *windows = AnClickCaptureCandidateWindows(&window);
         if (window) {
-            CGSize size = window.bounds.size;
-            CGFloat scale = window.screen.scale > 0 ? window.screen.scale : UIScreen.mainScreen.scale;
-            UIGraphicsBeginImageContextWithOptions(size, NO, scale);
-            CGContextRef context = UIGraphicsGetCurrentContext();
-            if (context) {
-                for (UIWindow *captureWindow in windows) {
-                    if (!AnClickWindowCanBeCaptured(captureWindow)) {
-                        continue;
-                    }
-                    CGPoint origin = [captureWindow convertPoint:CGPointZero toWindow:window];
-                    CGContextSaveGState(context);
-                    CGContextTranslateCTM(context, origin.x, origin.y);
-                    BOOL drawn = [captureWindow drawViewHierarchyInRect:captureWindow.bounds afterScreenUpdates:YES];
-                    if (!drawn) {
-                        [captureWindow.layer renderInContext:context];
-                    }
-                    CGContextRestoreGState(context);
-                }
-                image = UIGraphicsGetImageFromCurrentImageContext();
+            UIImage *screenImage = AnClickCaptureHardwareScreenImage();
+            BOOL screenImageMatches = screenImage.CGImage && AnClickImageMatchesWindowPointSize(screenImage, window);
+            if (screenImageMatches && !AnClickImageAppearsBlankOrLowDetail(screenImage)) {
+                image = screenImage;
+                window = nil;
+                return;
             }
-            UIGraphicsEndImageContext();
+            if (screenImage.CGImage && !screenImageMatches) {
+                NSLog(@"[AnClick] Ignored hardware screenshot with mismatched orientation size");
+            }
+
+            image = AnClickCaptureWindowHierarchyImage(windows, window);
             if (image.CGImage && !AnClickImageAppearsBlankOrLowDetail(image)) {
                 return;
             }
 
-            UIImage *screenImage = AnClickCaptureHardwareScreenImage();
-            BOOL screenImageMatches = screenImage.CGImage && AnClickImageMatchesWindowPointSize(screenImage, window);
             if (screenImageMatches && screenImage.CGImage) {
                 image = screenImage;
                 window = nil;
                 return;
-            } else if (screenImage.CGImage) {
-                NSLog(@"[AnClick] Ignored hardware screenshot with mismatched orientation size");
             }
         }
 
         UIImage *screenImage = AnClickCaptureHardwareScreenImage();
-        if (screenImage.CGImage && (!window || AnClickImageMatchesWindowPointSize(screenImage, window))) {
+        BOOL screenImageMatches = screenImage.CGImage && (!window || AnClickImageMatchesWindowPointSize(screenImage, window));
+        if (screenImageMatches) {
             image = screenImage;
             window = nil;
         } else if (screenImage.CGImage) {
@@ -307,7 +325,52 @@ static UIImage *AnClickCaptureActiveWindowImage(UIWindow **capturedWindow) {
     if (capturedWindow) {
         *capturedWindow = window;
     }
+    if (capturedImageIsUsable) {
+        *capturedImageIsUsable = image.CGImage && !AnClickImageAppearsBlankOrLowDetail(image);
+    }
     return image;
+}
+
+static UIImage *AnClickCaptureActiveWindowImage(UIWindow **capturedWindow) {
+    UIImage *bestImage = nil;
+    UIWindow *bestWindow = nil;
+    static const NSTimeInterval retryDelays[] = {0.0, 0.045, 0.090};
+    for (NSUInteger attempt = 0; attempt < sizeof(retryDelays) / sizeof(retryDelays[0]); attempt++) {
+        NSTimeInterval delay = retryDelays[attempt];
+        if (delay > 0.0) {
+            if (NSThread.isMainThread) {
+                [[NSRunLoop currentRunLoop] runMode:NSRunLoopCommonModes
+                                        beforeDate:[NSDate dateWithTimeIntervalSinceNow:delay]];
+            } else {
+                [NSThread sleepForTimeInterval:delay];
+            }
+        }
+
+        UIWindow *attemptWindow = nil;
+        BOOL usable = NO;
+        UIImage *attemptImage = AnClickCaptureSingleAttempt(&attemptWindow, &usable);
+        if (attemptImage.CGImage) {
+            bestImage = attemptImage;
+            bestWindow = attemptWindow;
+        }
+        if (usable) {
+            if (capturedWindow) {
+                *capturedWindow = attemptWindow;
+            }
+            if (attempt > 0) {
+                NSLog(@"[AnClick] Screenshot recovered after %lu retry", (unsigned long)attempt);
+            }
+            return attemptImage;
+        }
+    }
+
+    if (capturedWindow) {
+        *capturedWindow = bestWindow;
+    }
+    if (bestImage.CGImage && AnClickImageAppearsBlankOrLowDetail(bestImage)) {
+        NSLog(@"[AnClick] Screenshot still appears blank after retries");
+    }
+    return bestImage;
 }
 
 static cv::Mat AnClickMatFromUIImage(UIImage *image) {
