@@ -97,6 +97,7 @@ static const NSInteger AnClickHomeOptionPanelTimeTag = 54101;
 static const NSInteger AnClickHomeOptionPanelLoopTag = 54102;
 static const NSInteger AnClickHomeOptionPanelSaveTag = 54103;
 static const NSInteger AnClickHomeOptionPanelMonitorTag = 54104;
+static const NSInteger AnClickHomeOptionContentViewTag = 54120;
 static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.045;
 static const NSTimeInterval AnClickVisualRecognitionCaptureDelay = 0.040;
 static const NSTimeInterval AnClickColorRecognitionCaptureDelay = 0.030;
@@ -246,9 +247,15 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 @property (nonatomic, assign, getter=isRecording) BOOL recording;
 @end
 
+@interface AnClickCore : NSObject
++ (UIImage *)captureCurrentWindowImageWithWindow:(UIWindow **)capturedWindow;
+@end
+
 @interface AnClickUI : NSObject <UITextFieldDelegate, UIGestureRecognizerDelegate, UIPickerViewDataSource, UIPickerViewDelegate, UITableViewDataSource, UITableViewDelegate, AnClickTaskEditorViewDelegate, AnClickTaskEngineDelegate, AnClickTemplateCaptureViewDelegate, AnClickPointPickerViewDelegate, AnClickColorPickerViewDelegate>
 + (instancetype)shared;
 - (void)show;
+- (void)startStartupRecognitionWarmupIfNeeded;
+- (void)finishStartupRecognitionWarmupAndShowPanel;
 - (void)handleScreenGeometryChanged;
 - (void)handleHardwareButtonHIDEvent:(IOHIDEventRef)event;
 - (void)handleWindowPressesEvent:(UIEvent *)event;
@@ -442,6 +449,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _hasObservedSystemVolume;
     BOOL _volumeShortcutRunSuppressToasts;
     BOOL _suppressTemplatePreviewRefresh;
+    BOOL _startupWarmupStarted;
+    BOOL _startupWarmupFinished;
     NSUInteger _panelRestoreGeneration;
     NSUInteger _taskRunGeneration;
     NSUInteger _toastGeneration;
@@ -1050,9 +1059,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [self attachPanelWindowToActiveSceneIfNeeded];
             [self registerVolumeShortcutObserver];
             [self scheduleGlobalTimers];
-            self->_panelWindow.hidden = NO;
-            [self reclampPanelWindowForCurrentScreen];
-            [self refreshCollapsedButtonTitle];
+            if (self->_startupWarmupFinished) {
+                self->_panelWindow.hidden = NO;
+                [self reclampPanelWindowForCurrentScreen];
+                [self refreshCollapsedButtonTitle];
+            } else {
+                self->_panelWindow.hidden = YES;
+                [self startStartupRecognitionWarmupIfNeeded];
+            }
             return;
         }
         [self buildPanel];
@@ -1062,6 +1076,130 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     } else {
         dispatch_async(dispatch_get_main_queue(), showBlock);
     }
+}
+
+- (void)collectTemplatePathsFromObject:(id)object intoSet:(NSMutableOrderedSet<NSString *> *)paths {
+    if (!object || !paths || paths.count >= _templateImageCache.countLimit) {
+        return;
+    }
+    if ([object isKindOfClass:AnClickTaskModel.class]) {
+        [self collectTemplatePathsFromObject:[(AnClickTaskModel *)object dictionaryRepresentation] intoSet:paths];
+        return;
+    }
+    if ([object isKindOfClass:NSDictionary.class]) {
+        NSDictionary *dictionary = (NSDictionary *)object;
+        NSString *templatePath = [self trimmedActionDescription:dictionary[@"templatePath"]];
+        if (templatePath.length > 0) {
+            [paths addObject:templatePath];
+            if (paths.count >= _templateImageCache.countLimit) {
+                return;
+            }
+        }
+        for (id value in dictionary.allValues) {
+            [self collectTemplatePathsFromObject:value intoSet:paths];
+            if (paths.count >= _templateImageCache.countLimit) {
+                return;
+            }
+        }
+        return;
+    }
+    if ([object isKindOfClass:NSArray.class]) {
+        for (id value in (NSArray *)object) {
+            [self collectTemplatePathsFromObject:value intoSet:paths];
+            if (paths.count >= _templateImageCache.countLimit) {
+                return;
+            }
+        }
+    }
+}
+
+- (void)preloadTemplateImagesForStartupWarmup {
+    if (!_templateImageCache) {
+        return;
+    }
+
+    NSMutableOrderedSet<NSString *> *paths = [NSMutableOrderedSet orderedSet];
+    for (AnClickTaskModel *model in _taskItems) {
+        [self collectTemplatePathsFromObject:model intoSet:paths];
+        if (paths.count >= _templateImageCache.countLimit) {
+            break;
+        }
+    }
+    if (_editingTaskModel && paths.count < _templateImageCache.countLimit) {
+        [self collectTemplatePathsFromObject:_editingTaskModel intoSet:paths];
+    }
+    if (_currentTemplatePath.length > 0 && paths.count < _templateImageCache.countLimit) {
+        [paths addObject:_currentTemplatePath];
+    }
+
+    for (NSString *path in paths) {
+        @autoreleasepool {
+            UIImage *image = [self cachedTemplateImageAtPath:path];
+            CGImageRef cgImage = image.CGImage;
+            if (cgImage) {
+                (void)CGImageGetWidth(cgImage);
+                (void)CGImageGetHeight(cgImage);
+            }
+        }
+    }
+}
+
+- (void)finishStartupRecognitionWarmupAndShowPanel {
+    if (_startupWarmupFinished) {
+        return;
+    }
+    _startupWarmupFinished = YES;
+    if (![self panelCanUseCurrentScene] || !_panelWindow) {
+        return;
+    }
+
+    [self attachPanelWindowToActiveSceneIfNeeded];
+    _panelWindow.hidden = NO;
+    _panelWindow.userInteractionEnabled = YES;
+    [self reclampPanelWindowForCurrentScreenAllowHeavyRefresh:NO];
+    [self refreshCollapsedButtonTitle];
+}
+
+- (void)startStartupRecognitionWarmupIfNeeded {
+    if (_startupWarmupFinished) {
+        [self finishStartupRecognitionWarmupAndShowPanel];
+        return;
+    }
+    if (_startupWarmupStarted) {
+        return;
+    }
+    _startupWarmupStarted = YES;
+    if (_panelWindow) {
+        _panelWindow.hidden = YES;
+    }
+
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf || strongSelf->_startupWarmupFinished) {
+            return;
+        }
+        [strongSelf finishStartupRecognitionWarmupAndShowPanel];
+    });
+
+    [self preloadTemplateImagesForStartupWarmup];
+    [_recognitionService prewarmWithCompletion:^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf || strongSelf->_startupWarmupFinished) {
+            return;
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) delayedSelf = weakSelf;
+            if (!delayedSelf || delayedSelf->_startupWarmupFinished) {
+                return;
+            }
+            UIWindow *capturedWindow = nil;
+            UIImage *image = [AnClickCore captureCurrentWindowImageWithWindow:&capturedWindow];
+            (void)image;
+            (void)capturedWindow;
+            [delayedSelf finishStartupRecognitionWarmupAndShowPanel];
+        });
+    }];
 }
 
 - (void)registerVolumeShortcutObserver {
@@ -1637,7 +1775,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self attachPanelWindowToActiveSceneIfNeeded];
     _panelWindow.windowLevel = UIWindowLevelAlert + 1000;
     _panelWindow.backgroundColor = UIColor.clearColor;
-    _panelWindow.hidden = NO;
+    _panelWindow.hidden = YES;
 
     UIViewController *controller = [[UIViewController alloc] init];
     _panelWindow.rootViewController = controller;
@@ -1859,8 +1997,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self setTaskEditorVisible:NO];
     [self scheduleGlobalTimers];
 
-    _panelWindow.hidden = NO;
     [self collapsePanel];
+    [self startStartupRecognitionWarmupIfNeeded];
     NSLog(@"[AnClick] Panel shown");
 }
 
@@ -2878,9 +3016,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         [hostWindow makeKeyWindow];
     }
     if (_panelWindow) {
+        [self collapsePanel];
         _panelWindow.alpha = 1.0;
-        _panelWindow.userInteractionEnabled = NO;
-        _panelWindow.hidden = YES;
+        _panelWindow.userInteractionEnabled = YES;
+        _panelWindow.hidden = NO;
+        [self refreshCollapsedButtonTitle];
     }
     [self hideToastForRecognitionCapture];
     return shouldRestorePanel;
@@ -4195,7 +4335,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)globalSettingsFieldChanged:(__unused UITextField *)textField {
     [self syncGlobalSettingsFromFields];
-    [self persistGlobalSettings];
 }
 
 - (void)globalSettingsFieldEditingDidEnd:(__unused UITextField *)textField {
@@ -4369,6 +4508,32 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
     panel.frame = [self homeFloatingPanelFrameForHeight:preferredHeight];
+    if (panel == _globalSettingsView && _globalSettingsScrollView) {
+        CGFloat headerHeight = 61.0;
+        CGFloat width = CGRectGetWidth(panel.bounds);
+        CGFloat height = CGRectGetHeight(panel.bounds);
+        _globalSettingsScrollView.frame = CGRectMake(0.0,
+                                                     headerHeight,
+                                                     width,
+                                                     MAX(1.0, height - headerHeight));
+        UIView *contentView = [_globalSettingsScrollView viewWithTag:AnClickHomeOptionContentViewTag];
+        if (contentView) {
+            CGFloat contentHeight = MAX(CGRectGetHeight(contentView.frame),
+                                        CGRectGetHeight(_globalSettingsScrollView.bounds) + 1.0);
+            contentView.frame = CGRectMake(0.0, 0.0, width, contentHeight);
+            _globalSettingsScrollView.contentSize = CGSizeMake(width, contentHeight);
+        }
+    }
+}
+
+- (void)updateHomeOptionContentHeightForView:(UIView *)contentView bottomY:(CGFloat)bottomY {
+    if (!contentView || !_globalSettingsScrollView) {
+        return;
+    }
+    CGFloat width = CGRectGetWidth(_globalSettingsScrollView.bounds);
+    CGFloat height = MAX(bottomY + 18.0, CGRectGetHeight(_globalSettingsScrollView.bounds) + 1.0);
+    contentView.frame = CGRectMake(0.0, 0.0, width, height);
+    _globalSettingsScrollView.contentSize = CGSizeMake(width, height);
 }
 
 - (CGFloat)homeFloatingPanelPreferredHeightForTag:(NSInteger)tag fallback:(CGFloat)fallback {
@@ -4403,6 +4568,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     CGFloat width = _globalSettingsView.bounds.size.width;
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(54.0, 13.0, width - 108.0, 34.0)];
+    titleLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     titleLabel.text = title;
     titleLabel.textAlignment = NSTextAlignmentCenter;
     titleLabel.textColor = [self themePrimaryTextColor];
@@ -4413,6 +4579,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     UIButton *closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
     closeButton.frame = CGRectMake(width - 56.0, 10.0, 40.0, 40.0);
+    closeButton.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
     closeButton.layer.cornerRadius = 20.0;
     closeButton.titleLabel.font = [UIFont systemFontOfSize:27.0 weight:UIFontWeightBold];
     [closeButton setTitle:@"×" forState:UIControlStateNormal];
@@ -4421,10 +4588,30 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_globalSettingsView addSubview:closeButton];
 
     UIView *divider = [[UIView alloc] initWithFrame:CGRectMake(0.0, 60.0, width, 1.0)];
+    divider.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     divider.backgroundColor = [self themeSeparatorColor];
     [_globalSettingsView addSubview:divider];
 
-    return _globalSettingsView;
+    _globalSettingsScrollView = [[UIScrollView alloc] initWithFrame:CGRectMake(0.0,
+                                                                               61.0,
+                                                                               width,
+                                                                               MAX(1.0, CGRectGetHeight(_globalSettingsView.bounds) - 61.0))];
+    _globalSettingsScrollView.alwaysBounceVertical = YES;
+    _globalSettingsScrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    _globalSettingsScrollView.showsVerticalScrollIndicator = YES;
+    _globalSettingsScrollView.keyboardDismissMode = UIScrollViewKeyboardDismissModeNone;
+    _globalSettingsScrollView.backgroundColor = UIColor.clearColor;
+    [_globalSettingsView addSubview:_globalSettingsScrollView];
+
+    UIView *contentView = [[UIView alloc] initWithFrame:CGRectMake(0.0,
+                                                                   0.0,
+                                                                   width,
+                                                                   CGRectGetHeight(_globalSettingsScrollView.bounds) + 1.0)];
+    contentView.tag = AnClickHomeOptionContentViewTag;
+    contentView.backgroundColor = UIColor.clearColor;
+    [_globalSettingsScrollView addSubview:contentView];
+
+    return contentView;
 }
 
 - (UILabel *)homeOptionCaptionWithText:(NSString *)text frame:(CGRect)frame {
@@ -4478,11 +4665,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat contentWidth = width - side * 2.0;
 
     UILabel *caption = [self homeOptionCaptionWithText:@"设置任务列表的定时运行和定时结束，时间精确到毫秒。"
-                                                 frame:CGRectMake(side, 62.0, contentWidth, 46.0)];
+                                                 frame:CGRectMake(side, 10.0, contentWidth, 46.0)];
     caption.font = [UIFont systemFontOfSize:12.8 weight:UIFontWeightSemibold];
     [panel addSubview:caption];
 
-    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 114.0, contentWidth, 248.0)];
+    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 62.0, contentWidth, 248.0)];
     [panel addSubview:card];
 
     _globalStartTimeButton = [self globalSettingsValueButtonWithAction:@selector(showGlobalStartTimePicker)];
@@ -4500,6 +4687,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                         detail:@"到达设置时间后停止当前任务运行"
                         button:_globalStopTimeButton
                              y:138.0];
+    [self updateHomeOptionContentHeightForView:panel bottomY:CGRectGetMaxY(card.frame)];
     [self refreshGlobalSettingsControls];
 }
 
@@ -4510,10 +4698,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat contentWidth = width - side * 2.0;
 
     UILabel *caption = [self homeOptionCaptionWithText:@"设置整个任务列表循环次数和每轮循环之间的等待时间。次数填 0 或留空表示无限循环。"
-                                                 frame:CGRectMake(side, 62.0, contentWidth, 48.0)];
+                                                 frame:CGRectMake(side, 10.0, contentWidth, 48.0)];
     [panel addSubview:caption];
 
-    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 116.0, contentWidth, 222.0)];
+    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 64.0, contentWidth, 222.0)];
     [panel addSubview:card];
 
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 16.0, contentWidth - 28.0, 22.0)];
@@ -4574,11 +4762,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     doneButton.frame = CGRectMake(side, CGRectGetMaxY(card.frame) + 14.0, contentWidth, 42.0);
     [self applyObsidian3DStyleToButton:doneButton selected:YES];
     [panel addSubview:doneButton];
+    [self updateHomeOptionContentHeightForView:panel bottomY:CGRectGetMaxY(doneButton.frame)];
 
     [self refreshGlobalSettingsControls];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self->_globalRepeatField becomeFirstResponder];
-    });
 }
 
 - (void)showHomeMonitorSettings {
@@ -4588,10 +4774,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat contentWidth = width - side * 2.0;
 
     UILabel *caption = [self homeOptionCaptionWithText:@"运行前先监控接口。命中运行条件后开始任务列表，命中不运行条件则继续等待。"
-                                                 frame:CGRectMake(side, 62.0, contentWidth, 46.0)];
+                                                 frame:CGRectMake(side, 10.0, contentWidth, 46.0)];
     [panel addSubview:caption];
 
-    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 112.0, contentWidth, 214.0)];
+    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 62.0, contentWidth, 214.0)];
     [panel addSubview:card];
 
     UILabel *gateLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 14.0, floor((contentWidth - 42.0) * 0.52), 36.0)];
@@ -4641,13 +4827,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     doneButton.frame = CGRectMake(side, CGRectGetMaxY(card.frame) + 14.0, contentWidth, 42.0);
     [self applyObsidian3DStyleToButton:doneButton selected:YES];
     [panel addSubview:doneButton];
+    [self updateHomeOptionContentHeightForView:panel bottomY:CGRectGetMaxY(doneButton.frame)];
 
     [self refreshGlobalSettingsControls];
-    if (_globalNetworkURL.length == 0) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self->_globalNetworkURLField becomeFirstResponder];
-        });
-    }
 }
 
 - (void)showHomeSaveConfigMenu {
@@ -11170,24 +11352,68 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if (!block) {
         return;
     }
-    if (delay <= 0.001) {
+
+    NSTimeInterval safeDelay = isfinite(delay) ? MAX(0.0, delay) : 0.0;
+    __weak typeof(self) weakSelf = self;
+    dispatch_block_t fireBlock = ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+        if (runGeneration == 0) {
+            if (![strongSelf panelCanUseCurrentScene]) {
+                return;
+            }
+        } else if (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration) {
+            return;
+        }
+        if (![strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow]) {
+            return;
+        }
         block();
+    };
+
+    if (safeDelay <= 0.0005) {
+        fireBlock();
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(safeDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), fireBlock);
+}
+
+- (void)scheduleRecognitionPointActionAfterDelay:(NSTimeInterval)delay
+                                        inWindow:(UIWindow *)hostWindow
+                                      generation:(NSUInteger)runGeneration
+                                           block:(void (^)(UIWindow *currentHostWindow))block {
+    if (!block) {
         return;
     }
 
+    NSTimeInterval safeDelay = isfinite(delay) ? MAX(0.0, delay) : 0.0;
     __weak typeof(self) weakSelf = self;
-    [_taskEngine scheduleAfter:delay guard:^BOOL{
+    dispatch_block_t fireBlock = ^{
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) {
-            return NO;
+            return;
         }
         if (runGeneration == 0) {
-            return [strongSelf panelCanUseCurrentScene];
+            if (![strongSelf panelCanUseCurrentScene]) {
+                return;
+            }
+        } else if (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration) {
+            return;
         }
-        return [strongSelf taskRunIsStillValidWithGeneration:runGeneration
-                                              fallbackWindow:hostWindow
-                                                      status:@"窗口变化停止"];
-    } block:block];
+        UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
+        if (!currentHostWindow) {
+            return;
+        }
+        block(currentHostWindow);
+    };
+
+    if (safeDelay <= 0.0005) {
+        fireBlock();
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(safeDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), fireBlock);
 }
 
 - (NSInteger)recognitionBranchIndexForTask:(NSDictionary *)task success:(BOOL)success {
@@ -12419,29 +12645,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         NSArray<NSValue *> *points = [self points:[self resolvedMultiTapPointsForTask:config] byApplyingJitterForTask:config];
         if (points.count >= 2) {
             NSTimeInterval successDelay = [self recognitionSuccessActionDelayForTask:config];
-            __weak typeof(self) weakSelf = self;
-            [_taskEngine scheduleAfter:successDelay guard:^BOOL{
-                __strong typeof(weakSelf) strongSelf = weakSelf;
-                if (!strongSelf) {
-                    return NO;
-                }
-                if (runGeneration == 0) {
-                    return [strongSelf panelCanUseCurrentScene];
-                }
-                return [strongSelf taskRunIsStillValidWithGeneration:runGeneration
-                                                       fallbackWindow:hostWindow
-                                                               status:@"窗口变化停止"];
-            } block:^{
-                __strong typeof(weakSelf) strongSelf = weakSelf;
-                if (!strongSelf) {
-                    return;
-                }
-                UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
-                if (!currentHostWindow) {
-                    return;
-                }
+            [self scheduleRecognitionPointActionAfterDelay:successDelay
+                                                  inWindow:hostWindow
+                                                generation:runGeneration
+                                                     block:^(UIWindow *currentHostWindow) {
                 [AnClickFakeTouch fastMultiTapAtPoints:points];
-                [strongSelf showMultiTapMarkersForScreenPoints:points inWindow:currentHostWindow duration:0.45];
+                [self showMultiTapMarkersForScreenPoints:points inWindow:currentHostWindow duration:0.45];
             }];
             if (duration) {
                 *duration = successDelay + AnClickFastRecognitionTapDuration;
@@ -12466,41 +12675,24 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         actionDuration = [self longPressOperationDurationForDuration:[self longPressDurationForTask:config]];
     }
     NSTimeInterval successDelay = [self recognitionSuccessActionDelayForTask:config];
-    __weak typeof(self) weakSelf = self;
-    [_taskEngine scheduleAfter:successDelay guard:^BOOL{
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) {
-            return NO;
-        }
-        if (runGeneration == 0) {
-            return [strongSelf panelCanUseCurrentScene];
-        }
-        return [strongSelf taskRunIsStillValidWithGeneration:runGeneration
-                                               fallbackWindow:hostWindow
-                                                       status:@"窗口变化停止"];
-    } block:^{
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) {
-            return;
-        }
-        UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
-        if (!currentHostWindow) {
-            return;
-        }
+    [self scheduleRecognitionPointActionAfterDelay:successDelay
+                                          inWindow:hostWindow
+                                        generation:runGeneration
+                                             block:^(UIWindow *currentHostWindow) {
         if (actionMode == AnClickActionModeDoubleTap) {
-            [strongSelf performDoubleTapAtPoint:point interval:[strongSelf doubleTapIntervalForTask:config]];
-            [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:currentHostWindow duration:actionDuration];
+            [self performDoubleTapAtPoint:point interval:[self doubleTapIntervalForTask:config]];
+            [self showOperationTraceForMode:actionMode atPoint:point inWindow:currentHostWindow duration:actionDuration];
         } else if (actionMode == AnClickActionModeLongPress) {
-            NSTimeInterval longPressDuration = [strongSelf longPressDurationForTask:config];
-            [strongSelf performPointActionMode:actionMode
-                                       atPoint:point
-                                      inWindow:currentHostWindow
-                                     showTrace:NO
-                             longPressDuration:longPressDuration];
-            [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:currentHostWindow duration:actionDuration];
+            NSTimeInterval longPressDuration = [self longPressDurationForTask:config];
+            [self performPointActionMode:actionMode
+                                 atPoint:point
+                                inWindow:currentHostWindow
+                               showTrace:NO
+                       longPressDuration:longPressDuration];
+            [self showOperationTraceForMode:actionMode atPoint:point inWindow:currentHostWindow duration:actionDuration];
         } else {
-            [strongSelf performPointActionMode:actionMode atPoint:point inWindow:currentHostWindow showTrace:NO];
-            [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:currentHostWindow duration:actionDuration];
+            [self performPointActionMode:actionMode atPoint:point inWindow:currentHostWindow showTrace:NO];
+            [self showOperationTraceForMode:actionMode atPoint:point inWindow:currentHostWindow duration:actionDuration];
         }
     }];
 

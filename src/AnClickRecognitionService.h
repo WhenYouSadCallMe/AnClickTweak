@@ -8,6 +8,8 @@ typedef void (^AnClickRecognitionMatchCompletion)(NSDictionary *_Nullable match)
 
 @interface AnClickRecognitionService : NSObject
 
+- (void)prewarmWithCompletion:(void (^_Nullable)(void))completion;
+
 - (void)findTemplateImageMatch:(UIImage *)templateImage
                      threshold:(double)threshold
                     completion:(AnClickRecognitionMatchCompletion)completion;

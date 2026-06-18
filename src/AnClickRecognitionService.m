@@ -34,6 +34,18 @@
     return self;
 }
 
+- (void)prewarmWithCompletion:(void (^)(void))completion {
+    dispatch_async(_queue, ^{
+        @autoreleasepool {
+            [AnClickCore warmUpRecognition];
+            [AnClickOCR warmUpRecognition];
+        }
+        if (completion) {
+            dispatch_async(dispatch_get_main_queue(), completion);
+        }
+    });
+}
+
 - (NSUInteger)beginRequestToken {
     @synchronized (self) {
         self.latestRequestToken += 1;
