@@ -4,6 +4,7 @@
 
 static NSString * const ACKeyMode = @"mode";
 static NSString * const ACKeyDelay = @"delay";
+static NSString * const ACKeyCompletionDelay = @"completionDelay";
 static NSString * const ACKeyRepeat = @"repeat";
 static NSString * const ACKeyInterval = @"interval";
 static const NSTimeInterval ACFastDoubleTapInterval = 0.06;
@@ -90,7 +91,6 @@ static AnClickActionMode ACSupportedActionMode(id value) {
         case AnClickActionModeColor:
         case AnClickActionModeNetwork:
         case AnClickActionModeJump:
-        case AnClickActionModeDelay:
         case AnClickActionModeOpenApp:
             return mode;
         default:
@@ -151,6 +151,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     if (self) {
         _actionMode = AnClickActionModeNone;
         _delay = 0.0;
+        _completionDelay = 0.0;
         _repeatCount = 1;
         _interval = 1.0 / 240.0;
         _taskDescription = @"";
@@ -185,6 +186,8 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
         _macroSpeed = 1.0;
         _recognitionRetryUntilFound = NO;
         _recognitionRetryInterval = 1.0;
+        _recognitionSuccessActionDelay = 0.0;
+        _recognitionFailureActionDelay = 0.0;
         _successBranchIndex = -1;
         _failureBranchIndex = -1;
         _successActionConfig = @{};
@@ -208,6 +211,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
 
     _actionMode = ACSupportedActionMode(dictionary[ACKeyMode]);
     _delay = ACClampedDouble(dictionary[ACKeyDelay], 0.0, 3600.0, 0.0);
+    _completionDelay = ACClampedDouble(dictionary[ACKeyCompletionDelay] ?: dictionary[@"afterDelay"], 0.0, 3600.0, 0.0);
     _repeatCount = ACClampedInteger(dictionary[ACKeyRepeat], 1, 9999, 1);
     _interval = ACClampedDouble(dictionary[ACKeyInterval], 0.0, 30.0, _interval);
     _randomDelay = [dictionary[ACKeyRandomDelay] boolValue];
@@ -282,6 +286,8 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
 
     _recognitionRetryUntilFound = [dictionary[@"recognitionRetryUntilFound"] boolValue];
     _recognitionRetryInterval = ACClampedDouble(dictionary[@"recognitionRetryInterval"], 0.2, 30.0, 1.0);
+    _recognitionSuccessActionDelay = ACClampedDouble(dictionary[@"recognitionSuccessActionDelay"], 0.0, 30.0, 0.0);
+    _recognitionFailureActionDelay = ACClampedDouble(dictionary[@"recognitionFailureActionDelay"], 0.0, 30.0, 0.0);
     _successBranchIndex = ACClampedInteger(dictionary[@"successBranchIndex"], -1, NSIntegerMax, -1);
     _failureBranchIndex = ACClampedInteger(dictionary[@"failureBranchIndex"], -1, NSIntegerMax, -1);
     if (!hasExplicitSuccessActionMode && _successBranchIndex >= 0) {
@@ -357,6 +363,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     }
     dictionary[ACKeyMode] = @(actionMode);
     dictionary[ACKeyDelay] = @(actionMode == AnClickActionModeDelay ? MAX(0.0, self.delay) : 0.0);
+    dictionary[ACKeyCompletionDelay] = @(MIN(3600.0, MAX(0.0, self.completionDelay)));
     dictionary[ACKeyRepeat] = @(MAX(1, self.repeatCount));
     dictionary[ACKeyInterval] = @((actionMode == AnClickActionModeTap || actionMode == AnClickActionModeTwoFingerTap)
         ? MIN(30.0, MAX(0.0, self.interval))
@@ -451,6 +458,8 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     dictionary[@"macroSpeed"] = @(MIN(10.0, MAX(0.1, self.macroSpeed)));
     dictionary[@"recognitionRetryUntilFound"] = @(self.recognitionRetryUntilFound);
     dictionary[@"recognitionRetryInterval"] = @(MIN(30.0, MAX(0.2, self.recognitionRetryInterval)));
+    dictionary[@"recognitionSuccessActionDelay"] = @(MIN(30.0, MAX(0.0, self.recognitionSuccessActionDelay)));
+    dictionary[@"recognitionFailureActionDelay"] = @(MIN(30.0, MAX(0.0, self.recognitionFailureActionDelay)));
     if (self.successBranchIndex >= 0) dictionary[@"successBranchIndex"] = @(self.successBranchIndex);
     if (self.failureBranchIndex >= 0) dictionary[@"failureBranchIndex"] = @(self.failureBranchIndex);
     if (self.successActionConfig.count > 0) dictionary[@"successActionConfig"] = self.successActionConfig;

@@ -7256,13 +7256,28 @@ continueAfterNetworkTaskModel:(AnClickTaskModel *)model
         return;
     }
     if (model.networkRequestOnly) {
-        [self continueTaskRunAfterIndex:index inWindow:(UIWindow *)host generation:generation];
+        NSTimeInterval completionDelay = [self completionDelayForTask:task];
+        __weak typeof(self) weakSelf = self;
+        [_taskEngine scheduleAfter:completionDelay guard:^BOOL{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return NO;
+            }
+            return [strongSelf taskRunIsStillValidWithGeneration:generation fallbackWindow:(UIWindow *)host status:@"窗口变化停止"];
+        } block:^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:(UIWindow *)host];
+            [strongSelf continueTaskRunAfterIndex:index inWindow:currentHostWindow generation:generation];
+        }];
         return;
     }
     [self scheduleTaskContinuationAfterRecognitionTask:task
                                                atIndex:index
-                                              inWindow:(UIWindow *)host
-                                            generation:generation
+                                               inWindow:(UIWindow *)host
+                                             generation:generation
                                                success:success
                                                  delay:0.0];
 }
@@ -7326,7 +7341,7 @@ performRecognitionFailureActionForModel:(AnClickTaskModel *)model
 }
 
 - (NSTimeInterval)taskEngine:(__unused AnClickTaskEngine *)engine actionIntervalForRecognitionTaskModel:(AnClickTaskModel *)model {
-    return [self actionIntervalForTask:[self taskDictionaryForModel:model]];
+    return [self recognitionRetryIntervalForTask:[self taskDictionaryForModel:model]];
 }
 
 - (NSTimeInterval)taskEngine:(__unused AnClickTaskEngine *)engine retryIntervalForRecognitionTaskModel:(AnClickTaskModel *)model {
@@ -8639,7 +8654,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     } else {
         NSInteger repeat = MAX(1, [self repeatCountForTask:task]);
         [parts addObject:repeat > 1 ? [NSString stringWithFormat:@"尝试%ld次", (long)repeat] : @"识别一次"];
-        NSTimeInterval interval = MAX([self actionIntervalForTask:task], AnClickRecognitionCaptureDelay);
+        NSTimeInterval interval = MAX([self recognitionRetryIntervalForTask:task], AnClickRecognitionCaptureDelay);
         if (repeat > 1 && interval > 0.001) {
             [parts addObject:[NSString stringWithFormat:@"识别间隔%@", [self millisecondsSummaryTextForDuration:interval]]];
         }
@@ -8714,6 +8729,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     }
     if ([self modeForTask:task] == AnClickActionModeLongPress) {
         [parts addObject:[NSString stringWithFormat:@"长%@", [self longPressDurationSummaryText:[self longPressDurationForTask:task]]]];
+    }
+    NSTimeInterval completionDelay = [self completionDelayForTask:task];
+    if (completionDelay > 0.001) {
+        [parts addObject:[NSString stringWithFormat:@"任务完成后%.2f秒", completionDelay]];
     }
     NSString *successActionSummary = [self recognitionSuccessActionSummaryForTask:task];
     if (successActionSummary.length > 0) {
@@ -9274,7 +9293,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if (repeat <= 1) {
         return @"识别一次";
     }
-    NSTimeInterval interval = [self actionIntervalForTask:task];
+    NSTimeInterval interval = [self recognitionRetryIntervalForTask:task];
     return interval > 0.001
         ? [NSString stringWithFormat:@"尝试%ld次 · 间隔%@", (long)repeat, [self millisecondsSummaryTextForDuration:interval]]
         : [NSString stringWithFormat:@"尝试%ld次", (long)repeat];
@@ -9379,6 +9398,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 [self addTaskListDetailRowWithTitle:@"失败点击" value:failureClickTarget tint:tint rows:rows];
             }
             [self addTaskListDetailRowWithTitle:@"识别重试" value:[self taskListRecognitionRetrySummaryForTask:task] tint:tint rows:rows];
+            if ([self recognitionSuccessActionDelayForTask:task] > 0.001) {
+                [self addTaskListDetailRowWithTitle:@"成功后动作延时" value:[NSString stringWithFormat:@"%.2f秒", [self recognitionSuccessActionDelayForTask:task]] tint:tint rows:rows];
+            }
+            if ([self recognitionFailureActionDelayForTask:task] > 0.001) {
+                [self addTaskListDetailRowWithTitle:@"失败后动作延时" value:[NSString stringWithFormat:@"%.2f秒", [self recognitionFailureActionDelayForTask:task]] tint:tint rows:rows];
+            }
             break;
         }
         case AnClickActionModeOCR: {
@@ -9395,6 +9420,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 [self addTaskListDetailRowWithTitle:@"失败点击" value:failureClickTarget tint:tint rows:rows];
             }
             [self addTaskListDetailRowWithTitle:@"识别重试" value:[self taskListRecognitionRetrySummaryForTask:task] tint:tint rows:rows];
+            if ([self recognitionSuccessActionDelayForTask:task] > 0.001) {
+                [self addTaskListDetailRowWithTitle:@"成功后动作延时" value:[NSString stringWithFormat:@"%.2f秒", [self recognitionSuccessActionDelayForTask:task]] tint:tint rows:rows];
+            }
+            if ([self recognitionFailureActionDelayForTask:task] > 0.001) {
+                [self addTaskListDetailRowWithTitle:@"失败后动作延时" value:[NSString stringWithFormat:@"%.2f秒", [self recognitionFailureActionDelayForTask:task]] tint:tint rows:rows];
+            }
             break;
         }
         case AnClickActionModeColor: {
@@ -9410,6 +9441,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 [self addTaskListDetailRowWithTitle:@"失败点击" value:failureClickTarget tint:tint rows:rows];
             }
             [self addTaskListDetailRowWithTitle:@"识别重试" value:[self taskListRecognitionRetrySummaryForTask:task] tint:tint rows:rows];
+            if ([self recognitionSuccessActionDelayForTask:task] > 0.001) {
+                [self addTaskListDetailRowWithTitle:@"成功后动作延时" value:[NSString stringWithFormat:@"%.2f秒", [self recognitionSuccessActionDelayForTask:task]] tint:tint rows:rows];
+            }
+            if ([self recognitionFailureActionDelayForTask:task] > 0.001) {
+                [self addTaskListDetailRowWithTitle:@"失败后动作延时" value:[NSString stringWithFormat:@"%.2f秒", [self recognitionFailureActionDelayForTask:task]] tint:tint rows:rows];
+            }
             break;
         }
         case AnClickActionModeNetwork: {
@@ -9467,6 +9504,13 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         default:
             [self addTaskListDetailRowWithTitle:@"配置" value:@"未设置" tint:tint rows:rows];
             break;
+    }
+    NSTimeInterval completionDelay = [self completionDelayForTask:task];
+    if (completionDelay > 0.001) {
+        [self addTaskListDetailRowWithTitle:@"任务完成后延时"
+                                      value:[NSString stringWithFormat:@"%.2f秒", completionDelay]
+                                       tint:tint
+                                       rows:rows];
     }
     return rows;
 }
@@ -10541,6 +10585,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         NSTimeInterval baseDuration = mode == AnClickActionModeOCR ? 0.95 : 0.75;
         NSTimeInterval successDuration = [self estimatedActionDurationForTask:task success:YES actionMode:successMode depth:depth];
         NSTimeInterval failureDuration = [self estimatedActionDurationForTask:task success:NO actionMode:failureMode depth:depth];
+        if (successMode != AnClickActionModeNone) {
+            successDuration += [self recognitionSuccessActionDelayForTask:task];
+        }
+        if (failureMode != AnClickActionModeNone) {
+            failureDuration += [self recognitionFailureActionDelayForTask:task];
+        }
         duration = baseDuration + MAX(successDuration, failureDuration);
     } else if (mode == AnClickActionModeNetwork) {
         duration = 0.85;
@@ -10563,11 +10613,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             ? [self doubleTapOperationDurationForTask:task]
             : AnClickDefaultTapPressDuration;
         NSTimeInterval step = MAX(minimumStep, configuredInterval);
-        return delay + step * repeatCount;
+        return delay + step * repeatCount + [self completionDelayForTask:task];
     }
 
     NSTimeInterval interval = duration + configuredInterval;
-    return delay + duration + interval * MAX(0, repeatCount - 1);
+    return delay + duration + interval * MAX(0, repeatCount - 1) + [self completionDelayForTask:task];
 }
 
 - (NSTimeInterval)estimatedTaskDurationForTaskModel:(AnClickTaskModel *)model depth:(NSUInteger)depth {
@@ -10583,6 +10633,14 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     CGFloat unit = (CGFloat)arc4random() / (CGFloat)UINT32_MAX;
     NSTimeInterval minimumDelay = delay >= 1.0 ? 1.0 : 0.0;
     return minimumDelay + (delay - minimumDelay) * unit;
+}
+
+- (NSTimeInterval)completionDelayForTask:(NSDictionary *)task {
+    id value = task[@"completionDelay"] ?: task[@"afterDelay"];
+    if (![value respondsToSelector:@selector(doubleValue)]) {
+        return 0.0;
+    }
+    return MIN(3600.0, MAX(0.0, [value doubleValue]));
 }
 
 - (NSInteger)repeatCountForTask:(NSDictionary *)task {
@@ -11032,6 +11090,49 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         return MIN(30.0, MAX(0.2, [value doubleValue]));
     }
     return 1.0;
+}
+
+- (NSTimeInterval)recognitionSuccessActionDelayForTask:(NSDictionary *)task {
+    id value = task[@"recognitionSuccessActionDelay"];
+    if (![value respondsToSelector:@selector(doubleValue)]) {
+        return 0.0;
+    }
+    return MIN(30.0, MAX(0.0, [value doubleValue]));
+}
+
+- (NSTimeInterval)recognitionFailureActionDelayForTask:(NSDictionary *)task {
+    id value = task[@"recognitionFailureActionDelay"];
+    if (![value respondsToSelector:@selector(doubleValue)]) {
+        return 0.0;
+    }
+    return MIN(30.0, MAX(0.0, [value doubleValue]));
+}
+
+- (void)scheduleRecognitionActionAfterDelay:(NSTimeInterval)delay
+                                   inWindow:(UIWindow *)hostWindow
+                                 generation:(NSUInteger)runGeneration
+                                      block:(dispatch_block_t)block {
+    if (!block) {
+        return;
+    }
+    if (delay <= 0.001) {
+        block();
+        return;
+    }
+
+    __weak typeof(self) weakSelf = self;
+    [_taskEngine scheduleAfter:delay guard:^BOOL{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return NO;
+        }
+        if (runGeneration == 0) {
+            return [strongSelf panelCanUseCurrentScene];
+        }
+        return [strongSelf taskRunIsStillValidWithGeneration:runGeneration
+                                              fallbackWindow:hostWindow
+                                                      status:@"窗口变化停止"];
+    } block:block];
 }
 
 - (NSInteger)recognitionBranchIndexForTask:(NSDictionary *)task success:(BOOL)success {
@@ -11821,7 +11922,22 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 
     NSInteger repeatCount = [self repeatCountForTask:task];
     if (repeatIndex >= repeatCount) {
-        [self continueTaskRunAfterIndex:index inWindow:hostWindow generation:runGeneration];
+        NSTimeInterval completionDelay = [self completionDelayForTask:task];
+        __weak typeof(self) weakSelf = self;
+        [_taskEngine scheduleAfter:completionDelay guard:^BOOL{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return NO;
+            }
+            return [strongSelf taskRunIsStillValidWithGeneration:runGeneration fallbackWindow:hostWindow status:@"窗口变化停止"];
+        } block:^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            UIWindow *nextHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
+            [strongSelf continueTaskRunAfterIndex:index inWindow:nextHostWindow generation:runGeneration];
+        }];
         return;
     }
 
@@ -11831,7 +11947,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         }
         UIWindow *currentHostWindow = [self currentUsableHostWindowForTaskRunFallback:hostWindow];
         __weak typeof(self) weakSelf = self;
-        NSTimeInterval interval = [self actionIntervalForTask:task];
+        NSTimeInterval interval = [self recognitionRetryIntervalForTask:task];
         [_taskEngine scheduleAfter:interval guard:^BOOL{
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) {
@@ -11877,7 +11993,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if ([self branchActionConfigForTask:task success:YES expectedMode:actionMode]) {
         return 0.0;
     }
-    NSTimeInterval interval = [self actionIntervalForTask:task];
+    NSTimeInterval interval = [self recognitionRetryIntervalForTask:task];
     if (actionMode == AnClickActionModeNetwork ||
         actionMode == AnClickActionModeJump ||
         [self modeIsRecognitionTask:actionMode]) {
@@ -11901,9 +12017,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                              recognitionText:(NSString *)recognitionText
                                    completion:(void (^)(NSTimeInterval actionDelay))completion {
     AnClickActionMode actionMode = success ? [self successActionModeForTask:task] : [self failureActionModeForTask:task];
+    NSTimeInterval actionStartDelay = success ? [self recognitionSuccessActionDelayForTask:task] : [self recognitionFailureActionDelayForTask:task];
     if (actionMode == AnClickActionModeNone || actionMode == AnClickActionModeJump) {
         if (completion) {
-            completion(0.0);
+            completion(actionMode == AnClickActionModeJump ? actionStartDelay : 0.0);
         }
         return;
     }
@@ -11927,7 +12044,13 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     }
 
     NSTimeInterval fastPointDuration = 0.0;
-    if ([self performFastRecognitionPointActionForConfig:config
+    NSDictionary *pointConfig = config;
+    if ([self recognitionBranchActionModeCanExecuteFastPoint:actionMode]) {
+        NSMutableDictionary *mutablePointConfig = [config mutableCopy];
+        mutablePointConfig[@"recognitionSuccessActionDelay"] = @(actionStartDelay);
+        pointConfig = mutablePointConfig;
+    }
+    if ([self performFastRecognitionPointActionForConfig:pointConfig
                                               actionMode:actionMode
                                                 inWindow:hostWindow
                                                 duration:&fastPointDuration]) {
@@ -11936,7 +12059,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                              [self actionNameForMode:actionMode]];
         [self showToast:_statusLabel.text];
         if (completion) {
-            completion(fastPointDuration);
+            completion(fastPointDuration + [self completionDelayForTask:config]);
         }
         return;
     }
@@ -11961,21 +12084,32 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             [singleCheckConfig removeObjectForKey:@"failureActionConfig"];
             [singleCheckConfig removeObjectForKey:@"failureRecognitionActionConfig"];
         }
-        [self performRecognitionNetworkTask:singleCheckConfig
-                            recognitionText:recognitionText
-                                   inWindow:hostWindow
-                                 generation:runGeneration
-                                 completion:nil];
+        [self scheduleRecognitionActionAfterDelay:actionStartDelay
+                                         inWindow:hostWindow
+                                       generation:runGeneration
+                                            block:^{
+            [self performRecognitionNetworkTask:singleCheckConfig
+                                recognitionText:recognitionText
+                                       inWindow:hostWindow
+                                     generation:runGeneration
+                                     completion:nil];
+        }];
         if (completion) {
-            completion([self estimatedTaskDurationForTask:singleCheckConfig depth:1] + [self actionIntervalForTask:task]);
+            completion(actionStartDelay + [self estimatedTaskDurationForTask:singleCheckConfig depth:1] + [self actionIntervalForTask:task]);
         }
         return;
     }
-    NSTimeInterval duration = [self performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:config]
-                                            inWindow:hostWindow
-                                       runGeneration:runGeneration];
+    NSTimeInterval duration = [self estimatedTaskDurationForTask:config depth:1];
+    [self scheduleRecognitionActionAfterDelay:actionStartDelay
+                                     inWindow:hostWindow
+                                   generation:runGeneration
+                                        block:^{
+        [self performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:config]
+                      inWindow:hostWindow
+                 runGeneration:runGeneration];
+    }];
     if (completion) {
-        completion(duration + [self actionIntervalForTask:task]);
+        completion(actionStartDelay + duration + [self actionIntervalForTask:task]);
     }
 }
 
@@ -12008,7 +12142,8 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 return;
             }
             __weak typeof(strongSelf) nestedWeakSelf = strongSelf;
-            [strongSelf->_taskEngine scheduleAfter:actionDelay guard:^BOOL{
+            NSTimeInterval continuationDelay = MAX(0.0, actionDelay) + [strongSelf completionDelayForTask:task];
+            [strongSelf->_taskEngine scheduleAfter:continuationDelay guard:^BOOL{
                 __strong typeof(nestedWeakSelf) nestedSelf = nestedWeakSelf;
                 if (!nestedSelf) {
                     return NO;
@@ -12118,16 +12253,19 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     }
 
     NSTimeInterval interval = [self actionIntervalForTask:task];
+    NSTimeInterval failureActionDelay = [self recognitionFailureActionDelayForTask:task];
     if (failureMode == AnClickActionModeJump) {
         if (completion) {
-            completion(interval);
+            completion(failureActionDelay + interval);
         }
         return;
     }
     NSDictionary *failureConfig = [self branchActionConfigForTask:task success:NO expectedMode:failureMode];
     if (failureConfig) {
+        NSMutableDictionary *delayedFailureConfig = [failureConfig mutableCopy];
+        delayedFailureConfig[@"recognitionSuccessActionDelay"] = @(failureActionDelay);
         NSTimeInterval fastPointDuration = 0.0;
-        if ([self performFastRecognitionPointActionForConfig:failureConfig
+        if ([self performFastRecognitionPointActionForConfig:delayedFailureConfig
                                                   actionMode:failureMode
                                                     inWindow:hostWindow
                                                     duration:&fastPointDuration]) {
@@ -12140,21 +12278,32 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         }
         _statusLabel.text = [NSString stringWithFormat:@"识别失败后%@完整动作", [self actionNameForMode:failureMode]];
         [self showToast:_statusLabel.text];
-        NSTimeInterval duration = [self performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:failureConfig]
-                                                inWindow:hostWindow
-                                           runGeneration:runGeneration];
+        NSTimeInterval duration = [self estimatedTaskDurationForTask:failureConfig depth:1];
+        [self scheduleRecognitionActionAfterDelay:failureActionDelay
+                                         inWindow:hostWindow
+                                       generation:runGeneration
+                                            block:^{
+            [self performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:failureConfig]
+                          inWindow:hostWindow
+                     runGeneration:runGeneration];
+        }];
         if (completion) {
-            completion(duration + interval);
+            completion(failureActionDelay + duration + interval);
         }
         return;
     }
     if (failureMode == AnClickActionModeNetwork) {
         _statusLabel.text = @"识别失败后网络请求";
         [self showToast:_statusLabel.text];
-        [self performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:^{
-            if (completion) {
-                completion(interval);
-            }
+        [self scheduleRecognitionActionAfterDelay:failureActionDelay
+                                         inWindow:hostWindow
+                                       generation:runGeneration
+                                            block:^{
+            [self performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:^{
+                if (completion) {
+                    completion(interval);
+                }
+            }];
         }];
         return;
     }
@@ -12179,7 +12328,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     }
 
     actionPoint = [self point:actionPoint byApplyingJitterForTask:task];
-    [self performPointActionMode:failureMode atPoint:actionPoint inWindow:hostWindow showTrace:NO];
+    [self scheduleRecognitionActionAfterDelay:failureActionDelay
+                                     inWindow:hostWindow
+                                   generation:runGeneration
+                                        block:^{
+        [self performPointActionMode:failureMode atPoint:actionPoint inWindow:hostWindow showTrace:NO];
+    }];
     _statusLabel.text = [NSString stringWithFormat:@"识别失败后%@ %.0f,%.0f",
                          [self actionNameForMode:failureMode],
                          actionPoint.x,
@@ -12189,7 +12343,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         NSTimeInterval actionDuration = [self modeIsFastClickTask:failureMode]
             ? [self fastClickDurationForMode:failureMode]
             : [self durationForTaskMode:failureMode];
-        completion(actionDuration + interval);
+        completion(failureActionDelay + actionDuration + interval);
     }
 }
 
@@ -12206,10 +12360,21 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if (actionMode == AnClickActionModeTwoFingerTap) {
         NSArray<NSValue *> *points = [self points:[self resolvedMultiTapPointsForTask:config] byApplyingJitterForTask:config];
         if (points.count >= 2) {
-            [AnClickFakeTouch fastMultiTapAtPoints:points];
-            [self showMultiTapMarkersForScreenPoints:points inWindow:hostWindow duration:0.45];
+            NSTimeInterval successDelay = [self recognitionSuccessActionDelayForTask:config];
+            __weak typeof(self) weakSelf = self;
+            [_taskEngine scheduleAfter:successDelay guard:^BOOL{
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                return strongSelf != nil && [strongSelf panelCanUseCurrentScene];
+            } block:^{
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) {
+                    return;
+                }
+                [AnClickFakeTouch fastMultiTapAtPoints:points];
+                [strongSelf showMultiTapMarkersForScreenPoints:points inWindow:hostWindow duration:0.45];
+            }];
             if (duration) {
-                *duration = AnClickFastRecognitionTapDuration;
+                *duration = successDelay + AnClickFastRecognitionTapDuration;
             }
             return YES;
         }
@@ -12227,24 +12392,38 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         : [self durationForTaskMode:actionMode];
     if (actionMode == AnClickActionModeDoubleTap) {
         actionDuration = AnClickFastDoubleTapDuration;
-        [self performDoubleTapAtPoint:point interval:[self doubleTapIntervalForTask:config]];
-        [self showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:actionDuration];
     } else if (actionMode == AnClickActionModeLongPress) {
-        NSTimeInterval longPressDuration = [self longPressDurationForTask:config];
-        actionDuration = [self longPressOperationDurationForDuration:longPressDuration];
-        [self performPointActionMode:actionMode
-                             atPoint:point
-                            inWindow:hostWindow
-                           showTrace:NO
-                   longPressDuration:longPressDuration];
-        [self showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:actionDuration];
-    } else {
-        [self performPointActionMode:actionMode atPoint:point inWindow:hostWindow showTrace:NO];
-        [self showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:actionDuration];
+        actionDuration = [self longPressOperationDurationForDuration:[self longPressDurationForTask:config]];
     }
+    NSTimeInterval successDelay = [self recognitionSuccessActionDelayForTask:config];
+    __weak typeof(self) weakSelf = self;
+    [_taskEngine scheduleAfter:successDelay guard:^BOOL{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        return strongSelf != nil && [strongSelf panelCanUseCurrentScene];
+    } block:^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+        if (actionMode == AnClickActionModeDoubleTap) {
+            [strongSelf performDoubleTapAtPoint:point interval:[strongSelf doubleTapIntervalForTask:config]];
+            [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:actionDuration];
+        } else if (actionMode == AnClickActionModeLongPress) {
+            NSTimeInterval longPressDuration = [strongSelf longPressDurationForTask:config];
+            [strongSelf performPointActionMode:actionMode
+                                       atPoint:point
+                                      inWindow:hostWindow
+                                     showTrace:NO
+                             longPressDuration:longPressDuration];
+            [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:actionDuration];
+        } else {
+            [strongSelf performPointActionMode:actionMode atPoint:point inWindow:hostWindow showTrace:NO];
+            [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:actionDuration];
+        }
+    }];
 
     if (duration) {
-        *duration = actionDuration;
+        *duration = successDelay + actionDuration;
     }
     return YES;
 }
@@ -12360,8 +12539,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 }
                 NSDictionary *successConfig = [strongSelf branchActionConfigForTask:task success:YES expectedMode:imageActionMode];
                 if (successConfig) {
+                    NSMutableDictionary *delayedSuccessConfig = [successConfig mutableCopy];
+                    delayedSuccessConfig[@"recognitionSuccessActionDelay"] = @([strongSelf recognitionSuccessActionDelayForTask:task]);
                     NSTimeInterval fastPointDuration = 0.0;
-                    if ([strongSelf performFastRecognitionPointActionForConfig:successConfig
+                    if ([strongSelf performFastRecognitionPointActionForConfig:delayedSuccessConfig
                                                                      actionMode:imageActionMode
                                                                        inWindow:currentHostWindow
                                                                        duration:&fastPointDuration]) {
@@ -12398,11 +12579,18 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                      scoreNumber.doubleValue,
                                                      [strongSelf actionNameForMode:imageActionMode]];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
-                    NSTimeInterval configDuration = [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
-                                                                        inWindow:currentHostWindow
-                                                                   runGeneration:runGeneration];
+                    NSTimeInterval successActionDelay = [strongSelf recognitionSuccessActionDelayForTask:task];
+                    NSTimeInterval configDuration = [strongSelf estimatedTaskDurationForTask:successConfig depth:1];
+                    [strongSelf scheduleRecognitionActionAfterDelay:successActionDelay
+                                                           inWindow:currentHostWindow
+                                                         generation:runGeneration
+                                                              block:^{
+                        [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
+                                            inWindow:currentHostWindow
+                                       runGeneration:runGeneration];
+                    }];
                     if (completion) {
-                        completion(YES, YES, configDuration);
+                        completion(YES, YES, successActionDelay + configDuration);
                     }
                     return;
                 }
@@ -12422,10 +12610,16 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 }
                 if (imageActionMode == AnClickActionModeNetwork) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:^{
-                        if (completion) {
-                            completion(YES, YES, 0.0);
-                        }
+                    NSTimeInterval successActionDelay = [strongSelf recognitionSuccessActionDelayForTask:task];
+                    [strongSelf scheduleRecognitionActionAfterDelay:successActionDelay
+                                                           inWindow:currentHostWindow
+                                                         generation:runGeneration
+                                                              block:^{
+                        [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:^{
+                            if (completion) {
+                                completion(YES, YES, 0.0);
+                            }
+                        }];
                     }];
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f 网络请求",
                                                      scoreNumber.doubleValue];
@@ -12452,18 +12646,24 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 NSTimeInterval actionDuration = imageActionMode == AnClickActionModeLongPress
                     ? [strongSelf longPressOperationDurationForDuration:actionLongPressDuration]
                     : [strongSelf durationForTaskMode:imageActionMode];
-                [strongSelf performPointActionMode:imageActionMode
-                                           atPoint:actionPoint
-                                          inWindow:currentHostWindow
-                                         showTrace:NO
-                                 longPressDuration:actionLongPressDuration];
-                if (deferRecognitionBoxUntilAfterPointAction) {
-                    [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:0.75];
-                }
-                [strongSelf showOperationTraceForMode:imageActionMode
-                                              atPoint:actionPoint
-                                             inWindow:currentHostWindow
-                                             duration:actionDuration];
+                NSTimeInterval successActionDelay = [strongSelf recognitionSuccessActionDelayForTask:task];
+                [strongSelf scheduleRecognitionActionAfterDelay:successActionDelay
+                                                       inWindow:currentHostWindow
+                                                     generation:runGeneration
+                                                          block:^{
+                    [strongSelf performPointActionMode:imageActionMode
+                                               atPoint:actionPoint
+                                              inWindow:currentHostWindow
+                                             showTrace:NO
+                                     longPressDuration:actionLongPressDuration];
+                    if (deferRecognitionBoxUntilAfterPointAction) {
+                        [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:0.75];
+                    }
+                    [strongSelf showOperationTraceForMode:imageActionMode
+                                                  atPoint:actionPoint
+                                                 inWindow:currentHostWindow
+                                                 duration:actionDuration];
+                }];
                 strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f %@ %.0f,%.0f",
                                                  scoreNumber.doubleValue,
                                                  [strongSelf actionNameForMode:imageActionMode],
@@ -12471,9 +12671,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                  actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                   delay:actionDuration + 0.008];
+                                                                   delay:successActionDelay + actionDuration + 0.008];
                 if (completion) {
-                    completion(YES, YES, actionDuration + 0.008);
+                    completion(YES, YES, successActionDelay + actionDuration + 0.008);
                 }
         }];
     }];
@@ -12642,8 +12842,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 }
                 NSDictionary *successConfig = [strongSelf branchActionConfigForTask:task success:YES expectedMode:actionMode];
                 if (successConfig) {
+                    NSMutableDictionary *delayedSuccessConfig = [successConfig mutableCopy];
+                    delayedSuccessConfig[@"recognitionSuccessActionDelay"] = @([strongSelf recognitionSuccessActionDelayForTask:task]);
                     NSTimeInterval fastPointDuration = 0.0;
-                    if ([strongSelf performFastRecognitionPointActionForConfig:successConfig
+                    if ([strongSelf performFastRecognitionPointActionForConfig:delayedSuccessConfig
                                                                      actionMode:actionMode
                                                                        inWindow:currentHostWindow
                                                                        duration:&fastPointDuration]) {
@@ -12685,11 +12887,18 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                      text,
                                                      [strongSelf actionNameForMode:actionMode]];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
-                    NSTimeInterval configDuration = [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
-                                                                        inWindow:currentHostWindow
-                                                                   runGeneration:runGeneration];
+                    NSTimeInterval successActionDelay = [strongSelf recognitionSuccessActionDelayForTask:task];
+                    NSTimeInterval configDuration = [strongSelf estimatedTaskDurationForTask:successConfig depth:1];
+                    [strongSelf scheduleRecognitionActionAfterDelay:successActionDelay
+                                                           inWindow:currentHostWindow
+                                                         generation:runGeneration
+                                                              block:^{
+                        [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
+                                            inWindow:currentHostWindow
+                                       runGeneration:runGeneration];
+                    }];
                     if (completion) {
-                        completion(YES, YES, configDuration);
+                        completion(YES, YES, successActionDelay + configDuration);
                     }
                     return;
                 }
@@ -12710,10 +12919,16 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 }
                 if (actionMode == AnClickActionModeNetwork) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    [strongSelf performRecognitionNetworkActionForTask:task recognitionText:text runGeneration:runGeneration completion:^{
-                        if (completion) {
-                            completion(YES, YES, 0.0);
-                        }
+                    NSTimeInterval successActionDelay = [strongSelf recognitionSuccessActionDelayForTask:task];
+                    [strongSelf scheduleRecognitionActionAfterDelay:successActionDelay
+                                                           inWindow:currentHostWindow
+                                                         generation:runGeneration
+                                                              block:^{
+                        [strongSelf performRecognitionNetworkActionForTask:task recognitionText:text runGeneration:runGeneration completion:^{
+                            if (completion) {
+                                completion(YES, YES, 0.0);
+                            }
+                        }];
                     }];
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ 网络请求", matchSummary, text];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
@@ -12739,21 +12954,27 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 NSTimeInterval actionDuration = actionMode == AnClickActionModeLongPress
                     ? [strongSelf longPressOperationDurationForDuration:actionLongPressDuration]
                     : [strongSelf durationForTaskMode:actionMode];
-                [strongSelf performPointActionMode:actionMode
-                                           atPoint:actionPoint
-                                          inWindow:currentHostWindow
-                                         showTrace:NO
-                                 longPressDuration:actionLongPressDuration];
-                if (deferRecognitionBoxUntilAfterPointAction) {
-                    [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue
-                                                          score:scoreNumber ? scoreNumber.doubleValue : 1.0
+                NSTimeInterval successActionDelay = [strongSelf recognitionSuccessActionDelayForTask:task];
+                [strongSelf scheduleRecognitionActionAfterDelay:successActionDelay
                                                        inWindow:currentHostWindow
-                                                       duration:0.75];
-                }
-                [strongSelf showOperationTraceForMode:actionMode
-                                              atPoint:actionPoint
-                                             inWindow:currentHostWindow
-                                             duration:actionDuration];
+                                                     generation:runGeneration
+                                                          block:^{
+                    [strongSelf performPointActionMode:actionMode
+                                               atPoint:actionPoint
+                                              inWindow:currentHostWindow
+                                             showTrace:NO
+                                     longPressDuration:actionLongPressDuration];
+                    if (deferRecognitionBoxUntilAfterPointAction) {
+                        [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue
+                                                              score:scoreNumber ? scoreNumber.doubleValue : 1.0
+                                                           inWindow:currentHostWindow
+                                                           duration:0.75];
+                    }
+                    [strongSelf showOperationTraceForMode:actionMode
+                                                  atPoint:actionPoint
+                                                 inWindow:currentHostWindow
+                                                 duration:actionDuration];
+                }];
                 strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ %.0f,%.0f",
                                                  matchSummary,
                                                  text,
@@ -12761,9 +12982,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                  actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                   delay:actionDuration + 0.008];
+                                                                   delay:successActionDelay + actionDuration + 0.008];
                 if (completion) {
-                    completion(YES, YES, actionDuration + 0.008);
+                    completion(YES, YES, successActionDelay + actionDuration + 0.008);
                 }
         }];
     }];
@@ -12911,8 +13132,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 }
                 NSDictionary *successConfig = [strongSelf branchActionConfigForTask:task success:YES expectedMode:actionMode];
                 if (successConfig) {
+                    NSMutableDictionary *delayedSuccessConfig = [successConfig mutableCopy];
+                    delayedSuccessConfig[@"recognitionSuccessActionDelay"] = @([strongSelf recognitionSuccessActionDelayForTask:task]);
                     NSTimeInterval fastPointDuration = 0.0;
-                    if ([strongSelf performFastRecognitionPointActionForConfig:successConfig
+                    if ([strongSelf performFastRecognitionPointActionForConfig:delayedSuccessConfig
                                                                      actionMode:actionMode
                                                                        inWindow:currentHostWindow
                                                                        duration:&fastPointDuration]) {
@@ -12952,11 +13175,18 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                      patternSummary,
                                                      [strongSelf actionNameForMode:actionMode]];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
-                    NSTimeInterval configDuration = [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
-                                                                        inWindow:currentHostWindow
-                                                                   runGeneration:runGeneration];
+                    NSTimeInterval successActionDelay = [strongSelf recognitionSuccessActionDelayForTask:task];
+                    NSTimeInterval configDuration = [strongSelf estimatedTaskDurationForTask:successConfig depth:1];
+                    [strongSelf scheduleRecognitionActionAfterDelay:successActionDelay
+                                                           inWindow:currentHostWindow
+                                                         generation:runGeneration
+                                                              block:^{
+                        [strongSelf performTaskModel:[[AnClickTaskModel alloc] initWithDictionary:successConfig]
+                                            inWindow:currentHostWindow
+                                       runGeneration:runGeneration];
+                    }];
                     if (completion) {
-                        completion(YES, YES, configDuration);
+                        completion(YES, YES, successActionDelay + configDuration);
                     }
                     return;
                 }
@@ -12976,10 +13206,16 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 }
                 if (actionMode == AnClickActionModeNetwork) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:^{
-                        if (completion) {
-                            completion(YES, YES, 0.0);
-                        }
+                    NSTimeInterval successActionDelay = [strongSelf recognitionSuccessActionDelayForTask:task];
+                    [strongSelf scheduleRecognitionActionAfterDelay:successActionDelay
+                                                           inWindow:currentHostWindow
+                                                         generation:runGeneration
+                                                              block:^{
+                        [strongSelf performRecognitionNetworkActionForTask:task recognitionText:nil runGeneration:runGeneration completion:^{
+                            if (completion) {
+                                completion(YES, YES, 0.0);
+                            }
+                        }];
                     }];
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ 网络请求", patternSummary];
                     [strongSelf showToast:strongSelf->_statusLabel.text];
@@ -13005,30 +13241,36 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 NSTimeInterval actionDuration = actionMode == AnClickActionModeLongPress
                     ? [strongSelf longPressOperationDurationForDuration:actionLongPressDuration]
                     : [strongSelf durationForTaskMode:actionMode];
-                [strongSelf performPointActionMode:actionMode
-                                           atPoint:actionPoint
-                                          inWindow:currentHostWindow
-                                         showTrace:NO
-                                 longPressDuration:actionLongPressDuration];
-                if (deferRecognitionBoxUntilAfterPointAction) {
-                    [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue
-                                                          score:scoreNumber ? scoreNumber.doubleValue : 1.0
+                NSTimeInterval successActionDelay = [strongSelf recognitionSuccessActionDelayForTask:task];
+                [strongSelf scheduleRecognitionActionAfterDelay:successActionDelay
                                                        inWindow:currentHostWindow
-                                                       duration:0.75];
-                }
-                [strongSelf showOperationTraceForMode:actionMode
-                                              atPoint:actionPoint
-                                             inWindow:currentHostWindow
-                                             duration:actionDuration];
+                                                     generation:runGeneration
+                                                          block:^{
+                    [strongSelf performPointActionMode:actionMode
+                                               atPoint:actionPoint
+                                              inWindow:currentHostWindow
+                                             showTrace:NO
+                                     longPressDuration:actionLongPressDuration];
+                    if (deferRecognitionBoxUntilAfterPointAction) {
+                        [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue
+                                                              score:scoreNumber ? scoreNumber.doubleValue : 1.0
+                                                           inWindow:currentHostWindow
+                                                           duration:0.75];
+                    }
+                    [strongSelf showOperationTraceForMode:actionMode
+                                                  atPoint:actionPoint
+                                                 inWindow:currentHostWindow
+                                                 duration:actionDuration];
+                }];
                 strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ %.0f,%.0f",
                                                  patternSummary,
                                                  actionPoint.x,
                                                  actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                   delay:actionDuration + 0.008];
+                                                                   delay:successActionDelay + actionDuration + 0.008];
                 if (completion) {
-                    completion(YES, YES, actionDuration + 0.008);
+                    completion(YES, YES, successActionDelay + actionDuration + 0.008);
                 }
         }];
     }];

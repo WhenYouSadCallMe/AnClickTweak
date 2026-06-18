@@ -8,6 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property (nonatomic, assign) AnClickActionMode actionMode;
 @property (nonatomic, assign) NSTimeInterval delay;
+@property (nonatomic, assign) NSTimeInterval completionDelay;
 @property (nonatomic, assign) NSInteger repeatCount;
 @property (nonatomic, assign) NSTimeInterval interval;
 @property (nonatomic, assign) BOOL randomDelay;
@@ -62,6 +63,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property (nonatomic, assign) BOOL recognitionRetryUntilFound;
 @property (nonatomic, assign) NSTimeInterval recognitionRetryInterval;
+@property (nonatomic, assign) NSTimeInterval recognitionSuccessActionDelay;
+@property (nonatomic, assign) NSTimeInterval recognitionFailureActionDelay;
 @property (nonatomic, assign) NSInteger successBranchIndex;
 @property (nonatomic, assign) NSInteger failureBranchIndex;
 @property (nonatomic, copy) NSDictionary *successActionConfig;

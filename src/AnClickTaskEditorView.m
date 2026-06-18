@@ -56,10 +56,14 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     ACEditorRowKindSwipeDuration,
     ACEditorRowKindSwipeStep,
     ACEditorRowKindDelay,
+    ACEditorRowKindCompletionDelay,
     ACEditorRowKindInterval,
     ACEditorRowKindLongPress,
     ACEditorRowKindRecognitionRetryMode,
+    ACEditorRowKindRecognitionRetryLimit,
     ACEditorRowKindRecognitionRetryInterval,
+    ACEditorRowKindRecognitionSuccessActionDelay,
+    ACEditorRowKindRecognitionFailureActionDelay,
     ACEditorRowKindSuccessActionMode,
     ACEditorRowKindFailureActionMode,
     ACEditorRowKindSuccessActionConfig,
@@ -687,7 +691,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @{@"title": @"🎨 识色", @"mode": @(AnClickActionModeColor)},
             @{@"title": @"🌐 网络", @"mode": @(AnClickActionModeNetwork)},
             @{@"title": @"🔀 跳转", @"mode": @(AnClickActionModeJump)},
-            @{@"title": @"⏱ 延时", @"mode": @(AnClickActionModeDelay)},
             @{@"title": @"⇄ 应用切换", @"mode": @(AnClickActionModeOpenApp)},
         ];
         NSMutableArray *buttons = [NSMutableArray array];
@@ -1062,7 +1065,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
 
 - (NSArray<NSNumber *> *)timingRows {
     NSArray<NSNumber *> *candidates = @[
-        @(ACEditorRowKindDelay),
         @(ACEditorRowKindRepeat),
         @(ACEditorRowKindInterval),
         @(ACEditorRowKindDoubleTapInterval),
@@ -1075,7 +1077,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @(ACEditorRowKindNetworkRetryLimit),
         @(ACEditorRowKindNetworkTimeout),
         @(ACEditorRowKindRecognitionRetryMode),
+        @(ACEditorRowKindRecognitionRetryLimit),
         @(ACEditorRowKindRecognitionRetryInterval),
+        @(ACEditorRowKindCompletionDelay),
     ];
     NSMutableArray<NSNumber *> *rows = [NSMutableArray array];
     for (NSNumber *row in candidates) {
@@ -1220,7 +1224,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         mode == AnClickActionModeTwoFingerTap ||
         mode == AnClickActionModeSwipe ||
         mode == AnClickActionModeNetwork ||
-        mode == AnClickActionModeDelay ||
         mode == AnClickActionModeOpenApp ||
         mode == AnClickActionModeJump;
 }
@@ -1247,7 +1250,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @(AnClickActionModeLongPress),
             @(AnClickActionModeSwipe),
             @(AnClickActionModeNetwork),
-            @(AnClickActionModeDelay),
             @(AnClickActionModeOpenApp),
             @(AnClickActionModeTwoFingerTap),
             @(AnClickActionModeJump),
@@ -1261,7 +1263,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @(AnClickActionModeSwipe),
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeNetwork),
-        @(AnClickActionModeDelay),
         @(AnClickActionModeOpenApp),
     ]];
     if (![self isEditingBranchActionConfig]) {
@@ -1509,7 +1510,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @(AnClickActionModeTwoFingerTap),
         @(AnClickActionModeSwipe),
         @(AnClickActionModeNetwork),
-        @(AnClickActionModeDelay),
         @(AnClickActionModeOpenApp),
         @(AnClickActionModeJump),
     ];
@@ -1629,9 +1629,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
     config[@"imageActionMode"] = @(mode);
     if (previous != mode) {
         [config removeObjectForKey:@"successActionConfig"];
-        if (mode == AnClickActionModeDelay) {
-            config[@"successActionConfig"] = [self draftBranchConfigForMode:mode];
-        } else if (mode == AnClickActionModeNetwork) {
+        if (mode == AnClickActionModeNetwork) {
             NSMutableDictionary *childConfig = [[self draftBranchConfigForMode:mode] mutableCopy];
             childConfig[@"networkRequestOnly"] = @YES;
             config[@"successActionConfig"] = childConfig;
@@ -1662,9 +1660,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         @"failureActionMode": @(AnClickActionModeNone),
         @"useMatchPoint": @YES,
     } mutableCopy];
-    if (mode == AnClickActionModeDelay) {
-        config[@"delay"] = @0.50;
-    } else if (mode == AnClickActionModeNetwork) {
+    if (mode == AnClickActionModeNetwork) {
         config[@"networkMethod"] = @"GET";
         config[@"networkRequestOnly"] = @YES;
         config[@"networkTimeout"] = @8.0;
@@ -1820,13 +1816,21 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindMacroSpeed:
             return mode == AnClickActionModeMacro;
         case ACEditorRowKindDelay:
-            return mode == AnClickActionModeDelay;
+            return NO;
+        case ACEditorRowKindCompletionDelay:
+            return mode != AnClickActionModeNone;
         case ACEditorRowKindInterval:
             return (mode == AnClickActionModeTap || mode == AnClickActionModeTwoFingerTap) &&
                 self.model.repeatCount > 1;
         case ACEditorRowKindRecognitionRetryMode:
         case ACEditorRowKindRecognitionRetryInterval:
             return recognitionMode;
+        case ACEditorRowKindRecognitionSuccessActionDelay:
+            return judgementMode && self.model.successActionMode != AnClickActionModeNone;
+        case ACEditorRowKindRecognitionFailureActionDelay:
+            return judgementMode && self.model.failureActionMode != AnClickActionModeNone;
+        case ACEditorRowKindRecognitionRetryLimit:
+            return recognitionMode && !self.model.recognitionRetryUntilFound;
         case ACEditorRowKindSuccessActionMode:
         case ACEditorRowKindFailureActionMode:
             return judgementMode;
@@ -1938,9 +1942,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
                 failureInlineMode == AnClickActionModeNetwork &&
                 ![self branchInlineBoolValueForSuccess:NO key:@"networkRequestOnly" defaultValue:YES];
         case ACEditorRowKindSuccessBranchDelay:
-            return judgementMode && successInlineMode == AnClickActionModeDelay;
+            return NO;
         case ACEditorRowKindFailureBranchDelay:
-            return judgementMode && failureInlineMode == AnClickActionModeDelay;
+            return NO;
         case ACEditorRowKindSuccessBranchAppBundleID:
             return judgementMode && successInlineMode == AnClickActionModeOpenApp;
         case ACEditorRowKindFailureBranchAppBundleID:
@@ -1975,6 +1979,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         self.model.actionMode == AnClickActionModeOCR ||
         self.model.actionMode == AnClickActionModeColor) {
         NSMutableArray<NSNumber *> *rows = [NSMutableArray arrayWithObject:@(ACEditorRowKindSuccessActionMode)];
+        if ([self shouldShowRowForKind:ACEditorRowKindRecognitionSuccessActionDelay]) {
+            [rows addObject:@(ACEditorRowKindRecognitionSuccessActionDelay)];
+        }
         if ([self shouldShowRowForKind:ACEditorRowKindSuccessActionConfig]) {
             [rows addObject:@(ACEditorRowKindSuccessActionConfig)];
         }
@@ -2014,7 +2021,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @(ACEditorRowKindSuccessBranchNetworkTimeout),
             @(ACEditorRowKindSuccessBranchNetworkContains),
             @(ACEditorRowKindSuccessBranchNetworkFalse),
-            @(ACEditorRowKindSuccessBranchDelay),
             @(ACEditorRowKindSuccessBranchAppBundleID),
         ];
         for (NSNumber *rowNumber in successInlineRows) {
@@ -2038,6 +2044,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             [rows addObject:@(ACEditorRowKindSuccessBranch)];
         }
         [rows addObject:@(ACEditorRowKindFailureActionMode)];
+        if ([self shouldShowRowForKind:ACEditorRowKindRecognitionFailureActionDelay]) {
+            [rows addObject:@(ACEditorRowKindRecognitionFailureActionDelay)];
+        }
         if ([self shouldShowRowForKind:ACEditorRowKindFailureActionConfig]) {
             [rows addObject:@(ACEditorRowKindFailureActionConfig)];
         }
@@ -2077,7 +2086,6 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             @(ACEditorRowKindFailureBranchNetworkTimeout),
             @(ACEditorRowKindFailureBranchNetworkContains),
             @(ACEditorRowKindFailureBranchNetworkFalse),
-            @(ACEditorRowKindFailureBranchDelay),
             @(ACEditorRowKindFailureBranchAppBundleID),
         ];
         for (NSNumber *rowNumber in failureInlineRows) {
@@ -2116,10 +2124,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         mode == AnClickActionModeOCR ||
         mode == AnClickActionModeColor;
 
-    if (mode != AnClickActionModeDelay) {
-        self.model.delay = 0.0;
-    }
-    if (mode != AnClickActionModeTap && mode != AnClickActionModeTwoFingerTap) {
+    self.model.delay = 0.0;
+    if (mode != AnClickActionModeTap &&
+        mode != AnClickActionModeTwoFingerTap &&
+        mode != AnClickActionModeImage &&
+        mode != AnClickActionModeOCR &&
+        mode != AnClickActionModeColor) {
         self.model.interval = 0.0;
         self.model.repeatCount = 1;
     }
@@ -2838,6 +2848,13 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             cell.textField.text = [NSString stringWithFormat:@"%ld", (long)MAX(1, self.model.networkRetryLimit)];
             cell.textField.keyboardType = UIKeyboardTypeNumberPad;
             break;
+        case ACEditorRowKindRecognitionRetryLimit:
+            cell.iconLabel.text = @"#";
+            cell.titleLabel.text = @"识别次数";
+            cell.textField.text = [NSString stringWithFormat:@"%ld", (long)MAX(1, self.model.repeatCount)];
+            cell.textField.keyboardType = UIKeyboardTypeNumberPad;
+            cell.unitLabel.text = @"次";
+            break;
         case ACEditorRowKindNetworkTimeout:
             cell.iconLabel.text = @"⏲";
             cell.titleLabel.text = @"超时时间";
@@ -2979,6 +2996,15 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             cell.textField.keyboardType = UIKeyboardTypeNumberPad;
             cell.unitLabel.text = @"ms";
             break;
+        case ACEditorRowKindCompletionDelay:
+            cell.iconLabel.text = @"⏭";
+            cell.titleLabel.text = @"任务完成后延时";
+            cell.textField.text = self.model.completionDelay > 0.001
+                ? [NSString stringWithFormat:@"%.2f", self.model.completionDelay]
+                : @"0";
+            cell.textField.keyboardType = UIKeyboardTypeDecimalPad;
+            cell.unitLabel.text = @"s";
+            break;
         case ACEditorRowKindInterval:
             cell.iconLabel.text = @"⏱";
             cell.titleLabel.text = @"点击间隔";
@@ -2992,6 +3018,23 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             cell.textField.text = [NSString stringWithFormat:@"%.0f", self.model.recognitionRetryInterval * 1000.0];
             cell.textField.keyboardType = UIKeyboardTypeNumberPad;
             cell.unitLabel.text = @"ms";
+            break;
+        case ACEditorRowKindRecognitionSuccessActionDelay:
+            cell.iconLabel.text = @"⚡";
+            cell.titleLabel.text = @"成功后动作延时";
+            cell.textField.text = [NSString stringWithFormat:@"%.2f", self.model.recognitionSuccessActionDelay];
+            cell.textField.placeholder = @"0=最快";
+            cell.textField.keyboardType = UIKeyboardTypeDecimalPad;
+            cell.unitLabel.text = @"s";
+            break;
+        case ACEditorRowKindRecognitionFailureActionDelay:
+            cell.iconLabel.text = @"⚡";
+            cell.iconLabel.textColor = UIColor.systemRedColor;
+            cell.titleLabel.text = @"失败后动作延时";
+            cell.textField.text = [NSString stringWithFormat:@"%.2f", self.model.recognitionFailureActionDelay];
+            cell.textField.placeholder = @"0=最快";
+            cell.textField.keyboardType = UIKeyboardTypeDecimalPad;
+            cell.unitLabel.text = @"s";
             break;
         case ACEditorRowKindLongPress:
             cell.iconLabel.text = @"👆";
@@ -3144,6 +3187,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindNetworkRetryLimit:
             self.model.networkRetryLimit = MAX(1, text.integerValue);
             break;
+        case ACEditorRowKindRecognitionRetryLimit:
+            self.model.repeatCount = MAX(1, text.integerValue);
+            break;
         case ACEditorRowKindNetworkTimeout:
             self.model.networkTimeout = MIN(60.0, MAX(1.0, text.doubleValue));
             break;
@@ -3207,6 +3253,9 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
         case ACEditorRowKindDelay:
             self.model.delay = MAX(0.0, text.doubleValue) / 1000.0;
             break;
+        case ACEditorRowKindCompletionDelay:
+            self.model.completionDelay = MIN(3600.0, MAX(0.0, text.doubleValue));
+            break;
         case ACEditorRowKindSuccessBranchDelay:
             [self storeBranchInlineValue:@(MAX(0.0, text.doubleValue) / 1000.0) key:@"delay" success:YES];
             break;
@@ -3227,6 +3276,12 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             break;
         case ACEditorRowKindRecognitionRetryInterval:
             self.model.recognitionRetryInterval = MIN(30.0, MAX(0.2, text.doubleValue / 1000.0));
+            break;
+        case ACEditorRowKindRecognitionSuccessActionDelay:
+            self.model.recognitionSuccessActionDelay = MIN(30.0, MAX(0.0, text.doubleValue));
+            break;
+        case ACEditorRowKindRecognitionFailureActionDelay:
+            self.model.recognitionFailureActionDelay = MIN(30.0, MAX(0.0, text.doubleValue));
             break;
         case ACEditorRowKindSuccessBranch:
             [self setBranchText:text success:YES];
@@ -3433,6 +3488,7 @@ typedef NS_ENUM(NSInteger, ACEditorRowKind) {
             break;
         case ACEditorRowKindRecognitionRetryMode:
             self.model.recognitionRetryUntilFound = selected == 1;
+            [self reloadForm];
             break;
         default:
             break;

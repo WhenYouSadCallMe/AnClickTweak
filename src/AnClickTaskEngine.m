@@ -322,7 +322,8 @@
         NSUInteger targetIndex = [self jumpTargetIndexForTask:task];
         [delegate taskEngine:self setStatus:[NSString stringWithFormat:@"跳转任务%lu", (unsigned long)targetIndex + 1]];
         __weak typeof(self) weakSelf = self;
-        [self scheduleAfter:self.minJumpContinuationInterval guard:^BOOL{
+        NSTimeInterval jumpDelay = self.minJumpContinuationInterval + MAX(0.0, taskModel.completionDelay);
+        [self scheduleAfter:jumpDelay guard:^BOOL{
             __strong typeof(weakSelf) strongSelf = weakSelf;
             id<AnClickTaskEngineDelegate> strongDelegate = strongSelf.delegate;
             if (!strongSelf || !strongDelegate) {
@@ -375,8 +376,22 @@
         return;
     }
 
+    [self continueAfterTaskModelCompletionDelay:taskModel
+                                        toIndex:index + 1
+                                           host:currentHost
+                                     generation:generation
+                                additionalDelay:duration];
+}
+
+- (void)continueAfterTaskModelCompletionDelay:(AnClickTaskModel *)model
+                                      toIndex:(NSUInteger)nextIndex
+                                         host:(id)host
+                                   generation:(NSUInteger)generation
+                              additionalDelay:(NSTimeInterval)additionalDelay {
+    NSTimeInterval completionDelay = model ? MAX(0.0, model.completionDelay) : 0.0;
+    NSTimeInterval totalDelay = MAX(0.0, additionalDelay) + completionDelay;
     __weak typeof(self) weakSelf = self;
-    [self scheduleAfter:duration guard:^BOOL{
+    [self scheduleAfter:totalDelay guard:^BOOL{
         __strong typeof(weakSelf) strongSelf = weakSelf;
         id<AnClickTaskEngineDelegate> strongDelegate = strongSelf.delegate;
         if (!strongSelf || !strongDelegate) {
@@ -384,7 +399,7 @@
         }
         return [strongDelegate taskEngine:strongSelf
                 canContinueWithGeneration:generation
-                             fallbackHost:currentHost
+                             fallbackHost:host
                                    status:@"窗口变化停止"];
     } block:^{
         __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -392,8 +407,8 @@
         if (!strongSelf || !strongDelegate) {
             return;
         }
-        id delayedHost = [strongDelegate taskEngine:strongSelf currentHostWithFallback:currentHost];
-        [strongSelf continueTaskRunToIndex:index + 1 host:delayedHost generation:generation];
+        id nextHost = [strongDelegate taskEngine:strongSelf currentHostWithFallback:host];
+        [strongSelf continueTaskRunToIndex:nextIndex host:nextHost generation:generation];
     }];
 }
 
@@ -729,25 +744,15 @@
             if (actionPerformed) {
                 NSTimeInterval nextDelay = MAX(0.0, actionDelay);
                 if (retryUntilFound || attempt >= repeatCount) {
-                    [self scheduleAfter:nextDelay guard:^BOOL{
-                        id<AnClickTaskEngineDelegate> guardDelegate = self.delegate;
-                        return guardDelegate &&
-                            [guardDelegate taskEngine:self
-                            canContinueWithGeneration:generation
-                                         fallbackHost:currentHost
-                                               status:@"窗口变化停止"];
-                    } block:^{
-                        id<AnClickTaskEngineDelegate> finishDelegate = self.delegate;
-                        if (!finishDelegate) {
-                            return;
-                        }
-                        id nextHost = [finishDelegate taskEngine:self currentHostWithFallback:currentHost];
-                        NSUInteger nextIndex = [finishDelegate taskEngine:self
-                                      nextIndexAfterRecognitionTaskModel:model
-                                                            currentIndex:index
-                                                                 success:YES];
-                        [self continueTaskRunToIndex:nextIndex host:nextHost generation:generation];
-                    }];
+                    NSUInteger nextIndex = [callbackDelegate taskEngine:self
+                                  nextIndexAfterRecognitionTaskModel:model
+                                                        currentIndex:index
+                                                             success:YES];
+                    [self continueAfterTaskModelCompletionDelay:model
+                                                        toIndex:nextIndex
+                                                           host:currentHost
+                                                     generation:generation
+                                                additionalDelay:nextDelay];
                     return;
                 }
                 [self scheduleRecognitionTaskModel:model
@@ -874,30 +879,15 @@
                 ![nestedDelegate taskEngine:strongSelf canContinueWithGeneration:generation fallbackHost:currentHost status:@"窗口变化停止"]) {
                 return;
             }
-            __weak typeof(strongSelf) nestedWeakSelf = strongSelf;
-            [strongSelf scheduleAfter:actionDelay guard:^BOOL{
-                __strong typeof(nestedWeakSelf) nestedSelf = nestedWeakSelf;
-                id<AnClickTaskEngineDelegate> guardDelegate = nestedSelf.delegate;
-                if (!nestedSelf || !guardDelegate) {
-                    return NO;
-                }
-                return [guardDelegate taskEngine:nestedSelf
-                       canContinueWithGeneration:generation
-                                    fallbackHost:currentHost
-                                          status:@"窗口变化停止"];
-            } block:^{
-                __strong typeof(nestedWeakSelf) nestedSelf = nestedWeakSelf;
-                id<AnClickTaskEngineDelegate> finishDelegate = nestedSelf.delegate;
-                if (!nestedSelf || !finishDelegate) {
-                    return;
-                }
-                id nextHost = [finishDelegate taskEngine:nestedSelf currentHostWithFallback:currentHost];
-                NSUInteger nextIndex = [finishDelegate taskEngine:nestedSelf
-                              nextIndexAfterRecognitionTaskModel:model
-                                                    currentIndex:index
-                                                         success:success];
-                [nestedSelf continueTaskRunToIndex:nextIndex host:nextHost generation:generation];
-            }];
+            NSUInteger nextIndex = [nestedDelegate taskEngine:strongSelf
+                          nextIndexAfterRecognitionTaskModel:model
+                                                currentIndex:index
+                                                     success:success];
+            [strongSelf continueAfterTaskModelCompletionDelay:model
+                                                      toIndex:nextIndex
+                                                         host:currentHost
+                                                   generation:generation
+                                              additionalDelay:actionDelay];
         }];
     }];
 }
