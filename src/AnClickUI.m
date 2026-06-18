@@ -718,7 +718,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)toolDisplayName {
-    return @"安姐点击器V3.0";
+    return @"安姐点击器V3.0.1";
 }
 
 - (void)markPanelSceneUnavailable {
@@ -6959,7 +6959,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (UIWindow *)currentUsableHostWindowForTaskRunFallback:(UIWindow *)fallbackWindow {
-    (void)fallbackWindow;
     if (![self applicationIsActiveForTaskRun]) {
         return nil;
     }
@@ -6967,6 +6966,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIWindow *currentWindow = [self hostWindow];
     if ([self hostWindowIsUsableForTaskRun:currentWindow]) {
         return currentWindow;
+    }
+    if ([self hostWindowIsUsableForTaskRun:fallbackWindow]) {
+        return fallbackWindow;
     }
     return nil;
 }
@@ -12053,6 +12055,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if ([self performFastRecognitionPointActionForConfig:pointConfig
                                               actionMode:actionMode
                                                 inWindow:hostWindow
+                                              generation:runGeneration
                                                 duration:&fastPointDuration]) {
         _statusLabel.text = [NSString stringWithFormat:@"识别%@后%@",
                              success ? @"成功" : @"失败",
@@ -12268,6 +12271,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         if ([self performFastRecognitionPointActionForConfig:delayedFailureConfig
                                                   actionMode:failureMode
                                                     inWindow:hostWindow
+                                                  generation:runGeneration
                                                     duration:&fastPointDuration]) {
             _statusLabel.text = [NSString stringWithFormat:@"识别失败后%@", [self actionNameForMode:failureMode]];
             [self showToast:_statusLabel.text];
@@ -12350,6 +12354,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 - (BOOL)performFastRecognitionPointActionForConfig:(NSDictionary *)config
                                         actionMode:(AnClickActionMode)actionMode
                                           inWindow:(UIWindow *)hostWindow
+                                        generation:(NSUInteger)runGeneration
                                           duration:(NSTimeInterval *)duration {
     if (![config isKindOfClass:NSDictionary.class] ||
         ![self recognitionBranchActionModeCanExecuteFastPoint:actionMode] ||
@@ -12364,14 +12369,26 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             __weak typeof(self) weakSelf = self;
             [_taskEngine scheduleAfter:successDelay guard:^BOOL{
                 __strong typeof(weakSelf) strongSelf = weakSelf;
-                return strongSelf != nil && [strongSelf panelCanUseCurrentScene];
+                if (!strongSelf) {
+                    return NO;
+                }
+                if (runGeneration == 0) {
+                    return [strongSelf panelCanUseCurrentScene];
+                }
+                return [strongSelf taskRunIsStillValidWithGeneration:runGeneration
+                                                       fallbackWindow:hostWindow
+                                                               status:@"窗口变化停止"];
             } block:^{
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) {
                     return;
                 }
+                UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
+                if (!currentHostWindow) {
+                    return;
+                }
                 [AnClickFakeTouch fastMultiTapAtPoints:points];
-                [strongSelf showMultiTapMarkersForScreenPoints:points inWindow:hostWindow duration:0.45];
+                [strongSelf showMultiTapMarkersForScreenPoints:points inWindow:currentHostWindow duration:0.45];
             }];
             if (duration) {
                 *duration = successDelay + AnClickFastRecognitionTapDuration;
@@ -12399,26 +12416,38 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     __weak typeof(self) weakSelf = self;
     [_taskEngine scheduleAfter:successDelay guard:^BOOL{
         __strong typeof(weakSelf) strongSelf = weakSelf;
-        return strongSelf != nil && [strongSelf panelCanUseCurrentScene];
+        if (!strongSelf) {
+            return NO;
+        }
+        if (runGeneration == 0) {
+            return [strongSelf panelCanUseCurrentScene];
+        }
+        return [strongSelf taskRunIsStillValidWithGeneration:runGeneration
+                                               fallbackWindow:hostWindow
+                                                       status:@"窗口变化停止"];
     } block:^{
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) {
             return;
         }
+        UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
+        if (!currentHostWindow) {
+            return;
+        }
         if (actionMode == AnClickActionModeDoubleTap) {
             [strongSelf performDoubleTapAtPoint:point interval:[strongSelf doubleTapIntervalForTask:config]];
-            [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:actionDuration];
+            [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:currentHostWindow duration:actionDuration];
         } else if (actionMode == AnClickActionModeLongPress) {
             NSTimeInterval longPressDuration = [strongSelf longPressDurationForTask:config];
             [strongSelf performPointActionMode:actionMode
                                        atPoint:point
-                                      inWindow:hostWindow
+                                      inWindow:currentHostWindow
                                      showTrace:NO
                              longPressDuration:longPressDuration];
-            [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:actionDuration];
+            [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:currentHostWindow duration:actionDuration];
         } else {
-            [strongSelf performPointActionMode:actionMode atPoint:point inWindow:hostWindow showTrace:NO];
-            [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:hostWindow duration:actionDuration];
+            [strongSelf performPointActionMode:actionMode atPoint:point inWindow:currentHostWindow showTrace:NO];
+            [strongSelf showOperationTraceForMode:actionMode atPoint:point inWindow:currentHostWindow duration:actionDuration];
         }
     }];
 
@@ -12545,6 +12574,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     if ([strongSelf performFastRecognitionPointActionForConfig:delayedSuccessConfig
                                                                      actionMode:imageActionMode
                                                                        inWindow:currentHostWindow
+                                                                     generation:runGeneration
                                                                        duration:&fastPointDuration]) {
                         if (deferRecognitionBoxUntilAfterPointAction) {
                             [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:0.75];
@@ -12848,6 +12878,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     if ([strongSelf performFastRecognitionPointActionForConfig:delayedSuccessConfig
                                                                      actionMode:actionMode
                                                                        inWindow:currentHostWindow
+                                                                     generation:runGeneration
                                                                        duration:&fastPointDuration]) {
                         if (deferRecognitionBoxUntilAfterPointAction) {
                             [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue
@@ -13138,6 +13169,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     if ([strongSelf performFastRecognitionPointActionForConfig:delayedSuccessConfig
                                                                      actionMode:actionMode
                                                                        inWindow:currentHostWindow
+                                                                     generation:runGeneration
                                                                        duration:&fastPointDuration]) {
                         if (deferRecognitionBoxUntilAfterPointAction) {
                             [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue
