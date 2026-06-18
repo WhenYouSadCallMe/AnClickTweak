@@ -271,6 +271,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (CGSize)currentScreenCoordinateSize;
 - (NSValue *)currentScreenCoordinateSizeValue;
 - (CGSize)screenCoordinateSizeFromObject:(id)object;
+- (NSArray<NSValue *> *)runtimeSwipePathForTask:(NSDictionary *)task;
+- (NSArray<NSValue *> *)runtimeLimitedSwipePath:(NSArray<NSValue *> *)path forTask:(NSDictionary *)task;
 - (NSArray<NSDictionary *> *)colorSamples:(NSArray<NSDictionary *> *)samples mappedFromScreenSize:(CGSize)sourceSize toScreenSize:(CGSize)targetSize;
 - (CGSize)inferredRotatedSourceSizeForPoint:(CGPoint)point targetSize:(CGSize)targetSize;
 - (void)showFunctionMenu;
@@ -393,6 +395,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _hasManualSwipeAnchor;
     CGPoint _manualSwipeEndPoint;
     BOOL _hasManualSwipeEndPoint;
+    BOOL _swipeUsesManualEndpoints;
     CGPoint _successActionPoint;
     BOOL _hasSuccessActionPoint;
     CGPoint _failureActionPoint;
@@ -2569,6 +2572,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [self path:path mappedFromScreenSize:sourceSize toScreenSize:targetSize];
 }
 
+- (NSArray<NSValue *> *)runtimeSwipePathForTask:(NSDictionary *)task {
+    NSArray<NSValue *> *path = [self resolvedPathForTask:task];
+    path = [self path:path byApplyingSwipeStepForTask:task];
+    return [self runtimeLimitedSwipePath:path forTask:task];
+}
+
 - (NSArray<NSValue *> *)pointValuesArrayFromObject:(id)object maxCount:(NSUInteger)maxCount {
     if (![object isKindOfClass:NSArray.class]) {
         return @[];
@@ -2655,9 +2664,6 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_hasFailureActionPoint) {
         _failureActionPoint = [self point:_failureActionPoint mappedFromScreenSize:sourceSize toScreenSize:targetSize];
     }
-    if (_recordedSwipePoints.count > 0) {
-        _recordedSwipePoints = [[self path:_recordedSwipePoints mappedFromScreenSize:sourceSize toScreenSize:targetSize] mutableCopy];
-    }
     if (_multiTapPoints.count > 0) {
         _multiTapPoints = [[self path:_multiTapPoints mappedFromScreenSize:sourceSize toScreenSize:targetSize] mutableCopy];
     }
@@ -2671,10 +2677,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (_hasManualActionPoint[(NSUInteger)AnClickActionModeImage] ||
         _hasManualActionPoint[(NSUInteger)AnClickActionModeOCR] ||
         _hasManualSwipeAnchor ||
+        _hasManualSwipeEndPoint ||
         _hasSuccessActionPoint ||
         _hasFailureActionPoint ||
         _multiTapPoints.count > 0 ||
-        _recordedSwipePoints.count > 0 ||
         _targetColorSamples.count > 0) {
         _manualCoordinateScreenSize = targetSize;
         _hasManualCoordinateScreenSize = YES;
@@ -3404,7 +3410,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _pointPickWindow.rootViewController.view.frame = _pointPickWindow.bounds;
         _pointPickOverlay.frame = _pointPickWindow.rootViewController.view.bounds;
         [self updatePointPickCursor];
-        if (_actionMode == AnClickActionModeSwipe && _hasManualSwipeAnchor) {
+        if (_actionMode == AnClickActionModeSwipe &&
+            _swipeUsesManualEndpoints &&
+            _hasManualSwipeAnchor) {
             [self showPointPickSwipeStartMarker];
         }
     }
@@ -5580,6 +5588,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _manualSwipeEndPoint = CGPointZero;
     _hasManualSwipeAnchor = NO;
     _hasManualSwipeEndPoint = NO;
+    _swipeUsesManualEndpoints = NO;
     _successActionPoint = CGPointZero;
     _hasSuccessActionPoint = NO;
     _failureActionPoint = CGPointZero;
@@ -5874,7 +5883,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
     if (_actionMode == AnClickActionModeSwipe) {
         model.path = [self manualSwipePath] ?: @[];
-        model.pathScreenSize = [self currentScreenCoordinateSizeValue];
+        if (_hasManualCoordinateScreenSize && [self screenCoordinateSizeIsValid:_manualCoordinateScreenSize]) {
+            model.pathScreenSize = [NSValue valueWithCGSize:_manualCoordinateScreenSize];
+        } else {
+            model.pathScreenSize = [self currentScreenCoordinateSizeValue];
+        }
     }
     if (_actionMode == AnClickActionModeTwoFingerTap) {
         model.multiPoints = _multiTapPoints ?: @[];
@@ -5966,9 +5979,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _recordedSwipePoints = [model.path mutableCopy];
         _manualSwipeAnchor = [model.path.firstObject CGPointValue];
         _manualSwipeEndPoint = [model.path.lastObject CGPointValue];
-        _hasManualSwipeAnchor = YES;
-        _hasManualSwipeEndPoint = YES;
-        [self rememberManualCoordinateScreenSize];
+        _swipeUsesManualEndpoints = model.path.count <= 2;
+        _hasManualSwipeAnchor = _swipeUsesManualEndpoints;
+        _hasManualSwipeEndPoint = _swipeUsesManualEndpoints;
+        CGSize pathScreenSize = [self screenCoordinateSizeFromObject:model.pathScreenSize];
+        if ([self screenCoordinateSizeIsValid:pathScreenSize]) {
+            _manualCoordinateScreenSize = pathScreenSize;
+            _hasManualCoordinateScreenSize = YES;
+        } else {
+            [self rememberManualCoordinateScreenSize];
+        }
     }
     if (model.actionMode == AnClickActionModeTwoFingerTap && model.multiPoints.count > 0) {
         _multiTapPoints = [model.multiPoints mutableCopy];
@@ -6829,15 +6849,18 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return [self multiTapPointSummary];
     }
     if (mode == AnClickActionModeSwipe) {
-        if (_hasManualSwipeAnchor && _hasManualSwipeEndPoint) {
+        if (_swipeUsesManualEndpoints && _hasManualSwipeAnchor && _hasManualSwipeEndPoint) {
             return [NSString stringWithFormat:@"起 %.0f,%.0f  终 %.0f,%.0f",
                     _manualSwipeAnchor.x,
                     _manualSwipeAnchor.y,
                     _manualSwipeEndPoint.x,
                     _manualSwipeEndPoint.y];
         }
-        if (_hasManualSwipeAnchor) {
+        if (_swipeUsesManualEndpoints && _hasManualSwipeAnchor) {
             return [NSString stringWithFormat:@"起点 %.0f,%.0f，继续选择终点", _manualSwipeAnchor.x, _manualSwipeAnchor.y];
+        }
+        if (_recordedSwipePoints.count >= 2) {
+            return [NSString stringWithFormat:@"已录%lu点", (unsigned long)_recordedSwipePoints.count];
         }
         return emptyTitle;
     }
@@ -8428,7 +8451,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     }
 
     if (_actionMode == AnClickActionModeSwipe) {
-        NSArray<NSValue *> *path = (_hasManualSwipeAnchor && _hasManualSwipeEndPoint)
+        NSArray<NSValue *> *path = (_swipeUsesManualEndpoints && _hasManualSwipeAnchor && _hasManualSwipeEndPoint)
             ? [self manualSwipePath]
             : [self recordedSwipePointsAnchoredAtPoint:point];
         if (path.count < 2) {
@@ -8480,7 +8503,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (NSArray<NSValue *> *)manualSwipePath {
-    if (_hasManualSwipeAnchor && _hasManualSwipeEndPoint) {
+    if (_swipeUsesManualEndpoints && _hasManualSwipeAnchor && _hasManualSwipeEndPoint) {
         return @[
             [NSValue valueWithCGPoint:_manualSwipeAnchor],
             [NSValue valueWithCGPoint:_manualSwipeEndPoint],
@@ -10923,6 +10946,32 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     return steppedPath;
 }
 
+- (NSArray<NSValue *> *)runtimeLimitedSwipePath:(NSArray<NSValue *> *)path forTask:(NSDictionary *)task {
+    if (![path isKindOfClass:NSArray.class] || path.count <= 2) {
+        return path ?: @[];
+    }
+
+    NSTimeInterval duration = [self swipeDurationForTask:task];
+    NSUInteger maxPoints = (NSUInteger)ceil(MAX(0.16, duration) * 180.0);
+    maxPoints = MAX((NSUInteger)24, MIN((NSUInteger)180, maxPoints));
+    if (path.count <= maxPoints) {
+        return path;
+    }
+
+    NSMutableArray<NSValue *> *limitedPath = [NSMutableArray arrayWithCapacity:maxPoints];
+    NSUInteger lastSourceIndex = path.count - 1;
+    NSUInteger lastTargetIndex = maxPoints - 1;
+    for (NSUInteger index = 0; index < maxPoints; index++) {
+        NSUInteger sourceIndex = (NSUInteger)llround((double)index * (double)lastSourceIndex / (double)lastTargetIndex);
+        sourceIndex = MIN(sourceIndex, lastSourceIndex);
+        NSValue *value = path[sourceIndex];
+        if ([value isKindOfClass:NSValue.class]) {
+            [limitedPath addObject:value];
+        }
+    }
+    return limitedPath.count >= 2 ? limitedPath : path;
+}
+
 - (NSArray<NSValue *> *)points:(NSArray<NSValue *> *)points byApplyingJitterForTask:(NSDictionary *)task {
     if (points.count == 0) {
         return @[];
@@ -11367,9 +11416,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         } else if (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration) {
             return;
         }
-        if (![strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow]) {
-            return;
-        }
         block();
     };
 
@@ -11402,10 +11448,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         } else if (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration) {
             return;
         }
-        UIWindow *currentHostWindow = [strongSelf currentUsableHostWindowForTaskRunFallback:hostWindow];
-        if (!currentHostWindow) {
-            return;
-        }
+        UIWindow *currentHostWindow = hostWindow ?: [strongSelf currentUsableHostWindowForTaskRunFallback:nil];
         block(currentHostWindow);
     };
 
@@ -14108,8 +14151,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 return;
             }
             if (mode == AnClickActionModeSwipe) {
-                NSArray<NSValue *> *steppedPath = [strongSelf path:[strongSelf resolvedPathForTask:task] byApplyingSwipeStepForTask:task];
-                NSArray<NSValue *> *path = [strongSelf path:steppedPath byApplyingJitterForTask:task];
+                NSArray<NSValue *> *path = [strongSelf path:[strongSelf runtimeSwipePathForTask:task] byApplyingJitterForTask:task];
                 NSTimeInterval swipeDuration = [strongSelf swipeDurationForTask:task];
                 if (!suppressFastTrace) {
                     [strongSelf showTrajectoryForScreenPoints:path inWindow:currentHostWindow duration:swipeDuration];
@@ -14983,6 +15025,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             _hasManualSwipeAnchor = NO;
             _hasManualSwipeEndPoint = NO;
         }
+        _swipeUsesManualEndpoints = YES;
         _pickingSwipeEndPoint = shouldPickEnd;
     } else {
         _pickingSwipeEndPoint = NO;
@@ -15195,6 +15238,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             _manualSwipeAnchor = screenPoint;
             _hasManualSwipeAnchor = YES;
             _hasManualSwipeEndPoint = NO;
+            _swipeUsesManualEndpoints = YES;
             _manualSwipeEndPoint = CGPointZero;
             [self rememberManualCoordinateScreenSize];
             _pickingSwipeEndPoint = YES;
@@ -15207,6 +15251,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 
         _manualSwipeEndPoint = screenPoint;
         _hasManualSwipeEndPoint = YES;
+        _swipeUsesManualEndpoints = YES;
         [self rememberManualCoordinateScreenSize];
         [self finishPointPickingOverlay];
         [self showTapMarkerAtScreenPoint:_manualSwipeAnchor inWindow:hostWindow];
@@ -15317,7 +15362,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 return;
             }
             [strongSelf showTrajectoryForScreenPoints:path inWindow:hostWindow duration:previewDuration];
-            strongSelf->_statusLabel.text = (strongSelf->_hasManualSwipeAnchor && strongSelf->_hasManualSwipeEndPoint) ? @"预览起终点" : @"预览原轨迹";
+            strongSelf->_statusLabel.text = (strongSelf->_swipeUsesManualEndpoints &&
+                                             strongSelf->_hasManualSwipeAnchor &&
+                                             strongSelf->_hasManualSwipeEndPoint) ? @"预览起终点" : @"预览原轨迹";
             [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
         });
         return;
@@ -15699,6 +15746,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             _recordedSwipePoints = [_liveSwipePoints mutableCopy];
             _hasManualSwipeAnchor = NO;
             _hasManualSwipeEndPoint = NO;
+            _swipeUsesManualEndpoints = NO;
             [self rememberManualCoordinateScreenSize];
             _actionMode = AnClickActionModeSwipe;
             [self refreshModeButtons];
