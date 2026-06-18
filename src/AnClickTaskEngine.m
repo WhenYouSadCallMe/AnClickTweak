@@ -389,7 +389,8 @@
                                    generation:(NSUInteger)generation
                               additionalDelay:(NSTimeInterval)additionalDelay {
     NSTimeInterval completionDelay = model ? MAX(0.0, model.completionDelay) : 0.0;
-    NSTimeInterval totalDelay = MAX(0.0, additionalDelay) + completionDelay;
+    NSTimeInterval branchSafetyDelay = MAX(0.0, additionalDelay) > 0.001 ? 0.03 : 0.0;
+    NSTimeInterval totalDelay = MAX(0.0, additionalDelay) + completionDelay + branchSafetyDelay;
     __weak typeof(self) weakSelf = self;
     [self scheduleAfter:totalDelay guard:^BOOL{
         __strong typeof(weakSelf) strongSelf = weakSelf;

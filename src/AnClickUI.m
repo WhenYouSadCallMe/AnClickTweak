@@ -10918,6 +10918,59 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     return nil;
 }
 
+- (NSDictionary *)rawBranchActionConfigForTask:(NSDictionary *)task success:(BOOL)success expectedMode:(AnClickActionMode)expectedMode {
+    if (![self isSelectableActionMode:expectedMode]) {
+        return nil;
+    }
+    id fullConfig = task[[self branchActionConfigKeyForSuccess:success]];
+    if (![fullConfig isKindOfClass:NSDictionary.class] ||
+        [self modeForTask:(NSDictionary *)fullConfig] != expectedMode) {
+        return nil;
+    }
+    NSDictionary *config = (NSDictionary *)fullConfig;
+    if (expectedMode == AnClickActionModeNetwork && config[@"networkRequestOnly"] == nil) {
+        NSMutableDictionary *normalizedConfig = [config mutableCopy];
+        normalizedConfig[@"networkRequestOnly"] = @YES;
+        config = normalizedConfig;
+    }
+    return config;
+}
+
+- (NSDictionary *)pointBranchActionConfigForTask:(NSDictionary *)task
+                                         success:(BOOL)success
+                                    expectedMode:(AnClickActionMode)expectedMode
+                                      matchPoint:(CGPoint)matchPoint
+                                   hasMatchPoint:(BOOL)hasMatchPoint {
+    if (![self modeCanUseRecognitionPoint:expectedMode]) {
+        return nil;
+    }
+
+    NSDictionary *rawConfig = [self rawBranchActionConfigForTask:task success:success expectedMode:expectedMode];
+    if (!rawConfig) {
+        return nil;
+    }
+    if (expectedMode == AnClickActionModeTwoFingerTap &&
+        [self storedMultiTapPointsForTask:rawConfig].count >= 2) {
+        return rawConfig;
+    }
+
+    id useMatchPointValue = rawConfig[@"useMatchPoint"];
+    BOOL useMatchPoint = [useMatchPointValue respondsToSelector:@selector(boolValue)]
+        ? [useMatchPointValue boolValue]
+        : YES;
+    if (!useMatchPoint) {
+        return rawConfig[@"point"] ? rawConfig : nil;
+    }
+    if (!hasMatchPoint) {
+        return nil;
+    }
+
+    NSMutableDictionary *config = [rawConfig mutableCopy];
+    config[@"point"] = [NSValue valueWithCGPoint:matchPoint];
+    config[@"useMatchPoint"] = @YES;
+    return config;
+}
+
 - (NSDictionary *)recognitionActionConfigForTask:(NSDictionary *)task success:(BOOL)success expectedMode:(AnClickActionMode)expectedMode {
     if (![self modeIsRecognitionTask:expectedMode]) {
         return nil;
@@ -12567,6 +12620,13 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     return;
                 }
                 NSDictionary *successConfig = [strongSelf branchActionConfigForTask:task success:YES expectedMode:imageActionMode];
+                if (!successConfig) {
+                    successConfig = [strongSelf pointBranchActionConfigForTask:task
+                                                                        success:YES
+                                                                   expectedMode:imageActionMode
+                                                                     matchPoint:matchPointValue.CGPointValue
+                                                                  hasMatchPoint:YES];
+                }
                 if (successConfig) {
                     NSMutableDictionary *delayedSuccessConfig = [successConfig mutableCopy];
                     delayedSuccessConfig[@"recognitionSuccessActionDelay"] = @([strongSelf recognitionSuccessActionDelayForTask:task]);
@@ -12871,6 +12931,13 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     return;
                 }
                 NSDictionary *successConfig = [strongSelf branchActionConfigForTask:task success:YES expectedMode:actionMode];
+                if (!successConfig) {
+                    successConfig = [strongSelf pointBranchActionConfigForTask:task
+                                                                        success:YES
+                                                                   expectedMode:actionMode
+                                                                     matchPoint:pointValue.CGPointValue
+                                                                  hasMatchPoint:YES];
+                }
                 if (successConfig) {
                     NSMutableDictionary *delayedSuccessConfig = [successConfig mutableCopy];
                     delayedSuccessConfig[@"recognitionSuccessActionDelay"] = @([strongSelf recognitionSuccessActionDelayForTask:task]);
@@ -13162,6 +13229,13 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     return;
                 }
                 NSDictionary *successConfig = [strongSelf branchActionConfigForTask:task success:YES expectedMode:actionMode];
+                if (!successConfig) {
+                    successConfig = [strongSelf pointBranchActionConfigForTask:task
+                                                                        success:YES
+                                                                   expectedMode:actionMode
+                                                                     matchPoint:pointValue.CGPointValue
+                                                                  hasMatchPoint:YES];
+                }
                 if (successConfig) {
                     NSMutableDictionary *delayedSuccessConfig = [successConfig mutableCopy];
                     delayedSuccessConfig[@"recognitionSuccessActionDelay"] = @([strongSelf recognitionSuccessActionDelayForTask:task]);
