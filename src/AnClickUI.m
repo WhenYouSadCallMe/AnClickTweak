@@ -465,6 +465,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSUInteger _toastGeneration;
     NSUInteger _screenGeometryGeneration;
     NSUInteger _screenGeometryRefreshGeneration;
+    NSUInteger _pendingRecognitionPointActionCount;
+    NSUInteger _panelTouchPassthroughGeneration;
     CGSize _lastAppliedScreenGeometrySize;
     CGSize _recordedMacroScreenSize;
     CFTimeInterval _toastDeferNonVolumeUntil;
@@ -2998,6 +3000,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)cancelRunningTaskSideEffects {
     [_taskEngine invalidateScheduledCallbacks];
+    _pendingRecognitionPointActionCount = 0;
+    _panelTouchPassthroughGeneration++;
     [AnClickHammerTouchDriver cancelAll];
     [self cancelActiveNetworkTasks];
     [_recognitionService cancelPendingRequests];
@@ -7200,12 +7204,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
+    NSUInteger passthroughGeneration = ++_panelTouchPassthroughGeneration;
     _panelWindow.userInteractionEnabled = NO;
     NSTimeInterval restoreDelay = MAX(0.08, (isfinite(duration) ? MAX(0.0, duration) : 0.0) + 0.04);
     __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(restoreDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf || !strongSelf->_panelWindow) {
+            return;
+        }
+        if (passthroughGeneration != strongSelf->_panelTouchPassthroughGeneration) {
             return;
         }
         strongSelf->_panelWindow.userInteractionEnabled = YES;
@@ -11472,30 +11480,69 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                         inWindow:(UIWindow *)hostWindow
                                       generation:(NSUInteger)runGeneration
                                            block:(void (^)(UIWindow *currentHostWindow))block {
+    [self scheduleRecognitionPointActionAfterDelay:delay
+                                          duration:AnClickFastRecognitionTapDuration
+                                          inWindow:hostWindow
+                                        generation:runGeneration
+                                             block:block];
+}
+
+- (void)scheduleRecognitionPointActionAfterDelay:(NSTimeInterval)delay
+                                        duration:(NSTimeInterval)duration
+                                        inWindow:(UIWindow *)hostWindow
+                                      generation:(NSUInteger)runGeneration
+                                           block:(void (^)(UIWindow *currentHostWindow))block {
     if (!block) {
         return;
     }
 
     NSTimeInterval safeDelay = isfinite(delay) ? MAX(0.0, delay) : 0.0;
+    NSTimeInterval safeDuration = isfinite(duration) ? MAX(0.0, duration) : AnClickFastRecognitionTapDuration;
+    _pendingRecognitionPointActionCount++;
+    [self temporarilyPassPanelTouchesThroughForDuration:(safeDelay + safeDuration + AnClickRecognitionActionCompletionSafetyDelay)];
+    if (safeDelay > 0.001) {
+        [self setHomeOutputText:[NSString stringWithFormat:@"识别后等待%.2f秒执行动作", safeDelay]];
+    }
     __weak typeof(self) weakSelf = self;
     dispatch_block_t fireBlock = ^{
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) {
             return;
         }
+        void (^finishPendingActionNow)(void) = ^{
+            if (strongSelf->_pendingRecognitionPointActionCount > 0) {
+                strongSelf->_pendingRecognitionPointActionCount--;
+            }
+        };
+        void (^finishPendingActionAfterTouch)(void) = ^{
+            NSTimeInterval finishDelay = MAX(0.01, safeDuration + AnClickRecognitionActionCompletionSafetyDelay);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(finishDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) finishSelf = weakSelf;
+                if (!finishSelf) {
+                    return;
+                }
+                if (finishSelf->_pendingRecognitionPointActionCount > 0) {
+                    finishSelf->_pendingRecognitionPointActionCount--;
+                }
+            });
+        };
         if (runGeneration == 0) {
             if (![strongSelf panelCanUseCurrentScene]) {
+                finishPendingActionNow();
                 return;
             }
         } else if (!strongSelf->_taskRunActive || runGeneration != strongSelf->_taskRunGeneration) {
+            finishPendingActionNow();
             return;
         }
         UIWindow *currentHostWindow = [strongSelf focusedHostWindowForScreenActionWithFallback:hostWindow];
         if (!currentHostWindow) {
             [strongSelf setHomeOutputText:@"识别后动作窗口不可用"];
+            finishPendingActionNow();
             return;
         }
         block(currentHostWindow);
+        finishPendingActionAfterTouch();
     };
 
     if (safeDelay <= 0.0005) {
@@ -12706,7 +12753,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     }
 
     actionPoint = [self point:actionPoint byApplyingJitterForTask:task];
+    NSTimeInterval actionDuration = [self modeIsFastClickTask:failureMode]
+        ? [self fastClickDurationForMode:failureMode]
+        : [self durationForTaskMode:failureMode];
     [self scheduleRecognitionPointActionAfterDelay:failureActionDelay
+                                          duration:actionDuration
                                           inWindow:hostWindow
                                         generation:runGeneration
                                              block:^(UIWindow *currentHostWindow) {
@@ -12722,9 +12773,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                          actionPoint.y];
     [self showToast:_statusLabel.text];
     if (completion) {
-        NSTimeInterval actionDuration = [self modeIsFastClickTask:failureMode]
-            ? [self fastClickDurationForMode:failureMode]
-            : [self durationForTaskMode:failureMode];
         completion(failureActionDelay + actionDuration + interval);
     }
 }
@@ -12745,10 +12793,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         if (points.count >= 2) {
             NSTimeInterval successDelay = [self recognitionSuccessActionDelayForTask:config];
             [self scheduleRecognitionPointActionAfterDelay:successDelay
+                                                  duration:AnClickFastRecognitionTapDuration
                                                   inWindow:hostWindow
                                                 generation:runGeneration
                                                      block:^(UIWindow *currentHostWindow) {
-                [self temporarilyPassPanelTouchesThroughForDuration:AnClickFastRecognitionTapDuration];
                 [AnClickHammerTouchDriver fastMultiTapAtPoints:points inWindow:currentHostWindow];
                 [self setHomeOutputText:[NSString stringWithFormat:@"识别后多指已执行 %lu点", (unsigned long)points.count]];
                 [self showMultiTapMarkersForScreenPoints:points inWindow:currentHostWindow duration:0.45];
@@ -12777,6 +12825,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     }
     NSTimeInterval successDelay = [self recognitionSuccessActionDelayForTask:config];
     [self scheduleRecognitionPointActionAfterDelay:successDelay
+                                          duration:actionDuration
                                           inWindow:hostWindow
                                         generation:runGeneration
                                              block:^(UIWindow *currentHostWindow) {
@@ -13037,6 +13086,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     : [strongSelf durationForTaskMode:imageActionMode];
                 NSTimeInterval successActionDelay = [strongSelf recognitionSuccessActionDelayForTask:task];
                 [strongSelf scheduleRecognitionPointActionAfterDelay:successActionDelay
+                                                            duration:actionDuration
                                                             inWindow:currentHostWindow
                                                           generation:runGeneration
                                                                block:^(UIWindow *delayedHostWindow) {
@@ -13357,6 +13407,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     : [strongSelf durationForTaskMode:actionMode];
                 NSTimeInterval successActionDelay = [strongSelf recognitionSuccessActionDelayForTask:task];
                 [strongSelf scheduleRecognitionPointActionAfterDelay:successActionDelay
+                                                            duration:actionDuration
                                                             inWindow:currentHostWindow
                                                           generation:runGeneration
                                                                block:^(UIWindow *delayedHostWindow) {
@@ -13656,6 +13707,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     : [strongSelf durationForTaskMode:actionMode];
                 NSTimeInterval successActionDelay = [strongSelf recognitionSuccessActionDelayForTask:task];
                 [strongSelf scheduleRecognitionPointActionAfterDelay:successActionDelay
+                                                            duration:actionDuration
                                                             inWindow:currentHostWindow
                                                           generation:runGeneration
                                                                block:^(UIWindow *delayedHostWindow) {
@@ -14377,8 +14429,28 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     [self stopTaskRunWithStatus:status showToast:YES];
 }
 
+- (BOOL)shouldDeferTaskRunFinishForPendingRecognitionActionWithStatus:(NSString *)status {
+    if (_pendingRecognitionPointActionCount == 0) {
+        return NO;
+    }
+    return [status rangeOfString:@"完成"].location != NSNotFound;
+}
+
 - (void)finishTaskRunWithStatus:(NSString *)status showToast:(BOOL)showToast restorePanel:(BOOL)restorePanel {
     if (!_taskRunActive && !_taskRunPausedForForeground) {
+        return;
+    }
+
+    if ([self shouldDeferTaskRunFinishForPendingRecognitionActionWithStatus:status]) {
+        [self setHomeOutputText:@"等待识别后动作执行"];
+        __weak typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) {
+                return;
+            }
+            [strongSelf finishTaskRunWithStatus:status showToast:showToast restorePanel:restorePanel];
+        });
         return;
     }
 
