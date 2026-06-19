@@ -101,6 +101,7 @@ static const NSInteger AnClickHomeOptionContentViewTag = 54120;
 static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.045;
 static const NSTimeInterval AnClickVisualRecognitionCaptureDelay = 0.040;
 static const NSTimeInterval AnClickColorRecognitionCaptureDelay = 0.030;
+static const NSTimeInterval AnClickRecognitionActionCompletionSafetyDelay = 0.060;
 static NSString * const AnClickDefaultNetworkContentType = @"application/json; charset=utf-8";
 static NSString * const AnClickDefaultNetworkUserAgent = @"Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1";
 static void (*AnClickOriginalWindowSendEvent)(id self, SEL _cmd, UIEvent *event);
@@ -12202,9 +12203,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (void)performRecognitionNetworkTask:(NSDictionary *)task
-                              inWindow:(UIWindow *)hostWindow
-                            generation:(NSUInteger)runGeneration
-                            completion:(AnClickTaskEngineRecognitionCompletion)completion {
+                             inWindow:(UIWindow *)hostWindow
+                           generation:(NSUInteger)runGeneration
+                           completion:(AnClickTaskEngineRecognitionCompletion)completion {
     [self performRecognitionNetworkTask:task
                         recognitionText:nil
                                inWindow:hostWindow
@@ -12233,6 +12234,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     } else if (completion) {
         completion(NO, NO, 0.0);
     }
+}
+
+- (NSTimeInterval)recognitionActionCompletionDelayForDuration:(NSTimeInterval)duration {
+    NSTimeInterval safeDuration = isfinite(duration) ? MAX(0.0, duration) : 0.0;
+    return safeDuration + AnClickRecognitionActionCompletionSafetyDelay;
 }
 
 - (void)runRecognitionNetworkTask:(NSDictionary *)task
@@ -12696,7 +12702,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 [self showMultiTapMarkersForScreenPoints:points inWindow:currentHostWindow duration:0.45];
             }];
             if (duration) {
-                *duration = successDelay + AnClickFastRecognitionTapDuration;
+                *duration = [self recognitionActionCompletionDelayForDuration:(successDelay + AnClickFastRecognitionTapDuration)];
             }
             return YES;
         }
@@ -12740,7 +12746,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     }];
 
     if (duration) {
-        *duration = successDelay + actionDuration;
+        *duration = [self recognitionActionCompletionDelayForDuration:(successDelay + actionDuration)];
     }
     return YES;
 }
@@ -12879,9 +12885,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                          [strongSelf actionNameForMode:imageActionMode]];
                         [strongSelf showToast:strongSelf->_statusLabel.text];
                         [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                           delay:fastPointDuration + 0.008];
+                                                                           delay:[strongSelf recognitionActionCompletionDelayForDuration:fastPointDuration]];
                         if (completion) {
-                            completion(YES, YES, fastPointDuration + 0.008);
+                            completion(YES, YES, [strongSelf recognitionActionCompletionDelayForDuration:fastPointDuration]);
                         }
                         return;
                     }
@@ -12996,9 +13002,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                  actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                   delay:successActionDelay + actionDuration + 0.008];
+                                                                   delay:[strongSelf recognitionActionCompletionDelayForDuration:(successActionDelay + actionDuration)]];
                 if (completion) {
-                    completion(YES, YES, successActionDelay + actionDuration + 0.008);
+                    completion(YES, YES, [strongSelf recognitionActionCompletionDelayForDuration:(successActionDelay + actionDuration)]);
                 }
         }];
     }];
@@ -13194,9 +13200,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                          [strongSelf actionNameForMode:actionMode]];
                         [strongSelf showToast:strongSelf->_statusLabel.text];
                         [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                           delay:fastPointDuration + 0.008];
+                                                                           delay:[strongSelf recognitionActionCompletionDelayForDuration:fastPointDuration]];
                         if (completion) {
-                            completion(YES, YES, fastPointDuration + 0.008);
+                            completion(YES, YES, [strongSelf recognitionActionCompletionDelayForDuration:fastPointDuration]);
                         }
                         return;
                     }
@@ -13315,9 +13321,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                  actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                   delay:successActionDelay + actionDuration + 0.008];
+                                                                   delay:[strongSelf recognitionActionCompletionDelayForDuration:(successActionDelay + actionDuration)]];
                 if (completion) {
-                    completion(YES, YES, successActionDelay + actionDuration + 0.008);
+                    completion(YES, YES, [strongSelf recognitionActionCompletionDelayForDuration:(successActionDelay + actionDuration)]);
                 }
         }];
     }];
@@ -13491,9 +13497,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                          [strongSelf actionNameForMode:actionMode]];
                         [strongSelf showToast:strongSelf->_statusLabel.text];
                         [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                           delay:fastPointDuration + 0.008];
+                                                                           delay:[strongSelf recognitionActionCompletionDelayForDuration:fastPointDuration]];
                         if (completion) {
-                            completion(YES, YES, fastPointDuration + 0.008);
+                            completion(YES, YES, [strongSelf recognitionActionCompletionDelayForDuration:fastPointDuration]);
                         }
                         return;
                     }
@@ -13609,9 +13615,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                  actionPoint.y];
                 [strongSelf showToast:strongSelf->_statusLabel.text];
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
-                                                                   delay:successActionDelay + actionDuration + 0.008];
+                                                                   delay:[strongSelf recognitionActionCompletionDelayForDuration:(successActionDelay + actionDuration)]];
                 if (completion) {
-                    completion(YES, YES, successActionDelay + actionDuration + 0.008);
+                    completion(YES, YES, [strongSelf recognitionActionCompletionDelayForDuration:(successActionDelay + actionDuration)]);
                 }
         }];
     }];
