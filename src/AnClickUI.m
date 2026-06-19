@@ -224,9 +224,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 @interface AnClickHammerTouchDriver : NSObject
 + (void)fastTapAtPoint:(CGPoint)point;
++ (void)fastTapAtPoint:(CGPoint)point inWindow:(UIWindow *)targetWindow;
 + (void)fastDoubleTapAtPoint:(CGPoint)point;
++ (void)fastDoubleTapAtPoint:(CGPoint)point inWindow:(UIWindow *)targetWindow;
 + (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points;
++ (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points inWindow:(UIWindow *)targetWindow;
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration;
++ (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration inWindow:(UIWindow *)targetWindow;
 + (void)beginHoldAtPoint:(CGPoint)point;
 + (void)endHold;
 + (void)cancelHold;
@@ -236,6 +240,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events;
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events playbackSpeed:(NSTimeInterval)playbackSpeed;
 + (void)twoFingerTapAtPoint:(CGPoint)point distance:(CGFloat)distance;
++ (void)twoFingerTapAtPoint:(CGPoint)point distance:(CGFloat)distance inWindow:(UIWindow *)targetWindow;
 + (void)pinchAtPoint:(CGPoint)center fromDistance:(CGFloat)fromDistance toDistance:(CGFloat)toDistance duration:(NSTimeInterval)duration;
 + (void)rotateAtPoint:(CGPoint)center radius:(CGFloat)radius startAngle:(CGFloat)startAngle endAngle:(CGFloat)endAngle duration:(NSTimeInterval)duration;
 @end
@@ -8382,8 +8387,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (void)performDoubleTapAtPoint:(CGPoint)point interval:(NSTimeInterval)interval {
+    [self performDoubleTapAtPoint:point interval:interval inWindow:nil];
+}
+
+- (void)performDoubleTapAtPoint:(CGPoint)point interval:(NSTimeInterval)interval inWindow:(UIWindow *)hostWindow {
     (void)interval;
-    [AnClickHammerTouchDriver fastDoubleTapAtPoint:point];
+    [AnClickHammerTouchDriver fastDoubleTapAtPoint:point inWindow:hostWindow];
 }
 
 - (UIBezierPath *)pathForScreenPoints:(NSArray<NSValue *> *)points inWindow:(UIWindow *)hostWindow {
@@ -8501,11 +8510,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     [self showOperationTraceForMode:_actionMode atPoint:point inWindow:hostWindow duration:operationTraceDuration];
     if (_actionMode == AnClickActionModeDoubleTap) {
         NSTimeInterval interval = _editingTaskModel ? [self doubleTapIntervalForTask:[self taskDictionaryForModel:_editingTaskModel]] : AnClickDefaultDoubleTapInterval;
-        [self performDoubleTapAtPoint:point interval:interval];
+        [self performDoubleTapAtPoint:point interval:interval inWindow:hostWindow];
         _statusLabel.text = [NSString stringWithFormat:@"双 %.0f,%.0f", point.x, point.y];
     } else if (_actionMode == AnClickActionModeLongPress) {
         _longPressHolding = YES;
-        [AnClickHammerTouchDriver longPressAtPoint:point duration:pressDuration];
+        [AnClickHammerTouchDriver longPressAtPoint:point duration:pressDuration inWindow:hostWindow];
         _statusLabel.text = [NSString stringWithFormat:@"长按%@ %.0f,%.0f", [self longPressDurationSummaryText:pressDuration], point.x, point.y];
         [self refreshModeButtons];
         __weak typeof(self) weakSelf = self;
@@ -8521,13 +8530,13 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             }
         });
     } else if (_actionMode == AnClickActionModeTwoFingerTap) {
-        [AnClickHammerTouchDriver twoFingerTapAtPoint:point distance:72.0];
+        [AnClickHammerTouchDriver twoFingerTapAtPoint:point distance:72.0 inWindow:hostWindow];
         _statusLabel.text = [NSString stringWithFormat:@"二指 %.0f,%.0f", point.x, point.y];
     } else if (_actionMode == AnClickActionModeTap ||
                _actionMode == AnClickActionModeImage ||
                _actionMode == AnClickActionModeOCR ||
                _actionMode == AnClickActionModeColor) {
-        [AnClickHammerTouchDriver fastTapAtPoint:point];
+        [AnClickHammerTouchDriver fastTapAtPoint:point inWindow:hostWindow];
         _statusLabel.text = [NSString stringWithFormat:@"点 %.0f,%.0f", point.x, point.y];
     } else {
         _statusLabel.text = @"动作不可用";
@@ -12555,10 +12564,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         : [self durationForTaskMode:mode];
     [self temporarilyPassPanelTouchesThroughForDuration:duration];
     if (mode == AnClickActionModeDoubleTap) {
-        [self performDoubleTapAtPoint:point interval:AnClickDefaultDoubleTapInterval];
+        [self performDoubleTapAtPoint:point interval:AnClickDefaultDoubleTapInterval inWindow:hostWindow];
     } else if (mode == AnClickActionModeLongPress) {
         _longPressHolding = YES;
-        [AnClickHammerTouchDriver longPressAtPoint:point duration:pressDuration];
+        [AnClickHammerTouchDriver longPressAtPoint:point duration:pressDuration inWindow:hostWindow];
         __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -12568,9 +12577,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             strongSelf->_longPressHolding = NO;
         });
     } else if (mode == AnClickActionModeTwoFingerTap) {
-        [AnClickHammerTouchDriver twoFingerTapAtPoint:point distance:72.0];
+        [AnClickHammerTouchDriver twoFingerTapAtPoint:point distance:72.0 inWindow:hostWindow];
     } else if (mode == AnClickActionModeTap) {
-        [AnClickHammerTouchDriver fastTapAtPoint:point];
+        [AnClickHammerTouchDriver fastTapAtPoint:point inWindow:hostWindow];
     }
     if (showTrace) {
         [self showOperationTraceForMode:mode atPoint:point inWindow:hostWindow duration:duration];
@@ -12740,7 +12749,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                 generation:runGeneration
                                                      block:^(UIWindow *currentHostWindow) {
                 [self temporarilyPassPanelTouchesThroughForDuration:AnClickFastRecognitionTapDuration];
-                [AnClickHammerTouchDriver fastMultiTapAtPoints:points];
+                [AnClickHammerTouchDriver fastMultiTapAtPoints:points inWindow:currentHostWindow];
                 [self setHomeOutputText:[NSString stringWithFormat:@"识别后多指已执行 %lu点", (unsigned long)points.count]];
                 [self showMultiTapMarkersForScreenPoints:points inWindow:currentHostWindow duration:0.45];
             }];
@@ -12772,7 +12781,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                         generation:runGeneration
                                              block:^(UIWindow *currentHostWindow) {
         if (actionMode == AnClickActionModeDoubleTap) {
-            [self performDoubleTapAtPoint:point interval:[self doubleTapIntervalForTask:config]];
+            [self performDoubleTapAtPoint:point interval:[self doubleTapIntervalForTask:config] inWindow:currentHostWindow];
             [self setHomeOutputText:[NSString stringWithFormat:@"识别后双击已执行 %.0f,%.0f", point.x, point.y]];
             [self showOperationTraceForMode:actionMode atPoint:point inWindow:currentHostWindow duration:actionDuration];
         } else if (actionMode == AnClickActionModeLongPress) {
@@ -14158,9 +14167,15 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     if (!strongSelf) {
                         return;
                     }
+                    UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
+                                                                                  runGeneration:runGeneration
+                                                                                         status:@"窗口变化停止"];
+                    if (!currentHostWindow) {
+                        return;
+                    }
                     NSArray<NSValue *> *points = [strongSelf points:basePoints byApplyingJitterForTask:task];
                     if (points.count >= 2) {
-                        [AnClickHammerTouchDriver fastMultiTapAtPoints:points];
+                        [AnClickHammerTouchDriver fastMultiTapAtPoints:points inWindow:currentHostWindow];
                     }
                 }];
             }
@@ -14180,11 +14195,17 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     if (!strongSelf) {
                         return;
                     }
+                    UIWindow *currentHostWindow = [strongSelf hostWindowForCallbackWithFallback:hostWindow
+                                                                                  runGeneration:runGeneration
+                                                                                         status:@"窗口变化停止"];
+                    if (!currentHostWindow) {
+                        return;
+                    }
                     CGPoint point = [strongSelf point:basePoint byApplyingJitterForTask:task];
                     if (mode == AnClickActionModeDoubleTap) {
-                        [strongSelf performDoubleTapAtPoint:point interval:[strongSelf doubleTapIntervalForTask:task]];
+                        [strongSelf performDoubleTapAtPoint:point interval:[strongSelf doubleTapIntervalForTask:task] inWindow:currentHostWindow];
                     } else {
-                        [AnClickHammerTouchDriver fastTapAtPoint:point];
+                        [AnClickHammerTouchDriver fastTapAtPoint:point inWindow:currentHostWindow];
                     }
                 }];
             }
@@ -14250,7 +14271,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     if (!suppressFastTrace) {
                         [strongSelf showMultiTapMarkersForScreenPoints:points inWindow:currentHostWindow duration:0.75];
                     }
-                    [AnClickHammerTouchDriver fastMultiTapAtPoints:points];
+                    [AnClickHammerTouchDriver fastMultiTapAtPoints:points inWindow:currentHostWindow];
                 } else {
                     NSValue *pointValue = task[@"point"];
                     CGPoint point = [strongSelf point:[strongSelf resolvedPointForTask:task fallbackPoint:pointValue.CGPointValue] byApplyingJitterForTask:task];
@@ -14264,7 +14285,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     if (!suppressFastTrace) {
                         [strongSelf showOperationTraceForMode:mode atPoint:point inWindow:currentHostWindow duration:doubleTapDuration];
                     }
-                    [strongSelf performDoubleTapAtPoint:point interval:[strongSelf doubleTapIntervalForTask:task]];
+                    [strongSelf performDoubleTapAtPoint:point interval:[strongSelf doubleTapIntervalForTask:task] inWindow:currentHostWindow];
                 } else if (mode == AnClickActionModeLongPress) {
                     [strongSelf performPointActionMode:mode
                                                atPoint:point

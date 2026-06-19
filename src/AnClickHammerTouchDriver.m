@@ -10,10 +10,15 @@
 
 @interface AnClickHammerTouchDriver : NSObject
 + (void)fastTapAtPoint:(CGPoint)point;
++ (void)fastTapAtPoint:(CGPoint)point inWindow:(UIWindow *)targetWindow;
 + (void)fastDoubleTapAtPoint:(CGPoint)point;
++ (void)fastDoubleTapAtPoint:(CGPoint)point inWindow:(UIWindow *)targetWindow;
 + (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points;
++ (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points inWindow:(UIWindow *)targetWindow;
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration;
++ (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration inWindow:(UIWindow *)targetWindow;
 + (void)beginHoldAtPoint:(CGPoint)point;
++ (void)beginHoldAtPoint:(CGPoint)point inWindow:(UIWindow *)targetWindow;
 + (void)endHold;
 + (void)cancelHold;
 + (void)cancelAll;
@@ -24,13 +29,19 @@
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events;
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events playbackSpeed:(NSTimeInterval)playbackSpeed;
 + (void)twoFingerTapAtPoint:(CGPoint)point distance:(CGFloat)distance;
++ (void)twoFingerTapAtPoint:(CGPoint)point distance:(CGFloat)distance inWindow:(UIWindow *)targetWindow;
 + (void)pinchAtPoint:(CGPoint)center fromDistance:(CGFloat)fromDistance toDistance:(CGFloat)toDistance duration:(NSTimeInterval)duration;
 + (void)rotateAtPoint:(CGPoint)center radius:(CGFloat)radius startAngle:(CGFloat)startAngle endAngle:(CGFloat)endAngle duration:(NSTimeInterval)duration;
 + (void)touchDownAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
++ (void)touchDownAtPoint:(CGPoint)point touchId:(NSInteger)touchId inWindow:(UIWindow *)targetWindow;
 + (void)touchMoveAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
++ (void)touchMoveAtPoint:(CGPoint)point touchId:(NSInteger)touchId inWindow:(UIWindow *)targetWindow;
 + (void)touchStationaryAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
++ (void)touchStationaryAtPoint:(CGPoint)point touchId:(NSInteger)touchId inWindow:(UIWindow *)targetWindow;
 + (void)touchCancelAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
++ (void)touchCancelAtPoint:(CGPoint)point touchId:(NSInteger)touchId inWindow:(UIWindow *)targetWindow;
 + (void)touchUpAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
++ (void)touchUpAtPoint:(CGPoint)point touchId:(NSInteger)touchId inWindow:(UIWindow *)targetWindow;
 @end
 
 @implementation AnClickHammerTouchDriver
@@ -38,6 +49,7 @@
 static NSInteger AnClickHoldTouchId = 0;
 static BOOL AnClickHolding = NO;
 static CGPoint AnClickHoldPoint = {0, 0};
+static __unsafe_unretained UIWindow *AnClickHoldWindow = nil;
 static dispatch_source_t AnClickHoldTimer = nil;
 static NSUInteger AnClickHoldGeneration = 0;
 static NSUInteger AnClickTouchGeneration = 0;
@@ -82,34 +94,47 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
         AnClickHoldTimer = nil;
     }
     AnClickHolding = NO;
+    AnClickHoldWindow = nil;
     AnClickHoldGeneration++;
     [AnClickHammerTouch cancelAllActiveTouches];
 }
 
 + (void)fastTapAtPoint:(CGPoint)point {
+    [self fastTapAtPoint:point inWindow:nil];
+}
+
++ (void)fastTapAtPoint:(CGPoint)point inWindow:(UIWindow *)targetWindow {
     NSUInteger generation = AnClickTouchGeneration;
     NSInteger touchId = [self nextTurboTapTouchId];
-    [self touchDownAtPoint:point touchId:touchId];
+    [self touchDownAtPoint:point touchId:touchId inWindow:targetWindow];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickTurboTapUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (![self touchGenerationIsCurrent:generation]) {
             return;
         }
-        [self touchUpAtPoint:point touchId:touchId];
+        [self touchUpAtPoint:point touchId:touchId inWindow:targetWindow];
     });
 }
 
 + (void)fastDoubleTapAtPoint:(CGPoint)point {
+    [self fastDoubleTapAtPoint:point inWindow:nil];
+}
+
++ (void)fastDoubleTapAtPoint:(CGPoint)point inWindow:(UIWindow *)targetWindow {
     NSUInteger generation = AnClickTouchGeneration;
-    [self fastTapAtPoint:point];
+    [self fastTapAtPoint:point inWindow:targetWindow];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickTurboDoubleTapDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (![self touchGenerationIsCurrent:generation]) {
             return;
         }
-        [self fastTapAtPoint:point];
+        [self fastTapAtPoint:point inWindow:targetWindow];
     });
 }
 
 + (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points {
+    [self fastMultiTapAtPoints:points inWindow:nil];
+}
+
++ (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points inWindow:(UIWindow *)targetWindow {
     if (points.count == 0) {
         return;
     }
@@ -134,33 +159,41 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     }
 
     NSUInteger generation = AnClickTouchGeneration;
-    [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:beganPhases];
+    [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:beganPhases targetWindow:targetWindow];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickTurboTapUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (![self touchGenerationIsCurrent:generation]) {
             return;
         }
-        [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:endedPhases];
+        [AnClickHammerTouch sendTouchIds:touchIds points:touchPoints phases:endedPhases targetWindow:targetWindow];
     });
 }
 
 + (void)finishTouchId:(NSInteger)touchId atPoint:(CGPoint)point cancelled:(BOOL)cancelled {
+    [self finishTouchId:touchId atPoint:point cancelled:cancelled targetWindow:nil];
+}
+
++ (void)finishTouchId:(NSInteger)touchId atPoint:(CGPoint)point cancelled:(BOOL)cancelled targetWindow:(UIWindow *)targetWindow {
     NSUInteger generation = AnClickTouchGeneration;
-    [self touchMoveAtPoint:point touchId:touchId];
+    [self touchMoveAtPoint:point touchId:touchId inWindow:targetWindow];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickTouchUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (![self touchGenerationIsCurrent:generation]) {
             return;
         }
         if (cancelled) {
-            [self touchCancelAtPoint:point touchId:touchId];
+            [self touchCancelAtPoint:point touchId:touchId inWindow:targetWindow];
         } else {
-            [self touchUpAtPoint:point touchId:touchId];
+            [self touchUpAtPoint:point touchId:touchId inWindow:targetWindow];
         }
     });
 }
 
 + (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration {
+    [self longPressAtPoint:point duration:duration inWindow:nil];
+}
+
++ (void)longPressAtPoint:(CGPoint)point duration:(NSTimeInterval)duration inWindow:(UIWindow *)targetWindow {
     NSTimeInterval holdDuration = MAX(duration, 0.55);
-    [self beginHoldAtPoint:point];
+    [self beginHoldAtPoint:point inWindow:targetWindow];
     NSUInteger generation = AnClickHoldGeneration;
     NSUInteger touchGeneration = AnClickTouchGeneration;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(holdDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -171,9 +204,13 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
 }
 
 + (void)beginHoldAtPoint:(CGPoint)point {
+    [self beginHoldAtPoint:point inWindow:nil];
+}
+
++ (void)beginHoldAtPoint:(CGPoint)point inWindow:(UIWindow *)targetWindow {
     if (!NSThread.isMainThread) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self beginHoldAtPoint:point];
+            [self beginHoldAtPoint:point inWindow:targetWindow];
         });
         return;
     }
@@ -185,6 +222,7 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
 
     AnClickHolding = YES;
     AnClickHoldPoint = point;
+    AnClickHoldWindow = targetWindow;
     AnClickHoldTouchId = [AnClickHammerTouch availableTouchId];
     if (AnClickHoldTouchId <= 0) {
         AnClickHoldTouchId = 8;
@@ -194,7 +232,8 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     NSUInteger touchGeneration = AnClickTouchGeneration;
     NSInteger touchId = AnClickHoldTouchId;
     CGPoint holdPoint = AnClickHoldPoint;
-    [self touchDownAtPoint:point touchId:touchId];
+    UIWindow *holdWindow = AnClickHoldWindow;
+    [self touchDownAtPoint:point touchId:touchId inWindow:holdWindow];
 
     AnClickHoldTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
     dispatch_source_set_timer(AnClickHoldTimer,
@@ -205,7 +244,7 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
         if (![self touchGenerationIsCurrent:touchGeneration] || !AnClickHolding || generation != AnClickHoldGeneration) {
             return;
         }
-        [self touchMoveAtPoint:holdPoint touchId:touchId];
+        [self touchMoveAtPoint:holdPoint touchId:touchId inWindow:holdWindow];
     });
     dispatch_resume(AnClickHoldTimer);
 }
@@ -228,9 +267,11 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     }
     CGPoint point = AnClickHoldPoint;
     NSInteger touchId = AnClickHoldTouchId;
+    UIWindow *targetWindow = AnClickHoldWindow;
     AnClickHolding = NO;
+    AnClickHoldWindow = nil;
     AnClickHoldGeneration++;
-    [self finishTouchId:touchId atPoint:point cancelled:NO];
+    [self finishTouchId:touchId atPoint:point cancelled:NO targetWindow:targetWindow];
 }
 
 + (void)cancelHold {
@@ -251,9 +292,11 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
     }
     CGPoint point = AnClickHoldPoint;
     NSInteger touchId = AnClickHoldTouchId;
+    UIWindow *targetWindow = AnClickHoldWindow;
     AnClickHolding = NO;
+    AnClickHoldWindow = nil;
     AnClickHoldGeneration++;
-    [self finishTouchId:touchId atPoint:point cancelled:YES];
+    [self finishTouchId:touchId atPoint:point cancelled:YES targetWindow:targetWindow];
 }
 
 + (BOOL)isHolding {
@@ -332,8 +375,12 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
 }
 
 + (void)twoFingerTapAtPoint:(CGPoint)point distance:(CGFloat)distance {
+    [self twoFingerTapAtPoint:point distance:distance inWindow:nil];
+}
+
++ (void)twoFingerTapAtPoint:(CGPoint)point distance:(CGFloat)distance inWindow:(UIWindow *)targetWindow {
     NSArray<NSValue *> *points = [self twoFingerPointsAtCenter:point distance:MAX(distance, 24.0) angle:0];
-    [self fastMultiTapAtPoints:points];
+    [self fastMultiTapAtPoints:points inWindow:targetWindow];
 }
 
 + (void)pinchAtPoint:(CGPoint)center fromDistance:(CGFloat)fromDistance toDistance:(CGFloat)toDistance duration:(NSTimeInterval)duration {
@@ -535,23 +582,43 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
 }
 
 + (void)touchDownAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
-    [AnClickHammerTouch sendTouchId:touchId atPoint:point phase:AnClickHammerTouchPhaseBegan];
+    [self touchDownAtPoint:point touchId:touchId inWindow:nil];
+}
+
++ (void)touchDownAtPoint:(CGPoint)point touchId:(NSInteger)touchId inWindow:(UIWindow *)targetWindow {
+    [AnClickHammerTouch sendTouchId:touchId atPoint:point phase:AnClickHammerTouchPhaseBegan targetWindow:targetWindow];
 }
 
 + (void)touchMoveAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
-    [AnClickHammerTouch sendTouchId:touchId atPoint:point phase:AnClickHammerTouchPhaseMoved];
+    [self touchMoveAtPoint:point touchId:touchId inWindow:nil];
+}
+
++ (void)touchMoveAtPoint:(CGPoint)point touchId:(NSInteger)touchId inWindow:(UIWindow *)targetWindow {
+    [AnClickHammerTouch sendTouchId:touchId atPoint:point phase:AnClickHammerTouchPhaseMoved targetWindow:targetWindow];
 }
 
 + (void)touchStationaryAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
-    [AnClickHammerTouch sendTouchId:touchId atPoint:point phase:AnClickHammerTouchPhaseStationary];
+    [self touchStationaryAtPoint:point touchId:touchId inWindow:nil];
+}
+
++ (void)touchStationaryAtPoint:(CGPoint)point touchId:(NSInteger)touchId inWindow:(UIWindow *)targetWindow {
+    [AnClickHammerTouch sendTouchId:touchId atPoint:point phase:AnClickHammerTouchPhaseStationary targetWindow:targetWindow];
 }
 
 + (void)touchCancelAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
-    [AnClickHammerTouch sendTouchId:touchId atPoint:point phase:AnClickHammerTouchPhaseCancelled];
+    [self touchCancelAtPoint:point touchId:touchId inWindow:nil];
+}
+
++ (void)touchCancelAtPoint:(CGPoint)point touchId:(NSInteger)touchId inWindow:(UIWindow *)targetWindow {
+    [AnClickHammerTouch sendTouchId:touchId atPoint:point phase:AnClickHammerTouchPhaseCancelled targetWindow:targetWindow];
 }
 
 + (void)touchUpAtPoint:(CGPoint)point touchId:(NSInteger)touchId {
-    [AnClickHammerTouch sendTouchId:touchId atPoint:point phase:AnClickHammerTouchPhaseEnded];
+    [self touchUpAtPoint:point touchId:touchId inWindow:nil];
+}
+
++ (void)touchUpAtPoint:(CGPoint)point touchId:(NSInteger)touchId inWindow:(UIWindow *)targetWindow {
+    [AnClickHammerTouch sendTouchId:touchId atPoint:point phase:AnClickHammerTouchPhaseEnded targetWindow:targetWindow];
 }
 
 @end

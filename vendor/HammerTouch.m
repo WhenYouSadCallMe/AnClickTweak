@@ -252,6 +252,14 @@ static UIWindow *AnClickHammerWindowForPoint(CGPoint point) {
     return fallback;
 }
 
+static BOOL AnClickHammerWindowCanReceivePoint(UIWindow *window, CGPoint point) {
+    if (!window || window.hidden || window.alpha <= 0.01 || window.windowLevel >= UIWindowLevelAlert) {
+        return NO;
+    }
+    CGPoint windowPoint = [window convertPoint:point fromWindow:nil];
+    return CGRectContainsPoint(window.bounds, windowPoint);
+}
+
 static uint32_t AnClickHammerContextIDForWindow(UIWindow *window) {
     if (!window || ![window respondsToSelector:@selector(_contextId)]) {
         return 0;
@@ -394,6 +402,13 @@ static void AnClickHammerPrepareEventForWindow(IOHIDEventRef event, UIWindow *wi
 }
 
 + (NSInteger)sendTouchId:(NSInteger)touchId atPoint:(CGPoint)point phase:(AnClickHammerTouchPhase)phase {
+    return [self sendTouchId:touchId atPoint:point phase:phase targetWindow:nil];
+}
+
++ (NSInteger)sendTouchId:(NSInteger)touchId
+                 atPoint:(CGPoint)point
+                   phase:(AnClickHammerTouchPhase)phase
+            targetWindow:(UIWindow *)targetWindow {
     if (touchId <= 0) {
         touchId = [self availableTouchId];
     }
@@ -403,16 +418,24 @@ static void AnClickHammerPrepareEventForWindow(IOHIDEventRef event, UIWindow *wi
     }
     [self sendTouchIds:@[@(touchId)]
                 points:@[[NSValue valueWithCGPoint:point]]
-                phases:@[@(phase)]];
+                phases:@[@(phase)]
+          targetWindow:targetWindow];
     return touchId;
 }
 
 + (void)sendTouchIds:(NSArray<NSNumber *> *)touchIds
               points:(NSArray<NSValue *> *)points
               phases:(NSArray<NSNumber *> *)phases {
+    [self sendTouchIds:touchIds points:points phases:phases targetWindow:nil];
+}
+
++ (void)sendTouchIds:(NSArray<NSNumber *> *)touchIds
+              points:(NSArray<NSValue *> *)points
+              phases:(NSArray<NSNumber *> *)phases
+        targetWindow:(UIWindow *)targetWindow {
     if (!NSThread.isMainThread) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self sendTouchIds:touchIds points:points phases:phases];
+            [self sendTouchIds:touchIds points:points phases:phases targetWindow:targetWindow];
         });
         return;
     }
@@ -456,7 +479,7 @@ static void AnClickHammerPrepareEventForWindow(IOHIDEventRef event, UIWindow *wi
             slot->active = YES;
             slot->identity = AnClickHammerNewIdentity();
             slot->point = point;
-            slot->window = AnClickHammerWindowForPoint(point);
+            slot->window = AnClickHammerWindowCanReceivePoint(targetWindow, point) ? targetWindow : AnClickHammerWindowForPoint(point);
         } else if (!slot->active) {
             NSLog(@"[AnClick] HammerTouch dropped inactive phase=%ld id=%ld screen=(%.1f, %.1f)",
                   (long)phase,
@@ -467,12 +490,12 @@ static void AnClickHammerPrepareEventForWindow(IOHIDEventRef event, UIWindow *wi
         } else {
             slot->point = point;
             if (!slot->window || slot->window.hidden || slot->window.alpha <= 0.01) {
-                slot->window = AnClickHammerWindowForPoint(point);
+                slot->window = AnClickHammerWindowCanReceivePoint(targetWindow, point) ? targetWindow : AnClickHammerWindowForPoint(point);
             }
         }
 
         if (!eventWindow) {
-            eventWindow = slot->window ?: AnClickHammerWindowForPoint(point);
+            eventWindow = slot->window ?: (AnClickHammerWindowCanReceivePoint(targetWindow, point) ? targetWindow : AnClickHammerWindowForPoint(point));
         }
 
         if (!eventWindow) {

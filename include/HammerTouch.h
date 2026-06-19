@@ -14,8 +14,16 @@ typedef NS_ENUM(NSInteger, AnClickHammerTouchPhase) {
 + (NSInteger)availableTouchId;
 + (void)cancelAllActiveTouches;
 + (NSInteger)sendTouchId:(NSInteger)touchId atPoint:(CGPoint)point phase:(AnClickHammerTouchPhase)phase;
++ (NSInteger)sendTouchId:(NSInteger)touchId
+                 atPoint:(CGPoint)point
+                   phase:(AnClickHammerTouchPhase)phase
+            targetWindow:(UIWindow *)targetWindow;
 + (void)sendTouchIds:(NSArray<NSNumber *> *)touchIds
               points:(NSArray<NSValue *> *)points
               phases:(NSArray<NSNumber *> *)phases;
++ (void)sendTouchIds:(NSArray<NSNumber *> *)touchIds
+              points:(NSArray<NSValue *> *)points
+              phases:(NSArray<NSNumber *> *)phases
+        targetWindow:(UIWindow *)targetWindow;
 
 @end
