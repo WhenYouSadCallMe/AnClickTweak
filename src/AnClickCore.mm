@@ -14,7 +14,7 @@
 #define NSLog(...) do {} while (0)
 #endif
 
-@interface AnClickFakeTouch : NSObject
+@interface AnClickHammerTouchDriver : NSObject
 + (void)fastTapAtPoint:(CGPoint)point;
 @end
 
@@ -1113,7 +1113,7 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
 
     CGPoint point = pointValue.CGPointValue;
     dispatch_async(dispatch_get_main_queue(), ^{
-        [AnClickFakeTouch fastTapAtPoint:point];
+        [AnClickHammerTouchDriver fastTapAtPoint:point];
     });
     return YES;
 }

@@ -8,7 +8,7 @@
 #define NSLog(...) do {} while (0)
 #endif
 
-@interface AnClickFakeTouch : NSObject
+@interface AnClickHammerTouchDriver : NSObject
 + (void)fastTapAtPoint:(CGPoint)point;
 + (void)fastDoubleTapAtPoint:(CGPoint)point;
 + (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points;
@@ -33,7 +33,7 @@
 + (void)touchUpAtPoint:(CGPoint)point touchId:(NSInteger)touchId;
 @end
 
-@implementation AnClickFakeTouch
+@implementation AnClickHammerTouchDriver
 
 static NSInteger AnClickHoldTouchId = 0;
 static BOOL AnClickHolding = NO;

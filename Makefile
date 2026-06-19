@@ -14,7 +14,7 @@ OPENCV_LIB = $(THEOS_PROJECT_DIR)/opencv-ios-lib/libopencv_merged.a
 UIKitBridge_FILES = \
 	src/AnClickCore.mm \
 	src/AnClickOCR.mm \
-	src/AnClickFakeTouch.m \
+	src/AnClickHammerTouchDriver.m \
 	src/AnClickRecorder.m \
 	src/AnClickTaskModel.m \
 	src/AnClickTaskEngine.m \
