@@ -237,6 +237,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 + (void)cancelAll;
 + (BOOL)isHolding;
 + (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration;
++ (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration inWindow:(UIWindow *)targetWindow;
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events;
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events playbackSpeed:(NSTimeInterval)playbackSpeed;
 + (void)twoFingerTapAtPoint:(CGPoint)point distance:(CGFloat)distance;
@@ -6590,6 +6591,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return AnClickDefaultSwipeDuration;
 }
 
+- (NSTimeInterval)swipeOperationDurationForTask:(NSDictionary *)task {
+    return [self swipeDurationForTask:task] + 0.04;
+}
+
 - (NSTimeInterval)doubleTapIntervalForTask:(NSDictionary *)task {
     (void)task;
     return AnClickDefaultDoubleTapInterval;
@@ -8507,8 +8512,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             _statusLabel.text = _hasManualSwipeAnchor ? @"先取终点" : @"先取起点";
             return;
         }
-        [self showTrajectoryForScreenPoints:path inWindow:hostWindow duration:AnClickDefaultSwipeDuration];
-        [AnClickHammerTouchDriver playPath:path duration:AnClickDefaultSwipeDuration];
+        NSDictionary *task = _editingTaskModel ? [self taskDictionaryForModel:_editingTaskModel] : nil;
+        NSTimeInterval swipeDuration = task ? [self swipeDurationForTask:task] : AnClickDefaultSwipeDuration;
+        NSArray<NSValue *> *runtimePath = task ? [self runtimeLimitedSwipePath:[self path:path byApplyingSwipeStepForTask:task] forTask:task] : path;
+        [self showTrajectoryForScreenPoints:runtimePath inWindow:hostWindow duration:swipeDuration];
+        [AnClickHammerTouchDriver playPath:runtimePath duration:swipeDuration inWindow:hostWindow];
         _statusLabel.text = [NSString stringWithFormat:@"滑 %.0f,%.0f", point.x, point.y];
         return;
     }
@@ -10858,7 +10866,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     } else if (mode == AnClickActionModeLongPress) {
         duration = [self longPressOperationDurationForDuration:[self longPressDurationForTask:task]];
     } else if (mode == AnClickActionModeSwipe) {
-        duration = [self swipeDurationForTask:task];
+        duration = [self swipeOperationDurationForTask:task];
     }
 
     BOOL pointTapRepeatMode = mode == AnClickActionModeTap ||
@@ -10969,7 +10977,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         return path ?: @[];
     }
     id value = task[@"swipeStep"];
-    CGFloat step = [value respondsToSelector:@selector(doubleValue)] ? (CGFloat)[value doubleValue] : 0.0;
+    CGFloat step = [value respondsToSelector:@selector(doubleValue)] ? (CGFloat)[value doubleValue] : 12.0;
     if (step < 1.0) {
         return path;
     }
@@ -14196,7 +14204,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     } else if (mode == AnClickActionModeLongPress) {
         duration = [self longPressOperationDurationForDuration:[self longPressDurationForTask:task]];
     } else if (mode == AnClickActionModeSwipe) {
-        duration = [self swipeDurationForTask:task];
+        duration = [self swipeOperationDurationForTask:task];
     }
     if (turboPointTapRepeat) {
         __weak typeof(self) weakSelf = self;
@@ -14296,7 +14304,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 if (!suppressFastTrace) {
                     [strongSelf showTrajectoryForScreenPoints:path inWindow:currentHostWindow duration:swipeDuration];
                 }
-                [AnClickHammerTouchDriver playPath:path duration:swipeDuration];
+                [AnClickHammerTouchDriver playPath:path duration:swipeDuration inWindow:currentHostWindow];
             } else if (mode == AnClickActionModeImage) {
                 [strongSelf performImageTask:task inWindow:currentHostWindow runGeneration:runGeneration];
             } else if (mode == AnClickActionModeOCR) {

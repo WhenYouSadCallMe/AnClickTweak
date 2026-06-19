@@ -25,7 +25,9 @@
 + (BOOL)isHolding;
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end;
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end duration:(NSTimeInterval)duration steps:(NSUInteger)steps;
++ (void)swipeFrom:(CGPoint)start to:(CGPoint)end duration:(NSTimeInterval)duration steps:(NSUInteger)steps inWindow:(UIWindow *)targetWindow;
 + (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration;
++ (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration inWindow:(UIWindow *)targetWindow;
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events;
 + (void)playRecordedEvents:(NSArray<NSDictionary *> *)events playbackSpeed:(NSTimeInterval)playbackSpeed;
 + (void)twoFingerTapAtPoint:(CGPoint)point distance:(CGFloat)distance;
@@ -308,12 +310,20 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
 }
 
 + (void)swipeFrom:(CGPoint)start to:(CGPoint)end duration:(NSTimeInterval)duration steps:(NSUInteger)steps {
+    [self swipeFrom:start to:end duration:duration steps:steps inWindow:nil];
+}
+
++ (void)swipeFrom:(CGPoint)start to:(CGPoint)end duration:(NSTimeInterval)duration steps:(NSUInteger)steps inWindow:(UIWindow *)targetWindow {
     NSUInteger safeSteps = MAX(steps, 2);
-    NSInteger touchId = 2;
-    NSTimeInterval stepDuration = duration / (NSTimeInterval)safeSteps;
+    NSInteger touchId = [AnClickHammerTouch availableTouchId];
+    if (touchId <= 0) {
+        touchId = 4;
+    }
+    NSTimeInterval safeDuration = MAX(duration, 0.16);
+    NSTimeInterval stepDuration = safeDuration / (NSTimeInterval)safeSteps;
     NSUInteger generation = AnClickTouchGeneration;
 
-    [self touchDownAtPoint:start touchId:touchId];
+    [self touchDownAtPoint:start touchId:touchId inWindow:targetWindow];
     for (NSUInteger i = 1; i < safeSteps; i++) {
         CGFloat progress = (CGFloat)i / (CGFloat)safeSteps;
         CGPoint point = CGPointMake(start.x + (end.x - start.x) * progress,
@@ -322,28 +332,35 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
             if (![self touchGenerationIsCurrent:generation]) {
                 return;
             }
-            [self touchMoveAtPoint:point touchId:touchId];
+            [self touchMoveAtPoint:point touchId:touchId inWindow:targetWindow];
         });
     }
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(safeDuration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (![self touchGenerationIsCurrent:generation]) {
             return;
         }
-        [self finishTouchId:touchId atPoint:end cancelled:NO];
+        [self finishTouchId:touchId atPoint:end cancelled:NO targetWindow:targetWindow];
     });
 }
 
 + (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration {
+    [self playPath:points duration:duration inWindow:nil];
+}
+
++ (void)playPath:(NSArray<NSValue *> *)points duration:(NSTimeInterval)duration inWindow:(UIWindow *)targetWindow {
     if (points.count < 2) {
         return;
     }
 
-    NSInteger touchId = 4;
+    NSInteger touchId = [AnClickHammerTouch availableTouchId];
+    if (touchId <= 0) {
+        touchId = 4;
+    }
     NSTimeInterval safeDuration = MAX(duration, 0.16);
     NSUInteger lastIndex = points.count - 1;
     NSUInteger generation = AnClickTouchGeneration;
-    [self touchDownAtPoint:points.firstObject.CGPointValue touchId:touchId];
+    [self touchDownAtPoint:points.firstObject.CGPointValue touchId:touchId inWindow:targetWindow];
 
     for (NSUInteger i = 1; i < lastIndex; i++) {
         NSTimeInterval delay = safeDuration * ((NSTimeInterval)i / (NSTimeInterval)lastIndex);
@@ -352,7 +369,7 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
             if (![self touchGenerationIsCurrent:generation]) {
                 return;
             }
-            [self touchMoveAtPoint:point touchId:touchId];
+            [self touchMoveAtPoint:point touchId:touchId inWindow:targetWindow];
         });
     }
 
@@ -360,7 +377,7 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
         if (![self touchGenerationIsCurrent:generation]) {
             return;
         }
-        [self finishTouchId:touchId atPoint:points.lastObject.CGPointValue cancelled:NO];
+        [self finishTouchId:touchId atPoint:points.lastObject.CGPointValue cancelled:NO targetWindow:targetWindow];
     });
 }
 
