@@ -9,6 +9,7 @@
 #import <sys/sysctl.h>
 #import <unistd.h>
 #import <math.h>
+#import <string.h>
 #import "AnClickTypes.h"
 #import "AnClickTaskModel.h"
 #import "AnClickTaskEngine.h"
@@ -64,6 +65,7 @@ static const CFTimeInterval AnClickTemplateImageMetadataCheckInterval = 1.50;
 static const NSTimeInterval AnClickDefaultRecognitionRetryInterval = 0.20;
 static const CFTimeInterval AnClickVolumeShortcutStartupQuietInterval = 1.25;
 static const CFTimeInterval AnClickVolumeShortcutReattachQuietInterval = 0.70;
+static const CFTimeInterval AnClickVolumeShortcutForegroundQuietInterval = 1.80;
 static const NSInteger AnClickBranchSuccessSuccessActionTagBase = 21000;
 static const NSInteger AnClickBranchSuccessFailureActionTagBase = 22000;
 static const NSInteger AnClickBranchFailureSuccessActionTagBase = 23000;
@@ -281,6 +283,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)handleApplicationWillLeaveForeground;
 - (void)refreshObservedSystemVolumeBaseline;
 - (void)suppressPassiveVolumeShortcutEventsForInterval:(CFTimeInterval)interval;
+- (BOOL)volumeShortcutInputSuppressedAtTime:(CFTimeInterval)now;
 - (void)applyScreenGeometryRefreshAllowHeavyRefresh:(BOOL)allowHeavyRefresh;
 - (void)reclampPanelWindowForCurrentScreenAllowHeavyRefresh:(BOOL)allowHeavyRefresh;
 - (void)refreshActivePanelOverlayLayoutAllowHeavyRefresh:(BOOL)allowHeavyRefresh;
@@ -299,6 +302,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)showSaveTaskConfigNamePrompt;
 - (void)showTaskNotePromptForTaskAtIndex:(NSInteger)index;
 - (void)showSavedConfigListForDeleting:(BOOL)deleting;
+- (void)showSavedConfigListForDeleting:(BOOL)deleting sharing:(BOOL)sharing configsOverride:(NSArray *)configsOverride;
+- (void)showSavedConfigSharer;
 - (void)showDeleteSavedConfigConfirmationAtIndex:(NSInteger)index name:(NSString *)name taskCount:(NSUInteger)taskCount;
 - (void)registerKeyboardAvoidanceObserversIfNeeded;
 - (BOOL)currentEditorUsesNetworkPostPairs;
@@ -412,6 +417,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGFloat _taskReorderStartCenterY;
     BOOL _taskReordering;
     BOOL _configListDeleting;
+    BOOL _configListSharing;
     CGPoint _manualActionPoints[AnClickActionModeCount];
     BOOL _hasManualActionPoint[AnClickActionModeCount];
     CGPoint _manualSwipeAnchor;
@@ -1348,6 +1354,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _volumeShortcutIgnorePassiveEventsUntil = MAX(_volumeShortcutIgnorePassiveEventsUntil, now + interval);
 }
 
+- (BOOL)volumeShortcutInputSuppressedAtTime:(CFTimeInterval)now {
+    if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
+        return YES;
+    }
+    return _volumeShortcutIgnorePassiveEventsUntil > now;
+}
+
 - (void)installVolumeShortcutControl {
     UIWindow *hostWindow = [self hostWindow];
     UIView *hostView = hostWindow.rootViewController.view;
@@ -1560,7 +1573,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _hasObservedSystemVolume = YES;
         return;
     }
-    if (_volumeShortcutIgnorePassiveEventsUntil > now) {
+    if ([self volumeShortcutInputSuppressedAtTime:now]) {
         _lastObservedSystemVolume = volume;
         _hasObservedSystemVolume = YES;
         return;
@@ -1599,6 +1612,10 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     CFTimeInterval now = CACurrentMediaTime();
+    if ([self volumeShortcutInputSuppressedAtTime:now]) {
+        [self refreshObservedSystemVolumeBaseline];
+        return;
+    }
     if (_lastVolumeShortcutTime > 0 && now - _lastVolumeShortcutTime < 0.35) {
         return;
     }
@@ -3486,6 +3503,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL hadFunctionMenu = _functionMenuView != nil;
     BOOL hadConfigList = _configListView != nil;
     BOOL configListDeleting = _configListDeleting;
+    BOOL configListSharing = _configListSharing;
     BOOL hadSaveConfigPrompt = _configNameField != nil;
     NSString *configNameText = _configNameField.text ?: @"";
     NSInteger pendingDeleteIndex = _pendingConfigDeleteIndex;
@@ -3504,7 +3522,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                        preferredHeight:[self homeFloatingPanelPreferredHeightForTag:_functionMenuView.tag
                                                                            fallback:CGRectGetHeight(_functionMenuView.bounds)]];
         if (hadConfigList) {
-            [self showSavedConfigListForDeleting:configListDeleting];
+            [self showSavedConfigListForDeleting:configListDeleting sharing:configListSharing configsOverride:nil];
         } else {
             [self showFunctionMenu];
         }
@@ -5191,6 +5209,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _functionMenuView = nil;
     _configListView = nil;
     _configListDeleting = NO;
+    _configListSharing = NO;
 }
 
 - (UIButton *)functionMenuRowWithTitle:(NSString *)title subtitle:(NSString *)subtitle color:(UIColor *)color action:(SEL)action tag:(NSInteger)tag {
@@ -5233,16 +5252,25 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)layoutFunctionMenuRows:(NSArray<UIButton *> *)rows startY:(CGFloat)startY {
+    if (rows.count == 0) {
+        return;
+    }
+    UIView *container = rows.firstObject.superview ?: _functionMenuView;
     CGFloat side = 14.0;
-    CGFloat width = _functionMenuView.bounds.size.width - side * 2.0;
-    CGFloat rowHeight = 68.0;
-    CGFloat gap = 12.0;
+    CGFloat width = container.bounds.size.width - side * 2.0;
+    CGFloat rowHeight = rows.count > 3 ? 58.0 : 68.0;
+    CGFloat gap = rows.count > 3 ? 9.0 : 12.0;
+    CGFloat bottomY = startY;
     for (NSUInteger i = 0; i < rows.count; i++) {
         UIButton *row = rows[i];
         row.frame = CGRectMake(side, startY + (rowHeight + gap) * i, width, rowHeight);
         UILabel *chevron = (UILabel *)[row viewWithTag:9001];
         chevron.frame = CGRectMake(width - 44.0, 0, 34.0, rowHeight);
         [self updateButtonShadowPath:row];
+        bottomY = CGRectGetMaxY(row.frame);
+    }
+    if ([container isKindOfClass:UIScrollView.class]) {
+        ((UIScrollView *)container).contentSize = CGSizeMake(container.bounds.size.width, bottomY + 12.0);
     }
 }
 
@@ -5254,6 +5282,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _functionMenuView = [[UIView alloc] initWithFrame:_panelView.bounds];
     _functionMenuView.tag = AnClickHomeOptionPanelSaveTag;
     _configListDeleting = NO;
+    _configListSharing = NO;
     [self installDarkBlurInView:_functionMenuView cornerRadius:_panelView.layer.cornerRadius];
     _functionMenuView.layer.cornerRadius = _panelView.layer.cornerRadius;
     _functionMenuView.layer.borderWidth = 0.0;
@@ -5280,7 +5309,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [_functionMenuView addSubview:closeButton];
 
     UILabel *caption = [[UILabel alloc] initWithFrame:CGRectMake(18, 70, _functionMenuView.bounds.size.width - 36, 22)];
-    caption.text = @"保存 / 导入 / 删除";
+    caption.text = @"保存 / 选择 / 分享 / 删除";
     caption.textColor = [self themeSecondaryTextColor];
     caption.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
     [_functionMenuView addSubview:caption];
@@ -5295,15 +5324,29 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                   color:[self themeSurfaceColor]
                                                  action:@selector(showSavedConfigChooser)
                                                     tag:0];
+    UIButton *shareRow = [self functionMenuRowWithTitle:@"分享任务配置"
+                                               subtitle:@"导出已保存配置文件"
+                                                  color:[self themeSurfaceColor]
+                                                 action:@selector(showSavedConfigSharer)
+                                                    tag:0];
     UIButton *deleteRow = [self functionMenuRowWithTitle:@"删除任务配置"
                                                subtitle:@"删除前会再次确认"
                                                   color:[self themeSurfaceColor]
                                                  action:@selector(showSavedConfigDeleter)
                                                     tag:0];
-    [_functionMenuView addSubview:saveRow];
-    [_functionMenuView addSubview:chooseRow];
-    [_functionMenuView addSubview:deleteRow];
-    [self layoutFunctionMenuRows:@[saveRow, chooseRow, deleteRow] startY:108.0];
+    CGFloat rowsTop = 104.0;
+    UIScrollView *rowsScrollView = [[UIScrollView alloc] initWithFrame:CGRectMake(0.0,
+                                                                                  rowsTop,
+                                                                                  _functionMenuView.bounds.size.width,
+                                                                                  MAX(1.0, _functionMenuView.bounds.size.height - rowsTop - 10.0))];
+    rowsScrollView.backgroundColor = UIColor.clearColor;
+    rowsScrollView.showsVerticalScrollIndicator = YES;
+    [_functionMenuView addSubview:rowsScrollView];
+    [rowsScrollView addSubview:saveRow];
+    [rowsScrollView addSubview:chooseRow];
+    [rowsScrollView addSubview:shareRow];
+    [rowsScrollView addSubview:deleteRow];
+    [self layoutFunctionMenuRows:@[saveRow, chooseRow, shareRow, deleteRow] startY:0.0];
 }
 
 - (NSString *)defaultTaskConfigName {
@@ -5551,19 +5594,28 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self showSavedConfigListForDeleting:NO];
 }
 
+- (void)showSavedConfigSharer {
+    [self showSavedConfigListForDeleting:NO sharing:YES configsOverride:nil];
+}
+
 - (void)showSavedConfigDeleter {
     [self showSavedConfigListForDeleting:YES];
 }
 
 - (void)showSavedConfigListForDeleting:(BOOL)deleting {
-    [self showSavedConfigListForDeleting:deleting configsOverride:nil];
+    [self showSavedConfigListForDeleting:deleting sharing:NO configsOverride:nil];
 }
 
 - (void)showSavedConfigListForDeleting:(BOOL)deleting configsOverride:(NSArray *)configsOverride {
+    [self showSavedConfigListForDeleting:deleting sharing:NO configsOverride:configsOverride];
+}
+
+- (void)showSavedConfigListForDeleting:(BOOL)deleting sharing:(BOOL)sharing configsOverride:(NSArray *)configsOverride {
     if (!_functionMenuView) {
         [self showFunctionMenu];
     }
-    _configListDeleting = deleting;
+    _configListDeleting = deleting && !sharing;
+    _configListSharing = sharing;
     for (UIView *view in [_functionMenuView.subviews copy]) {
         if (view.tag != AnClickBackdropBlurViewTag) {
             [view removeFromSuperview];
@@ -5571,7 +5623,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(18, 14, _functionMenuView.bounds.size.width - 76, 34)];
-    titleLabel.text = [NSString stringWithFormat:@"%@ %@", [self toolDisplayName], deleting ? @"删除配置" : @"选择配置"];
+    NSString *modeTitle = sharing ? @"分享配置" : (deleting ? @"删除配置" : @"选择配置");
+    titleLabel.text = [NSString stringWithFormat:@"%@ %@", [self toolDisplayName], modeTitle];
     titleLabel.textColor = [self themePrimaryTextColor];
     titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
     titleLabel.adjustsFontSizeToFitWidth = YES;
@@ -5607,10 +5660,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         NSDictionary *config = configs[i];
         NSString *name = [config[@"name"] isKindOfClass:NSString.class] ? config[@"name"] : [NSString stringWithFormat:@"配置%lu", (unsigned long)i + 1];
         NSArray *tasks = [config[@"tasks"] isKindOfClass:NSArray.class] ? config[@"tasks"] : @[];
+        UIColor *rowColor = [self themeSurfaceColor];
+        SEL rowAction = @selector(loadSavedConfigButton:);
+        if (sharing) {
+            rowColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.10];
+            rowAction = @selector(shareSavedConfigButton:);
+        } else if (deleting) {
+            rowColor = [[UIColor systemRedColor] colorWithAlphaComponent:0.10];
+            rowAction = @selector(deleteSavedConfigButton:);
+        }
         UIButton *row = [self functionMenuRowWithTitle:name
                                               subtitle:[NSString stringWithFormat:@"%lu 个任务", (unsigned long)tasks.count]
-                                                 color:deleting ? [[UIColor systemRedColor] colorWithAlphaComponent:0.10] : [self themeSurfaceColor]
-                                                action:deleting ? @selector(deleteSavedConfigButton:) : @selector(loadSavedConfigButton:)
+                                                 color:rowColor
+                                                action:rowAction
                                                    tag:(NSInteger)i];
         row.frame = CGRectMake(0, 4.0 + (rowHeight + 10.0) * i, _configListView.bounds.size.width, rowHeight);
         UILabel *chevron = (UILabel *)[row viewWithTag:9001];
@@ -5641,6 +5703,134 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self hideFunctionMenu];
     [self showTaskHome];
     [self persistCurrentTaskList];
+    _statusLabel.text = @"";
+}
+
+- (NSString *)safeExportFileNameForConfigName:(NSString *)name {
+    NSString *base = [name isKindOfClass:NSString.class] && name.length > 0 ? name : @"AnClickConfig";
+    NSMutableCharacterSet *allowed = [[NSCharacterSet alphanumericCharacterSet] mutableCopy];
+    [allowed addCharactersInString:@"-_ "];
+    NSMutableString *result = [NSMutableString string];
+    for (NSUInteger i = 0; i < base.length; i++) {
+        unichar ch = [base characterAtIndex:i];
+        if ([allowed characterIsMember:ch]) {
+            [result appendFormat:@"%C", ch];
+        } else {
+            [result appendString:@"_"];
+        }
+    }
+    NSString *trimmed = [result stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trimmed.length == 0) {
+        trimmed = @"AnClickConfig";
+    }
+    if (trimmed.length > 48) {
+        trimmed = [trimmed substringToIndex:48];
+    }
+    return [trimmed stringByAppendingString:@".anclickconfig.json"];
+}
+
+- (id)jsonShareObjectFromObject:(id)object {
+    if (!object || object == NSNull.null) {
+        return NSNull.null;
+    }
+    if ([object isKindOfClass:NSString.class] ||
+        [object isKindOfClass:NSNumber.class]) {
+        return object;
+    }
+    if ([object isKindOfClass:NSValue.class]) {
+        const char *type = [(NSValue *)object objCType];
+        if (strcmp(type, @encode(CGPoint)) == 0) {
+            CGPoint point = [(NSValue *)object CGPointValue];
+            return @{@"type": @"CGPoint", @"x": @(point.x), @"y": @(point.y)};
+        }
+        if (strcmp(type, @encode(CGSize)) == 0) {
+            CGSize size = [(NSValue *)object CGSizeValue];
+            return @{@"type": @"CGSize", @"width": @(size.width), @"height": @(size.height)};
+        }
+        if (strcmp(type, @encode(CGRect)) == 0) {
+            CGRect rect = [(NSValue *)object CGRectValue];
+            return @{@"type": @"CGRect",
+                     @"x": @(rect.origin.x),
+                     @"y": @(rect.origin.y),
+                     @"width": @(rect.size.width),
+                     @"height": @(rect.size.height)};
+        }
+        return [object description] ?: @"";
+    }
+    if ([object isKindOfClass:NSDictionary.class]) {
+        NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+        [(NSDictionary *)object enumerateKeysAndObjectsUsingBlock:^(id key, id value, __unused BOOL *stop) {
+            NSString *jsonKey = [key isKindOfClass:NSString.class] ? key : [key description];
+            id jsonValue = [self jsonShareObjectFromObject:value];
+            if (jsonKey.length > 0 && jsonValue) {
+                dictionary[jsonKey] = jsonValue;
+            }
+        }];
+        return dictionary;
+    }
+    if ([object isKindOfClass:NSArray.class]) {
+        NSMutableArray *array = [NSMutableArray arrayWithCapacity:[(NSArray *)object count]];
+        for (id item in (NSArray *)object) {
+            id jsonItem = [self jsonShareObjectFromObject:item];
+            [array addObject:jsonItem ?: NSNull.null];
+        }
+        return array;
+    }
+    return [object description] ?: @"";
+}
+
+- (void)shareSavedConfigButton:(UIButton *)sender {
+    NSArray *configs = [self savedTaskConfigs];
+    NSInteger index = sender.tag;
+    if (index < 0 || index >= (NSInteger)configs.count) {
+        _statusLabel.text = @"配置不存在";
+        return;
+    }
+
+    NSDictionary *config = [configs[(NSUInteger)index] isKindOfClass:NSDictionary.class] ? configs[(NSUInteger)index] : @{};
+    NSString *name = [config[@"name"] isKindOfClass:NSString.class] ? config[@"name"] : [NSString stringWithFormat:@"配置%ld", (long)index + 1];
+    NSDictionary *payload = @{
+        @"format": @"AnClickTaskConfig",
+        @"version": @1,
+        @"exportedAt": @([NSDate date].timeIntervalSince1970),
+        @"config": [self jsonShareObjectFromObject:config] ?: @{}
+    };
+    if (![NSJSONSerialization isValidJSONObject:payload]) {
+        _statusLabel.text = @"配置无法导出";
+        return;
+    }
+
+    NSError *error = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:NSJSONWritingPrettyPrinted error:&error];
+    if (!data || error) {
+        _statusLabel.text = @"导出失败";
+        return;
+    }
+
+    NSString *fileName = [self safeExportFileNameForConfigName:name];
+    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:fileName];
+    NSURL *fileURL = [NSURL fileURLWithPath:path];
+    if (![data writeToURL:fileURL options:NSDataWritingAtomic error:&error]) {
+        _statusLabel.text = @"写入失败";
+        return;
+    }
+
+    UIViewController *presenter = _panelWindow.rootViewController ?: UIApplication.sharedApplication.keyWindow.rootViewController;
+    if (!presenter) {
+        _statusLabel.text = @"无法打开分享";
+        return;
+    }
+    while (presenter.presentedViewController) {
+        presenter = presenter.presentedViewController;
+    }
+
+    UIActivityViewController *activity = [[UIActivityViewController alloc] initWithActivityItems:@[fileURL] applicationActivities:nil];
+    UIPopoverPresentationController *popover = activity.popoverPresentationController;
+    if (popover) {
+        popover.sourceView = sender ?: _functionMenuView ?: _panelView;
+        popover.sourceRect = sender ? sender.bounds : (popover.sourceView ? popover.sourceView.bounds : CGRectZero);
+    }
+    [presenter presentViewController:activity animated:YES completion:nil];
     _statusLabel.text = @"";
 }
 
@@ -8002,13 +8192,24 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (void)handleApplicationDidBecomeActive {
+    [self refreshObservedSystemVolumeBaseline];
+    [self suppressPassiveVolumeShortcutEventsForInterval:AnClickVolumeShortcutForegroundQuietInterval];
+    _lastVolumeShortcutTime = 0;
     [self show];
     [self handleScreenGeometryChanged];
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+        [strongSelf refreshObservedSystemVolumeBaseline];
+        [strongSelf suppressPassiveVolumeShortcutEventsForInterval:AnClickVolumeShortcutReattachQuietInterval];
+    });
     if (!_taskRunPausedForForeground) {
         return;
     }
 
-    __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.20 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         __strong typeof(weakSelf) strongSelf = weakSelf;
         [strongSelf resumePausedTaskRunAttempt:0];
@@ -8016,6 +8217,8 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (void)handleApplicationWillLeaveForeground {
+    [self refreshObservedSystemVolumeBaseline];
+    [self suppressPassiveVolumeShortcutEventsForInterval:AnClickVolumeShortcutForegroundQuietInterval];
     if (_panelWindow) {
         if (_panelExpanded) {
             [self rememberExpandedPanelFrame:_panelWindow.frame];
