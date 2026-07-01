@@ -5815,7 +5815,30 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return;
     }
 
-    UIViewController *presenter = _panelWindow.rootViewController ?: UIApplication.sharedApplication.keyWindow.rootViewController;
+    UIViewController *presenter = _panelWindow.rootViewController;
+    if (!presenter) {
+        presenter = [self hostWindow].rootViewController;
+    }
+    if (!presenter) {
+        if (@available(iOS 13.0, *)) {
+            UIWindowScene *scene = [self activeWindowScene];
+            for (UIWindow *window in scene.windows) {
+                if (window.rootViewController && !window.hidden && window.alpha > 0.01) {
+                    presenter = window.rootViewController;
+                    break;
+                }
+            }
+        }
+    }
+    if (!presenter) {
+        NSArray<UIWindow *> *windows = [UIApplication.sharedApplication valueForKey:@"windows"];
+        for (UIWindow *window in windows) {
+            if (window.rootViewController && !window.hidden && window.alpha > 0.01) {
+                presenter = window.rootViewController;
+                break;
+            }
+        }
+    }
     if (!presenter) {
         _statusLabel.text = @"无法打开分享";
         return;
