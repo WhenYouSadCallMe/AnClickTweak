@@ -766,7 +766,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)toolDisplayName {
-    return @"安姐点击器V3.05";
+    return @"安姐点击器V3.06";
 }
 
 - (void)markPanelSceneUnavailable {

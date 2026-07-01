@@ -3,7 +3,7 @@ TARGET := iphone:clang:latest:14.0
 DEBUG = 0
 FINALPACKAGE = 1
 STRIP = 1
-ANCLICK_VERSION = 3.05
+ANCLICK_VERSION = 3.06
 
 include $(THEOS)/makefiles/common.mk
 
