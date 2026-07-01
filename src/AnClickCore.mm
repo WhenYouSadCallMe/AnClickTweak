@@ -1008,6 +1008,12 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
     }
 
     const AnClickColorPoint &anchorPoint = normalizedPoints[0];
+    BOOL usesVerticallyFlippedImageCoordinates = AnClickMatAppearsVerticallyFlippedFromImage(sourceImage, source);
+    if (usesVerticallyFlippedImageCoordinates) {
+        for (AnClickColorPoint &colorPoint : normalizedPoints) {
+            colorPoint.dy = -colorPoint.dy;
+        }
+    }
 
     minDx = 0;
     minDy = 0;
@@ -1089,6 +1095,9 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
     matchedPixels.reserve(normalizedPoints.size());
     for (const AnClickColorPoint &point : normalizedPoints) {
         cv::Point matchedPixel(bestAnchor.x + point.dx, bestAnchor.y + point.dy);
+        if (usesVerticallyFlippedImageCoordinates) {
+            matchedPixel.y = source.rows - 1 - matchedPixel.y;
+        }
         matchedPixels.push_back(matchedPixel);
     }
     return AnClickColorMatchResult(sourceWindow,
