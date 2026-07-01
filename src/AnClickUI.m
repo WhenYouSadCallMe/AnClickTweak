@@ -2677,6 +2677,34 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [self path:points mappedFromScreenSize:sourceSize toScreenSize:targetSize];
 }
 
+- (NSArray<NSValue *> *)resolvedMultiTapPointsForTask:(NSDictionary *)task anchoredAtRecognitionPoint:(CGPoint)matchPoint {
+    NSArray<NSValue *> *points = [self resolvedMultiTapPointsForTask:task];
+    if (points.count < 2) {
+        return @[];
+    }
+
+    CGPoint anchorPoint = points.firstObject.CGPointValue;
+    CGFloat dx = matchPoint.x - anchorPoint.x;
+    CGFloat dy = matchPoint.y - anchorPoint.y;
+    CGSize screenSize = [self currentScreenCoordinateSize];
+    BOOL hasScreenSize = [self screenCoordinateSizeIsValid:screenSize];
+    NSMutableArray<NSValue *> *anchoredPoints = [NSMutableArray arrayWithCapacity:points.count];
+    for (NSValue *value in points) {
+        if (![value isKindOfClass:NSValue.class]) {
+            continue;
+        }
+        CGPoint point = value.CGPointValue;
+        point.x += dx;
+        point.y += dy;
+        if (hasScreenSize) {
+            point.x = MIN(MAX(0.0, point.x), screenSize.width);
+            point.y = MIN(MAX(0.0, point.y), screenSize.height);
+        }
+        [anchoredPoints addObject:[NSValue valueWithCGPoint:point]];
+    }
+    return anchoredPoints.count >= 2 ? anchoredPoints : @[];
+}
+
 - (NSArray<NSDictionary *> *)resolvedRecordedEvents:(NSArray<NSDictionary *> *)events fromScreenSize:(CGSize)sourceSize {
     CGSize targetSize = [self currentScreenCoordinateSize];
     if (![self screenCoordinateSizeIsValid:sourceSize]) {
@@ -9079,31 +9107,17 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         return nil;
     }
 
+    if (success) {
+        if (actionMode == AnClickActionModeTwoFingerTap &&
+            [self storedMultiTapPointsForTask:task].count >= 2) {
+            return @"识别结果+多指偏移";
+        }
+        return @"识别结果";
+    }
+
     NSDictionary *branchConfig = [self branchActionConfigForTask:task success:success expectedMode:actionMode];
     if (branchConfig) {
         return [self taskListPointSummaryForTask:branchConfig];
-    }
-
-    if (success) {
-        NSValue *successPointValue = task[@"successPoint"];
-        if (successPointValue) {
-            CGPoint point = [self resolvedPoint:successPointValue.CGPointValue
-                                        forTask:task
-                                  screenSizeKey:@"successPointScreenSize"];
-            return [self pointCoordinateText:point];
-        }
-
-        BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
-        if (useMatchPoint) {
-            return @"识别中心";
-        }
-
-        NSValue *customPointValue = task[@"point"];
-        if (customPointValue) {
-            CGPoint point = [self resolvedPointForTask:task fallbackPoint:customPointValue.CGPointValue];
-            return [self pointCoordinateText:point];
-        }
-        return @"未取点";
     }
 
     CGPoint failurePoint = CGPointZero;
@@ -9893,13 +9907,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (NSString *)taskListPointSummaryForTask:(NSDictionary *)task {
+    if ([self modeIsRecognitionTask:[self modeForTask:task]]) {
+        return @"识别结果";
+    }
     CGPoint point = CGPointZero;
     if ([self primaryPointForTask:task point:&point]) {
         return [self pointCoordinateText:point];
-    }
-    if ([self modeIsRecognitionTask:[self modeForTask:task]] &&
-        ([task[@"useMatchPoint"] boolValue] || task[@"useMatchPoint"] == nil)) {
-        return @"识别中心";
     }
     return @"未取点";
 }
@@ -11601,20 +11614,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if (!rawConfig) {
         return nil;
     }
-    if (expectedMode == AnClickActionModeTwoFingerTap &&
-        [self storedMultiTapPointsForTask:rawConfig].count >= 2) {
-        return rawConfig;
-    }
-
-    id useMatchPointValue = rawConfig[@"useMatchPoint"];
-    BOOL useMatchPoint = [useMatchPointValue respondsToSelector:@selector(boolValue)]
-        ? [useMatchPointValue boolValue]
-        : YES;
-    if (!useMatchPoint) {
-        return rawConfig[@"point"] ? rawConfig : nil;
-    }
     if (!hasMatchPoint) {
-        return nil;
+        if (expectedMode == AnClickActionModeTwoFingerTap &&
+            [self storedMultiTapPointsForTask:rawConfig].count >= 2) {
+            return rawConfig;
+        }
+        return rawConfig[@"point"] ? rawConfig : nil;
     }
 
     NSMutableDictionary *config = [rawConfig mutableCopy];
@@ -12040,20 +12045,22 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                   customPointValue:(NSValue *)customPointValue
                      useMatchPoint:(BOOL)useMatchPoint
                              point:(CGPoint *)point {
-    NSValue *successPointValue = task[@"successPoint"];
-    if (successPointValue) {
-        if (point) {
-            *point = [self resolvedPoint:successPointValue.CGPointValue forTask:task screenSizeKey:@"successPointScreenSize"];
-        }
-        return YES;
-    }
-    if (useMatchPoint && hasMatchPoint) {
+    if (hasMatchPoint) {
         if (point) {
             *point = matchPoint;
         }
         return YES;
     }
-    if (customPointValue) {
+
+    BOOL shouldUseSavedFallback = !useMatchPoint || !hasMatchPoint;
+    NSValue *successPointValue = task[@"successPoint"];
+    if (shouldUseSavedFallback && successPointValue) {
+        if (point) {
+            *point = [self resolvedPoint:successPointValue.CGPointValue forTask:task screenSizeKey:@"successPointScreenSize"];
+        }
+        return YES;
+    }
+    if (shouldUseSavedFallback && customPointValue) {
         if (point) {
             *point = [self resolvedPointForTask:task fallbackPoint:customPointValue.CGPointValue];
         }
@@ -13160,8 +13167,13 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         return NO;
     }
 
+    NSValue *pointValue = [config[@"point"] isKindOfClass:NSValue.class] ? config[@"point"] : nil;
     if (actionMode == AnClickActionModeTwoFingerTap) {
-        NSArray<NSValue *> *points = [self points:[self resolvedMultiTapPointsForTask:config] byApplyingJitterForTask:config];
+        BOOL useMatchPoint = config[@"useMatchPoint"] ? [config[@"useMatchPoint"] boolValue] : NO;
+        NSArray<NSValue *> *basePoints = pointValue && useMatchPoint
+            ? [self resolvedMultiTapPointsForTask:config anchoredAtRecognitionPoint:pointValue.CGPointValue]
+            : [self resolvedMultiTapPointsForTask:config];
+        NSArray<NSValue *> *points = [self points:basePoints byApplyingJitterForTask:config];
         if (points.count >= 2) {
             NSTimeInterval successDelay = [self recognitionSuccessActionDelayForTask:config];
             [self scheduleRecognitionPointActionAfterDelay:successDelay
@@ -13180,7 +13192,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         }
     }
 
-    NSValue *pointValue = [config[@"point"] isKindOfClass:NSValue.class] ? config[@"point"] : nil;
     if (!pointValue) {
         return NO;
     }
@@ -13252,7 +13263,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         return;
     }
 
-    BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
     AnClickActionMode imageActionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
     NSNumber *thresholdNumber = task[@"threshold"];
     double threshold = thresholdNumber ? MIN(1.0, MAX(0.0, thresholdNumber.doubleValue)) : 0.80;
@@ -13337,13 +13347,16 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     }
                     return;
                 }
-                NSDictionary *successConfig = [strongSelf branchActionConfigForTask:task success:YES expectedMode:imageActionMode];
-                if (!successConfig) {
+                NSDictionary *successConfig = nil;
+                if ([strongSelf modeCanUseRecognitionPoint:imageActionMode]) {
                     successConfig = [strongSelf pointBranchActionConfigForTask:task
                                                                         success:YES
                                                                    expectedMode:imageActionMode
                                                                      matchPoint:matchPointValue.CGPointValue
                                                                   hasMatchPoint:YES];
+                }
+                if (!successConfig) {
+                    successConfig = [strongSelf branchActionConfigForTask:task success:YES expectedMode:imageActionMode];
                 }
                 if (successConfig) {
                     NSMutableDictionary *delayedSuccessConfig = [successConfig mutableCopy];
@@ -13436,7 +13449,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                  matchPoint:matchPointValue.CGPointValue
                                               hasMatchPoint:YES
                                            customPointValue:customPointValue
-                                              useMatchPoint:useMatchPoint
+                                              useMatchPoint:YES
                                                       point:&actionPoint]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     [strongSelf showTurboAwareStatusToast:@"识图成功动作未取点"];
@@ -13519,18 +13532,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         return;
     }
     AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
-    BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
     NSValue *customPointValue = task[@"point"];
-    if ([self recognitionActionModeNeedsPoint:actionMode] &&
-        !useMatchPoint &&
-        !customPointValue &&
-        !task[@"successPoint"]) {
-        [self setTurboAwareStatusLabelText:@"识字未取点"];
-        if (completion) {
-            completion(NO, NO, 0.0);
-        }
-        return;
-    }
     BOOL shouldRestorePanel = [self hideOwnUIForRecognitionCaptureWithHostWindow:hostWindow];
     _templateSearchInProgress = YES;
     NSUInteger geometryGeneration = _screenGeometryGeneration;
@@ -13643,13 +13645,16 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     }
                     return;
                 }
-                NSDictionary *successConfig = [strongSelf branchActionConfigForTask:task success:YES expectedMode:actionMode];
-                if (!successConfig) {
+                NSDictionary *successConfig = nil;
+                if ([strongSelf modeCanUseRecognitionPoint:actionMode]) {
                     successConfig = [strongSelf pointBranchActionConfigForTask:task
                                                                         success:YES
                                                                    expectedMode:actionMode
                                                                      matchPoint:pointValue.CGPointValue
                                                                   hasMatchPoint:YES];
+                }
+                if (!successConfig) {
+                    successConfig = [strongSelf branchActionConfigForTask:task success:YES expectedMode:actionMode];
                 }
                 if (successConfig) {
                     NSMutableDictionary *delayedSuccessConfig = [successConfig mutableCopy];
@@ -13747,7 +13752,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                  matchPoint:pointValue.CGPointValue
                                               hasMatchPoint:YES
                                            customPointValue:customPointValue
-                                              useMatchPoint:useMatchPoint
+                                              useMatchPoint:YES
                                                       point:&actionPoint]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     [strongSelf showTurboAwareStatusToast:@"识字成功动作未取点"];
@@ -13828,7 +13833,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     BOOL invertColorMatch = [task[@"colorMatchMode"] respondsToSelector:@selector(integerValue)] &&
         [task[@"colorMatchMode"] integerValue] == 1;
     AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
-    BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
     NSValue *customPointValue = task[@"point"];
     __block NSString *patternSummary = [self colorPatternSummaryForTask:task];
     BOOL shouldRestorePanel = [self hideOwnUIForRecognitionCaptureWithHostWindow:hostWindow];
@@ -13938,13 +13942,16 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     }
                     return;
                 }
-                NSDictionary *successConfig = [strongSelf branchActionConfigForTask:task success:YES expectedMode:actionMode];
-                if (!successConfig) {
+                NSDictionary *successConfig = nil;
+                if ([strongSelf modeCanUseRecognitionPoint:actionMode]) {
                     successConfig = [strongSelf pointBranchActionConfigForTask:task
                                                                         success:YES
                                                                    expectedMode:actionMode
                                                                      matchPoint:pointValue.CGPointValue
                                                                   hasMatchPoint:YES];
+                }
+                if (!successConfig) {
+                    successConfig = [strongSelf branchActionConfigForTask:task success:YES expectedMode:actionMode];
                 }
                 if (successConfig) {
                     NSMutableDictionary *delayedSuccessConfig = [successConfig mutableCopy];
@@ -14039,7 +14046,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                  matchPoint:pointValue.CGPointValue
                                               hasMatchPoint:YES
                                            customPointValue:customPointValue
-                                              useMatchPoint:useMatchPoint
+                                              useMatchPoint:YES
                                                       point:&actionPoint]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     [strongSelf showTurboAwareStatusToast:@"识色成功动作未取点"];
@@ -14231,7 +14238,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             _statusLabel.text = @"任务识图未截图";
             return NO;
         }
-        BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
         AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
         AnClickActionMode failureMode = [self failureActionModeForTask:task];
         BOOL successUsesFullConfig = [self branchActionConfigForTask:task success:YES expectedMode:actionMode] != nil;
@@ -14247,14 +14253,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 _statusLabel.text = @"任务识图POST键值未填写";
                 return NO;
             }
-        }
-        if (!successUsesFullConfig &&
-            [self recognitionActionModeNeedsPoint:actionMode] &&
-            !useMatchPoint &&
-            !task[@"point"] &&
-            !task[@"successPoint"]) {
-            _statusLabel.text = @"任务识图未取点";
-            return NO;
         }
         if (!failureUsesFullConfig && [self failureActionModeNeedsPoint:failureMode]) {
             CGPoint failurePoint = CGPointZero;
@@ -14285,7 +14283,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             _statusLabel.text = @"任务正则表达式无效";
             return NO;
         }
-        BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
         AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
         AnClickActionMode failureMode = [self failureActionModeForTask:task];
         BOOL successUsesFullConfig = [self branchActionConfigForTask:task success:YES expectedMode:actionMode] != nil;
@@ -14301,14 +14298,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 _statusLabel.text = @"任务POST键值未填写";
                 return NO;
             }
-        }
-        if (!successUsesFullConfig &&
-            [self recognitionActionModeNeedsPoint:actionMode] &&
-            !useMatchPoint &&
-            !task[@"point"] &&
-            !task[@"successPoint"]) {
-            _statusLabel.text = @"任务识字未取点";
-            return NO;
         }
         if (!failureUsesFullConfig && [self failureActionModeNeedsPoint:failureMode]) {
             CGPoint failurePoint = CGPointZero;
@@ -14335,7 +14324,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         }
         AnClickActionMode actionMode = [self normalizedImageActionMode:(AnClickActionMode)[task[@"imageActionMode"] integerValue]];
         AnClickActionMode failureMode = [self failureActionModeForTask:task];
-        BOOL useMatchPoint = task[@"useMatchPoint"] ? [task[@"useMatchPoint"] boolValue] : YES;
         BOOL successUsesFullConfig = [self branchActionConfigForTask:task success:YES expectedMode:actionMode] != nil;
         BOOL failureUsesFullConfig = [self branchActionConfigForTask:task success:NO expectedMode:failureMode] != nil;
         if ((actionMode == AnClickActionModeNetwork && !successUsesFullConfig) ||
@@ -14356,14 +14344,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 _statusLabel.text = @"任务识色失败动作未取点";
                 return NO;
             }
-        }
-        if (!successUsesFullConfig &&
-            [self recognitionActionModeNeedsPoint:actionMode] &&
-            !useMatchPoint &&
-            !task[@"point"] &&
-            !task[@"successPoint"]) {
-            _statusLabel.text = @"任务识色未取点";
-            return NO;
         }
         if (![self validateSuccessRecognitionActionTaskForTask:task]) {
             return NO;
@@ -16043,10 +16023,6 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                         [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue score:[match[@"score"] doubleValue] inWindow:hostWindow duration:previewDuration];
                     }
                     CGPoint point = pointValue ? pointValue.CGPointValue : CGPointZero;
-                    if (!strongSelf->_imageUsesMatchPoint &&
-                        [strongSelf hasManualPointForMode:AnClickActionModeColor]) {
-                        point = strongSelf->_manualActionPoints[(NSUInteger)AnClickActionModeColor];
-                    }
                     strongSelf->_statusLabel.text = [NSString stringWithFormat:@"预览识色 %@ %.0f,%.0f", patternSummary, point.x, point.y];
                     [strongSelf restorePanelAfterScreenDelay:previewDuration + 0.1];
             }];
