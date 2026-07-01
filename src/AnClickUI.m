@@ -59,7 +59,11 @@ static const NSTimeInterval AnClickRunTraceMinInterval = 0.300;
 static const NSTimeInterval AnClickGlobalTimerLateFireGrace = 5.000;
 static const NSTimeInterval AnClickMinJumpContinuationInterval = 0.030;
 static const NSUInteger AnClickMaxJumpVisitsPerRun = 96;
-static const CFTimeInterval AnClickRunListRefreshMinInterval = 0.75;
+static const CFTimeInterval AnClickRunListRefreshMinInterval = 2.0;
+static const CFTimeInterval AnClickTemplateImageMetadataCheckInterval = 1.50;
+static const NSTimeInterval AnClickDefaultRecognitionRetryInterval = 0.20;
+static const CFTimeInterval AnClickVolumeShortcutStartupQuietInterval = 1.25;
+static const CFTimeInterval AnClickVolumeShortcutReattachQuietInterval = 0.70;
 static const NSInteger AnClickBranchSuccessSuccessActionTagBase = 21000;
 static const NSInteger AnClickBranchSuccessFailureActionTagBase = 22000;
 static const NSInteger AnClickBranchFailureSuccessActionTagBase = 23000;
@@ -98,6 +102,12 @@ static const NSInteger AnClickHomeOptionPanelLoopTag = 54102;
 static const NSInteger AnClickHomeOptionPanelSaveTag = 54103;
 static const NSInteger AnClickHomeOptionPanelMonitorTag = 54104;
 static const NSInteger AnClickHomeOptionContentViewTag = 54120;
+typedef NS_ENUM(NSInteger, AnClickCollapsedButtonVisualState) {
+    AnClickCollapsedButtonVisualStateUnknown = -1,
+    AnClickCollapsedButtonVisualStateIdle = 0,
+    AnClickCollapsedButtonVisualStateRunning = 1,
+    AnClickCollapsedButtonVisualStateRecording = 2,
+};
 static const NSTimeInterval AnClickRecognitionCaptureDelay = 0.045;
 static const NSTimeInterval AnClickVisualRecognitionCaptureDelay = 0.040;
 static const NSTimeInterval AnClickColorRecognitionCaptureDelay = 0.030;
@@ -117,13 +127,13 @@ static void (*AnClickOriginalSpringBoardHandlePhysicalButtonEvent)(id self, SEL 
 extern int ptrace(int request, pid_t pid, void *addr, int data);
 
 static NSTimeInterval AnClickLocalExpiryUnixTime(void) {
-    const uint8_t encoded[] = {0x26, 0xA7, 0x1F, 0xF8, 0x0F, 0xC4, 0x78, 0xB3};
+    const uint8_t encoded[] = {0xA6, 0x94, 0xC8, 0xF8, 0x0F, 0xC4, 0x78, 0xB3};
     const uint8_t masks[] = {0xA6, 0x31, 0x5D, 0x92, 0x0F, 0xC4, 0x78, 0xB3};
     uint64_t value = 0;
     for (size_t i = 0; i < sizeof(encoded); i++) {
         value |= ((uint64_t)(encoded[i] ^ masks[i])) << (8 * i);
     }
-    if (((uint32_t)value ^ 0xA70C91EFu) != 0xCD4E076Fu ||
+    if (((uint32_t)value ^ 0xA70C91EFu) != 0xCD9934EFu ||
         value < 1600000000ULL ||
         value > 2200000000ULL) {
         return 1.0;
@@ -269,6 +279,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)handleExternalVolumeShortcutDirection:(NSInteger)direction;
 - (void)handleApplicationDidBecomeActive;
 - (void)handleApplicationWillLeaveForeground;
+- (void)refreshObservedSystemVolumeBaseline;
+- (void)suppressPassiveVolumeShortcutEventsForInterval:(CFTimeInterval)interval;
 - (void)applyScreenGeometryRefreshAllowHeavyRefresh:(BOOL)allowHeavyRefresh;
 - (void)reclampPanelWindowForCurrentScreenAllowHeavyRefresh:(BOOL)allowHeavyRefresh;
 - (void)refreshActivePanelOverlayLayoutAllowHeavyRefresh:(BOOL)allowHeavyRefresh;
@@ -294,6 +306,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)cleanupScreenInteractionStateRestoringPanel:(BOOL)restorePanel;
 - (void)showToast:(NSString *)message;
 - (void)setHomeOutputText:(NSString *)text;
+- (BOOL)shouldSuppressTurboRunStatusText:(NSString *)text;
+- (void)setTurboAwareStatusLabelText:(NSString *)text;
+- (void)showTurboAwareStatusToast:(NSString *)text;
 - (BOOL)homeOutputTextIsError:(NSString *)text;
 - (void)copyHomeOutputText;
 - (void)applyLowPowerEngineSettings;
@@ -378,6 +393,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     UIButton *_globalStopTimeButton;
     UIButton *_globalNetworkGateButton;
     UIButton *_globalLowPowerButton;
+    UIButton *_globalTurboModeButton;
     UIView *_globalTimePickerView;
     UIPickerView *_globalTimePicker;
     UIScrollView *_configListView;
@@ -421,6 +437,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CGRect _collapsedPanelFrame;
     CGPoint _collapsedPanelOriginRatio;
     CGSize _collapsedPanelScreenSize;
+    CGSize _collapsedButtonVisualSize;
+    AnClickCollapsedButtonVisualState _collapsedButtonVisualState;
     BOOL _hasCollapsedPanelFrame;
     BOOL _hasCollapsedPanelOriginRatio;
     CGRect _expandedPanelFrame;
@@ -437,6 +455,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     BOOL _globalStopEnabled;
     BOOL _globalNetworkGateEnabled;
     BOOL _globalLowPowerModeEnabled;
+    BOOL _globalTurboModeEnabled;
     BOOL _networkRequestOnly;
     BOOL _networkUsesPost;
     BOOL _networkPostBodyUsesOCRResult;
@@ -473,6 +492,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     CFTimeInterval _toastDeferNonVolumeUntil;
     CFTimeInterval _lastVolumeShortcutTime;
     CFTimeInterval _ignoreVolumeEventsUntil;
+    CFTimeInterval _volumeShortcutIgnorePassiveEventsUntil;
     NSInteger _globalDelayMilliseconds;
     NSInteger _globalRunRepeatCount;
     NSInteger _globalLoopIntervalSeconds;
@@ -526,6 +546,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     NSString *_currentTemplatePath;
     NSCache<NSString *, UIImage *> *_templateImageCache;
     NSMutableDictionary<NSString *, NSDate *> *_templateImageModificationDates;
+    NSMutableDictionary<NSString *, NSNumber *> *_templateImageNextValidationTimes;
     NSString *_actionDescription;
     NSString *_ocrTargetText;
     NSString *_networkURL;
@@ -739,7 +760,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (NSString *)toolDisplayName {
-    return @"安姐点击器V3.0.1";
+    return @"安姐点击器V3.05";
 }
 
 - (void)markPanelSceneUnavailable {
@@ -1215,6 +1236,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)registerVolumeShortcutObserver {
+    [self suppressPassiveVolumeShortcutEventsForInterval:AnClickVolumeShortcutStartupQuietInterval];
     [self activateVolumeShortcutAudioSession];
     [self installVolumeShortcutControl];
     [self registerVolumeOutputObserverIfNeeded];
@@ -1226,8 +1248,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     }
 
     _volumeShortcutRegistered = YES;
-    _lastObservedSystemVolume = AVAudioSession.sharedInstance.outputVolume;
-    _hasObservedSystemVolume = YES;
+    [self refreshObservedSystemVolumeBaseline];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(handleSystemVolumeDidChange:)
                                                  name:@"AVSystemController_SystemVolumeDidChangeNotification"
@@ -1317,6 +1338,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _volumeSlider = _volumeView ? [self volumeSliderInView:_volumeView] : nil;
 }
 
+- (void)refreshObservedSystemVolumeBaseline {
+    _lastObservedSystemVolume = AVAudioSession.sharedInstance.outputVolume;
+    _hasObservedSystemVolume = YES;
+}
+
+- (void)suppressPassiveVolumeShortcutEventsForInterval:(CFTimeInterval)interval {
+    CFTimeInterval now = CACurrentMediaTime();
+    _volumeShortcutIgnorePassiveEventsUntil = MAX(_volumeShortcutIgnorePassiveEventsUntil, now + interval);
+}
+
 - (void)installVolumeShortcutControl {
     UIWindow *hostWindow = [self hostWindow];
     UIView *hostView = hostWindow.rootViewController.view;
@@ -1349,9 +1380,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self refreshVolumeSliderReference];
     [_volumeSlider removeTarget:self action:@selector(handleVolumeSliderValueChanged:) forControlEvents:UIControlEventValueChanged];
     [_volumeSlider addTarget:self action:@selector(handleVolumeSliderValueChanged:) forControlEvents:UIControlEventValueChanged];
-    float currentVolume = AVAudioSession.sharedInstance.outputVolume;
-    _lastObservedSystemVolume = currentVolume;
-    _hasObservedSystemVolume = YES;
+    [self refreshObservedSystemVolumeBaseline];
+    [self suppressPassiveVolumeShortcutEventsForInterval:AnClickVolumeShortcutReattachQuietInterval];
 
     if (!_volumeSlider) {
         __weak typeof(self) weakSelf = self;
@@ -1363,9 +1393,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
             [strongSelf refreshVolumeSliderReference];
             [strongSelf->_volumeSlider removeTarget:strongSelf action:@selector(handleVolumeSliderValueChanged:) forControlEvents:UIControlEventValueChanged];
             [strongSelf->_volumeSlider addTarget:strongSelf action:@selector(handleVolumeSliderValueChanged:) forControlEvents:UIControlEventValueChanged];
-            float delayedVolume = AVAudioSession.sharedInstance.outputVolume;
-            strongSelf->_lastObservedSystemVolume = delayedVolume;
-            strongSelf->_hasObservedSystemVolume = YES;
+            [strongSelf refreshObservedSystemVolumeBaseline];
+            [strongSelf suppressPassiveVolumeShortcutEventsForInterval:AnClickVolumeShortcutReattachQuietInterval];
         });
     }
 }
@@ -1531,6 +1560,11 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _hasObservedSystemVolume = YES;
         return;
     }
+    if (_volumeShortcutIgnorePassiveEventsUntil > now) {
+        _lastObservedSystemVolume = volume;
+        _hasObservedSystemVolume = YES;
+        return;
+    }
 
     if (!_hasObservedSystemVolume) {
         _lastObservedSystemVolume = volume;
@@ -1644,28 +1678,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)handleScreenGeometryChanged {
     void (^geometryBlock)(void) = ^{
         NSUInteger generation = ++self->_screenGeometryRefreshGeneration;
-        BOOL hadCollapsedFrame = self->_hasCollapsedPanelFrame;
-        BOOL hadCollapsedRatio = self->_hasCollapsedPanelOriginRatio;
-        CGRect collapsedFrame = self->_collapsedPanelFrame;
-        CGPoint collapsedRatio = self->_collapsedPanelOriginRatio;
-        CGSize collapsedScreenSize = self->_collapsedPanelScreenSize;
-        BOOL hadExpandedFrame = self->_hasExpandedPanelFrame;
-        BOOL hadExpandedRatio = self->_hasExpandedPanelOriginRatio;
-        CGRect expandedFrame = self->_expandedPanelFrame;
-        CGPoint expandedRatio = self->_expandedPanelOriginRatio;
-        CGSize expandedScreenSize = self->_expandedPanelScreenSize;
-
         [self applyScreenGeometryRefreshAllowHeavyRefresh:NO];
-        self->_hasCollapsedPanelFrame = hadCollapsedFrame;
-        self->_hasCollapsedPanelOriginRatio = hadCollapsedRatio;
-        self->_collapsedPanelFrame = collapsedFrame;
-        self->_collapsedPanelOriginRatio = collapsedRatio;
-        self->_collapsedPanelScreenSize = collapsedScreenSize;
-        self->_hasExpandedPanelFrame = hadExpandedFrame;
-        self->_hasExpandedPanelOriginRatio = hadExpandedRatio;
-        self->_expandedPanelFrame = expandedFrame;
-        self->_expandedPanelOriginRatio = expandedRatio;
-        self->_expandedPanelScreenSize = expandedScreenSize;
 
         __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.22 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1719,6 +1732,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalStopEnabled = NO;
     _globalNetworkGateEnabled = NO;
     _globalLowPowerModeEnabled = YES;
+    _globalTurboModeEnabled = YES;
     _networkRequestOnly = YES;
     _networkUsesPost = NO;
     _networkPostBodyUsesOCRResult = NO;
@@ -1726,7 +1740,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkTimeout = 8.0;
     _recognitionRetryUntilFound = NO;
     _recognitionRetryDropdownVisible = NO;
-    _recognitionRetryInterval = 1.0;
+    _recognitionRetryInterval = AnClickDefaultRecognitionRetryInterval;
     _actionRandomDelayEnabled = NO;
     _actionJitterRadius = 0.0;
     _globalStartHour = 8;
@@ -1762,10 +1776,12 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _templateImageCache = [[NSCache alloc] init];
     _templateImageCache.countLimit = 12;
     _templateImageModificationDates = [NSMutableDictionary dictionary];
+    _templateImageNextValidationTimes = [NSMutableDictionary dictionary];
     _volumeShortcutRegistered = NO;
     _hasObservedSystemVolume = NO;
     _volumeShortcutRunSuppressToasts = NO;
     _ignoreVolumeEventsUntil = 0;
+    _volumeShortcutIgnorePassiveEventsUntil = 0;
     _pendingConfigDeleteIndex = -1;
     _pendingTaskNoteIndex = -1;
     [self loadGlobalSettings];
@@ -1781,6 +1797,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _collapsedPanelOriginRatio = [self originRatioForWindowFrame:_collapsedPanelFrame floating:YES];
     _collapsedPanelScreenSize = [self currentScreenBounds].size;
     _lastAppliedScreenGeometrySize = _collapsedPanelScreenSize;
+    _collapsedButtonVisualState = AnClickCollapsedButtonVisualStateUnknown;
+    _collapsedButtonVisualSize = CGSizeZero;
     _hasCollapsedPanelFrame = YES;
     _hasCollapsedPanelOriginRatio = YES;
     _panelWindow = [[UIWindow alloc] initWithFrame:_collapsedPanelFrame];
@@ -1797,6 +1815,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _collapsedButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _collapsedButton.frame = CGRectMake(0, 0, 48, 48);
     _collapsedButton.backgroundColor = [self floatingButtonIdleColor];
+    _collapsedButton.adjustsImageWhenHighlighted = NO;
+    _collapsedButton.adjustsImageWhenDisabled = NO;
+    _collapsedButton.showsTouchWhenHighlighted = NO;
     _collapsedButton.layer.cornerRadius = 24;
     _collapsedButton.layer.borderWidth = 2.0;
     _collapsedButton.layer.borderColor = [self floatingButtonIdleBorderColor].CGColor;
@@ -2125,24 +2146,33 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     button.imageEdgeInsets = UIEdgeInsetsZero;
     button.titleLabel.textAlignment = NSTextAlignmentCenter;
     button.titleLabel.font = [UIFont systemFontOfSize:fontSize weight:UIFontWeightBold];
-    [button setAttributedTitle:nil forState:UIControlStateNormal];
-    [button setImage:nil forState:UIControlStateNormal];
+    UIControlState states[] = { UIControlStateNormal, UIControlStateHighlighted, UIControlStateSelected, UIControlStateDisabled };
+    NSUInteger stateCount = sizeof(states) / sizeof(states[0]);
+    for (NSUInteger i = 0; i < stateCount; i++) {
+        UIControlState state = states[i];
+        [button setAttributedTitle:nil forState:state];
+        [button setTitle:nil forState:state];
+        [button setImage:nil forState:state];
+    }
 
     if (@available(iOS 13.0, *)) {
         UIImage *image = [UIImage systemImageNamed:systemName];
         if (image) {
             UIImageSymbolConfiguration *configuration = [UIImageSymbolConfiguration configurationWithPointSize:fontSize weight:UIImageSymbolWeightBold];
             image = [image imageWithConfiguration:configuration];
-            [button setTitle:nil forState:UIControlStateNormal];
-            [button setImage:image forState:UIControlStateNormal];
+            for (NSUInteger i = 0; i < stateCount; i++) {
+                [button setImage:image forState:states[i]];
+            }
             button.tintColor = [self themeHighlightColor];
             button.imageView.contentMode = UIViewContentModeScaleAspectFit;
             return;
         }
     }
 
-    [button setTitle:fallbackTitle forState:UIControlStateNormal];
-    [button setTitleColor:[self themeHighlightColor] forState:UIControlStateNormal];
+    for (NSUInteger i = 0; i < stateCount; i++) {
+        [button setTitle:fallbackTitle forState:states[i]];
+        [button setTitleColor:[self themeHighlightColor] forState:states[i]];
+    }
 }
 
 - (UIButton *)panelButtonWithTitle:(NSString *)title action:(SEL)action {
@@ -2894,6 +2924,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (!volumeShortcutToast) {
         [self setHomeOutputText:text];
     }
+    if (_globalTurboModeEnabled && _taskRunActive && _taskRunSingleStepStopIndex < 0) {
+        return;
+    }
     if (!volumeShortcutToast && _volumeShortcutRunSuppressToasts) {
         return;
     }
@@ -3238,11 +3271,19 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
     CGSize size = _panelWindow.bounds.size;
     CGRect buttonFrame = [self collapsedButtonFrameForPanelSize:size];
-    _collapsedButton.frame = buttonFrame;
+    if (!CGRectEqualToRect(_collapsedButton.frame, buttonFrame)) {
+        _collapsedButton.frame = buttonFrame;
+    }
     if (_collapsedRuntimeLabel) {
         CGFloat labelY = CGRectGetMaxY(buttonFrame) + 4.0;
-        _collapsedRuntimeLabel.frame = CGRectMake(0.0, labelY, size.width, 18.0);
-        _collapsedRuntimeLabel.hidden = !(_taskRunActive || _taskRunPausedForForeground);
+        CGRect runtimeFrame = CGRectMake(0.0, labelY, size.width, 18.0);
+        if (!CGRectEqualToRect(_collapsedRuntimeLabel.frame, runtimeFrame)) {
+            _collapsedRuntimeLabel.frame = runtimeFrame;
+        }
+        BOOL runtimeHidden = !(_taskRunActive || _taskRunPausedForForeground);
+        if (_collapsedRuntimeLabel.hidden != runtimeHidden) {
+            _collapsedRuntimeLabel.hidden = runtimeHidden;
+        }
     }
     [self refreshTaskRunRuntimeLabel];
     [self refreshCollapsedButtonTitle];
@@ -3549,47 +3590,53 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)refreshCollapsedButtonTitle {
+    if (!_collapsedButton) {
+        return;
+    }
+
+    AnClickCollapsedButtonVisualState state = AnClickCollapsedButtonVisualStateIdle;
     if ([AnClickRecorder shared].isRecording) {
-        _collapsedButton.layer.cornerRadius = CGRectGetWidth(_collapsedButton.bounds) * 0.5;
-        _collapsedButton.layer.borderWidth = 2.0;
-        _collapsedButton.backgroundColor = [UIColor colorWithRed:0.92 green:0.05 blue:0.08 alpha:0.98];
-        _collapsedButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.64 blue:0.48 alpha:0.95].CGColor;
-        _collapsedButton.layer.shadowColor = [UIColor colorWithRed:1.0 green:0.12 blue:0.08 alpha:1.0].CGColor;
-        _collapsedButton.layer.shadowOpacity = 0.62;
-        _collapsedButton.layer.shadowRadius = 10.0;
-        _collapsedButton.layer.shadowOffset = CGSizeZero;
-        [self setCenteredIconForButton:_collapsedButton systemName:@"stop.fill" fallbackTitle:@"■" fontSize:20];
-        _collapsedButton.tintColor = UIColor.whiteColor;
-        [_collapsedButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-        [self updateButtonShadowPath:_collapsedButton];
+        state = AnClickCollapsedButtonVisualStateRecording;
+    } else if (_taskRunActive) {
+        state = AnClickCollapsedButtonVisualStateRunning;
+    }
+
+    CGSize buttonSize = _collapsedButton.bounds.size;
+    BOOL sizeChanged = fabs(buttonSize.width - _collapsedButtonVisualSize.width) >= 0.5 ||
+        fabs(buttonSize.height - _collapsedButtonVisualSize.height) >= 0.5;
+    if (_collapsedButtonVisualState == state && !sizeChanged) {
         return;
     }
-    if (_taskRunActive) {
-        _collapsedButton.layer.cornerRadius = CGRectGetWidth(_collapsedButton.bounds) * 0.5;
-        _collapsedButton.layer.borderWidth = 2.0;
-        _collapsedButton.backgroundColor = [UIColor colorWithRed:0.92 green:0.05 blue:0.08 alpha:0.98];
-        _collapsedButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.64 blue:0.48 alpha:0.95].CGColor;
-        _collapsedButton.layer.shadowColor = [UIColor colorWithRed:1.0 green:0.12 blue:0.08 alpha:1.0].CGColor;
-        _collapsedButton.layer.shadowOpacity = 0.62;
-        _collapsedButton.layer.shadowRadius = 10.0;
-        _collapsedButton.layer.shadowOffset = CGSizeZero;
-        [self setCenteredIconForButton:_collapsedButton systemName:@"stop.fill" fallbackTitle:@"■" fontSize:20];
-        _collapsedButton.tintColor = UIColor.whiteColor;
-        [_collapsedButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-        [self updateButtonShadowPath:_collapsedButton];
-        return;
-    }
+    _collapsedButtonVisualState = state;
+    _collapsedButtonVisualSize = buttonSize;
+
+    BOOL active = state == AnClickCollapsedButtonVisualStateRunning ||
+        state == AnClickCollapsedButtonVisualStateRecording;
     _collapsedButton.layer.cornerRadius = CGRectGetWidth(_collapsedButton.bounds) * 0.5;
     _collapsedButton.layer.borderWidth = 2.0;
-    _collapsedButton.backgroundColor = [self floatingButtonIdleColor];
-    _collapsedButton.layer.borderColor = [self floatingButtonIdleBorderColor].CGColor;
-    _collapsedButton.layer.shadowColor = [self floatingButtonIdleShadowColor].CGColor;
-    _collapsedButton.layer.shadowOpacity = 0.58;
     _collapsedButton.layer.shadowRadius = 10.0;
     _collapsedButton.layer.shadowOffset = CGSizeZero;
-    [self setCenteredIconForButton:_collapsedButton systemName:@"play.circle.fill" fallbackTitle:@"▶" fontSize:25];
+
+    if (active) {
+        _collapsedButton.backgroundColor = [UIColor colorWithRed:0.92 green:0.05 blue:0.08 alpha:0.98];
+        _collapsedButton.layer.borderColor = [UIColor colorWithRed:1.0 green:0.64 blue:0.48 alpha:0.95].CGColor;
+        _collapsedButton.layer.shadowColor = [UIColor colorWithRed:1.0 green:0.12 blue:0.08 alpha:1.0].CGColor;
+        _collapsedButton.layer.shadowOpacity = 0.62;
+        [self setCenteredIconForButton:_collapsedButton systemName:@"stop.fill" fallbackTitle:@"停" fontSize:20];
+    } else {
+        _collapsedButton.backgroundColor = [self floatingButtonIdleColor];
+        _collapsedButton.layer.borderColor = [self floatingButtonIdleBorderColor].CGColor;
+        _collapsedButton.layer.shadowColor = [self floatingButtonIdleShadowColor].CGColor;
+        _collapsedButton.layer.shadowOpacity = 0.58;
+        [self setCenteredIconForButton:_collapsedButton systemName:@"play.circle.fill" fallbackTitle:@"开" fontSize:25];
+    }
+
+    UIControlState states[] = { UIControlStateNormal, UIControlStateHighlighted, UIControlStateSelected, UIControlStateDisabled };
+    NSUInteger stateCount = sizeof(states) / sizeof(states[0]);
     _collapsedButton.tintColor = UIColor.whiteColor;
-    [_collapsedButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    for (NSUInteger i = 0; i < stateCount; i++) {
+        [_collapsedButton setTitleColor:UIColor.whiteColor forState:states[i]];
+    }
     [self updateButtonShadowPath:_collapsedButton];
 }
 
@@ -3601,8 +3648,14 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (!_collapsedRuntimeLabel) {
         return;
     }
-    _collapsedRuntimeLabel.text = [self formattedTaskRunDuration];
-    _collapsedRuntimeLabel.hidden = !(_taskRunActive || _taskRunPausedForForeground);
+    NSString *duration = [self formattedTaskRunDuration] ?: @"00:00:00";
+    if (![_collapsedRuntimeLabel.text isEqualToString:duration]) {
+        _collapsedRuntimeLabel.text = duration;
+    }
+    BOOL hidden = !(_taskRunActive || _taskRunPausedForForeground);
+    if (_collapsedRuntimeLabel.hidden != hidden) {
+        _collapsedRuntimeLabel.hidden = hidden;
+    }
 }
 
 - (void)startTaskRunRuntimeTimerReset:(BOOL)reset {
@@ -4082,6 +4135,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         @"stopMillisecond": @(_globalStopMillisecond),
         @"networkGateEnabled": @(_globalNetworkGateEnabled),
         @"lowPowerModeEnabled": @(_globalLowPowerModeEnabled),
+        @"turboModeEnabled": @(_globalTurboModeEnabled),
         @"networkURL": _globalNetworkURL ?: @"",
         @"networkContains": _globalNetworkContainsText ?: @"",
         @"networkFalse": _globalNetworkFalseText ?: @"",
@@ -4117,6 +4171,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalNetworkGateEnabled = [settings[@"networkGateEnabled"] boolValue];
     id lowPowerValue = settings[@"lowPowerModeEnabled"];
     _globalLowPowerModeEnabled = [lowPowerValue respondsToSelector:@selector(boolValue)] ? [lowPowerValue boolValue] : YES;
+    id turboValue = settings[@"turboModeEnabled"];
+    _globalTurboModeEnabled = [turboValue respondsToSelector:@selector(boolValue)] ? [turboValue boolValue] : YES;
     _globalNetworkURL = [self trimmedActionDescription:settings[@"networkURL"]];
     _globalNetworkContainsText = [self trimmedActionDescription:settings[@"networkContains"]];
     _globalNetworkFalseText = [self trimmedActionDescription:settings[@"networkFalse"]];
@@ -4303,6 +4359,8 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalNetworkGateButton.alpha = _globalNetworkGateEnabled ? 1.0 : 0.78;
     [_globalLowPowerButton setTitle:_globalLowPowerModeEnabled ? @"开启" : @"关闭" forState:UIControlStateNormal];
     _globalLowPowerButton.alpha = _globalLowPowerModeEnabled ? 1.0 : 0.78;
+    [_globalTurboModeButton setTitle:_globalTurboModeEnabled ? @"开启" : @"关闭" forState:UIControlStateNormal];
+    _globalTurboModeButton.alpha = _globalTurboModeEnabled ? 1.0 : 0.78;
     if (_globalNetworkURLField && !_globalNetworkURLField.isFirstResponder) {
         _globalNetworkURLField.text = _globalNetworkURL ?: @"";
     }
@@ -4377,6 +4435,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     [self persistGlobalSettings];
 }
 
+- (void)toggleGlobalTurboMode {
+    [self syncGlobalSettingsFromFields];
+    _globalTurboModeEnabled = !_globalTurboModeEnabled;
+    [self refreshGlobalSettingsControls];
+    [self persistGlobalSettings];
+}
+
 - (void)hideGlobalTimePicker {
     [_globalTimePickerView removeFromSuperview];
     _globalTimePickerView = nil;
@@ -4402,6 +4467,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _globalStopTimeButton = nil;
     _globalNetworkGateButton = nil;
     _globalLowPowerButton = nil;
+    _globalTurboModeButton = nil;
 }
 
 - (void)openBilibiliProfile {
@@ -4449,6 +4515,9 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (!isError && [_statusLabel.text isEqualToString:safeText]) {
         return;
     }
+    if (!isError && [self shouldSuppressTurboRunStatusText:safeText]) {
+        return;
+    }
     _statusLabel.text = safeText;
     if (!isError) {
         return;
@@ -4461,6 +4530,27 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         _homeErrorLabel.hidden = NO;
         _homeOutputCopyButton.hidden = NO;
     }
+}
+
+- (BOOL)shouldSuppressTurboRunStatusText:(NSString *)text {
+    if (!_globalTurboModeEnabled || !_taskRunActive || _taskRunSingleStepStopIndex >= 0) {
+        return NO;
+    }
+    return ![self homeOutputTextIsError:text];
+}
+
+- (void)setTurboAwareStatusLabelText:(NSString *)text {
+    NSString *safeText = [self trimmedActionDescription:text];
+    if ([self shouldSuppressTurboRunStatusText:safeText]) {
+        return;
+    }
+    _statusLabel.text = safeText;
+}
+
+- (void)showTurboAwareStatusToast:(NSString *)text {
+    NSString *safeText = [self trimmedActionDescription:text];
+    [self setTurboAwareStatusLabelText:safeText];
+    [self showToast:safeText];
 }
 
 - (BOOL)homeOutputTextIsError:(NSString *)text {
@@ -4720,7 +4810,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                                  frame:CGRectMake(side, 10.0, contentWidth, 48.0)];
     [panel addSubview:caption];
 
-    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 64.0, contentWidth, 222.0)];
+    UIView *card = [self homeOptionCardWithFrame:CGRectMake(side, 64.0, contentWidth, 282.0)];
     [panel addSubview:card];
 
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 16.0, contentWidth - 28.0, 22.0)];
@@ -4776,6 +4866,25 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
                                              contentWidth - CGRectGetMaxX(powerLabel.frame) - 30.0,
                                              40.0);
     [card addSubview:_globalLowPowerButton];
+
+    UIView *line3 = [[UIView alloc] initWithFrame:CGRectMake(14.0, 226.0, contentWidth - 28.0, 1.0)];
+    line3.backgroundColor = [[self themeSeparatorColor] colorWithAlphaComponent:0.72];
+    [card addSubview:line3];
+
+    UILabel *turboLabel = [[UILabel alloc] initWithFrame:CGRectMake(14.0, 238.0, floor((contentWidth - 42.0) * 0.52), 28.0)];
+    turboLabel.text = @"极速模式";
+    turboLabel.textColor = [self themePrimaryTextColor];
+    turboLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightBold];
+    [card addSubview:turboLabel];
+
+    _globalTurboModeButton = [self globalSettingsValueButtonWithAction:@selector(toggleGlobalTurboMode)];
+    _globalTurboModeButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
+    _globalTurboModeButton.titleEdgeInsets = UIEdgeInsetsZero;
+    _globalTurboModeButton.frame = CGRectMake(CGRectGetMaxX(turboLabel.frame) + 8.0,
+                                              232.0,
+                                              contentWidth - CGRectGetMaxX(turboLabel.frame) - 30.0,
+                                              40.0);
+    [card addSubview:_globalTurboModeButton];
 
     UIButton *doneButton = [self configPromptButtonWithTitle:@"完成" action:@selector(hideGlobalSettings) destructive:NO];
     doneButton.frame = CGRectMake(side, CGRectGetMaxY(card.frame) + 14.0, contentWidth, 42.0);
@@ -5638,7 +5747,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     _networkTimeout = 8.0;
     _recognitionRetryUntilFound = NO;
     _recognitionRetryDropdownVisible = NO;
-    _recognitionRetryInterval = 1.0;
+    _recognitionRetryInterval = AnClickDefaultRecognitionRetryInterval;
     _actionRandomDelayEnabled = NO;
     _actionJitterRadius = 0.0;
     _macroPlaybackSpeed = 1.0;
@@ -7293,6 +7402,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 - (void)clearTemplateImageCache {
     [_templateImageCache removeAllObjects];
     [_templateImageModificationDates removeAllObjects];
+    [_templateImageNextValidationTimes removeAllObjects];
 }
 
 - (UIImage *)cachedTemplateImageAtPath:(NSString *)path {
@@ -7301,17 +7411,25 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
         return nil;
     }
 
+    CFTimeInterval now = CACurrentMediaTime();
+    UIImage *cachedImage = [_templateImageCache objectForKey:templatePath];
+    NSDate *cachedDate = _templateImageModificationDates[templatePath];
+    NSNumber *nextValidationTime = _templateImageNextValidationTimes[templatePath];
+    if (cachedImage && cachedDate && nextValidationTime && now < nextValidationTime.doubleValue) {
+        return cachedImage;
+    }
+
     NSDictionary<NSFileAttributeKey, id> *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:templatePath error:nil];
     NSDate *modificationDate = attributes[NSFileModificationDate];
     if (!modificationDate) {
         [_templateImageCache removeObjectForKey:templatePath];
         [_templateImageModificationDates removeObjectForKey:templatePath];
+        [_templateImageNextValidationTimes removeObjectForKey:templatePath];
         return nil;
     }
 
-    NSDate *cachedDate = _templateImageModificationDates[templatePath];
-    UIImage *cachedImage = [_templateImageCache objectForKey:templatePath];
     if (cachedImage && cachedDate && [cachedDate isEqualToDate:modificationDate]) {
+        _templateImageNextValidationTimes[templatePath] = @(now + AnClickTemplateImageMetadataCheckInterval);
         return cachedImage;
     }
 
@@ -7319,11 +7437,13 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     if (!image) {
         [_templateImageCache removeObjectForKey:templatePath];
         [_templateImageModificationDates removeObjectForKey:templatePath];
+        [_templateImageNextValidationTimes removeObjectForKey:templatePath];
         return nil;
     }
 
     [_templateImageCache setObject:image forKey:templatePath];
     _templateImageModificationDates[templatePath] = modificationDate;
+    _templateImageNextValidationTimes[templatePath] = @(now + AnClickTemplateImageMetadataCheckInterval);
     return image;
 }
 
@@ -7396,7 +7516,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 
 - (void)taskEngine:(__unused AnClickTaskEngine *)engine showToastForTask:(NSDictionary *)task index:(NSUInteger)index {
     NSString *text = [self toastTextForTask:task index:index];
-    _statusLabel.text = text;
+    [self setTurboAwareStatusLabelText:text];
     if (!_globalLowPowerModeEnabled || [self homeOutputTextIsError:text]) {
         [self setHomeOutputText:text];
     }
@@ -7406,13 +7526,16 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 }
 
 - (void)taskEngine:(__unused AnClickTaskEngine *)engine setStatus:(NSString *)status {
-    _statusLabel.text = status ?: @"";
+    [self setTurboAwareStatusLabelText:status ?: @""];
     [self setHomeOutputText:status ?: @""];
 }
 
 - (void)taskEngine:(__unused AnClickTaskEngine *)engine showRunStatus:(NSString *)status {
-    _statusLabel.text = status ?: @"";
+    [self setTurboAwareStatusLabelText:status ?: @""];
     [self setHomeOutputText:status ?: @""];
+    if (_globalTurboModeEnabled && _taskRunActive && _taskRunSingleStepStopIndex < 0) {
+        return;
+    }
     [self showToast:status ?: @""];
 }
 
@@ -8161,6 +8284,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (void)showTapMarkerAtScreenPoint:(CGPoint)screenPoint inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
+    if (_globalTurboModeEnabled && _taskRunActive && _taskRunSingleStepStopIndex < 0) {
+        return;
+    }
     if (![self shouldShowRunTraceNow]) {
         return;
     }
@@ -8201,6 +8327,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (void)showRecognitionBoxForScreenRect:(CGRect)screenRect score:(double)score inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
+    if (_globalTurboModeEnabled && _taskRunActive && _taskRunSingleStepStopIndex < 0) {
+        return;
+    }
     if (![self shouldShowRunTraceNow]) {
         return;
     }
@@ -8287,6 +8416,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (void)showMultiTapMarkersForScreenPoints:(NSArray<NSValue *> *)points inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
+    if (_globalTurboModeEnabled && _taskRunActive && _taskRunSingleStepStopIndex < 0) {
+        return;
+    }
     if (![self shouldShowRunTraceNow]) {
         return;
     }
@@ -8341,6 +8473,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (void)showOperationTraceForMode:(AnClickActionMode)mode atPoint:(CGPoint)screenPoint inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
+    if (_globalTurboModeEnabled && _taskRunActive && _taskRunSingleStepStopIndex < 0) {
+        return;
+    }
     if (!hostWindow) {
         return;
     }
@@ -8424,6 +8559,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 }
 
 - (void)showTrajectoryForScreenPoints:(NSArray<NSValue *> *)points inWindow:(UIWindow *)hostWindow duration:(NSTimeInterval)duration {
+    if (_globalTurboModeEnabled && _taskRunActive && _taskRunSingleStepStopIndex < 0) {
+        return;
+    }
     if (![self shouldShowRunTraceNow]) {
         return;
     }
@@ -11119,7 +11257,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         @"imageActionMode": @(AnClickActionModeTap),
         @"failureActionMode": @(AnClickActionModeNone),
         @"recognitionRetryUntilFound": @NO,
-        @"recognitionRetryInterval": @1.0,
+        @"recognitionRetryInterval": @(AnClickDefaultRecognitionRetryInterval),
     } mutableCopy];
     if (mode == AnClickActionModeDelay) {
         task[@"delay"] = @0.50;
@@ -12881,7 +13019,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     NSString *templatePath = task[@"templatePath"];
     UIImage *templateImage = [self cachedTemplateImageAtPath:templatePath];
     if (!templateImage) {
-        _statusLabel.text = @"识图无模板";
+        [self setTurboAwareStatusLabelText:@"识图无模板"];
         if (completion) {
             completion(NO, NO, 0.0);
         }
@@ -12932,8 +13070,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 }
                 if (!match) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = @"识图未找到";
-                    [strongSelf showToast:@"识图未找到"];
+                    [strongSelf showTurboAwareStatusToast:@"识图未找到"];
                     if (completion) {
                         completion(NO, NO, 0.0);
                     } else {
@@ -12951,8 +13088,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 NSNumber *scoreNumber = match[@"score"];
                 if (!matchPointValue || !rectValue) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = @"识图异常";
-                    [strongSelf showToast:@"识图异常"];
+                    [strongSelf showTurboAwareStatusToast:@"识图异常"];
                     if (completion) {
                         completion(NO, NO, 0.0);
                     }
@@ -12966,10 +13102,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 if (imageActionMode == AnClickActionModeJump) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     NSInteger taskIndex = [strongSelf validRecognitionJumpIndexForTask:task success:YES];
-                    strongSelf->_statusLabel.text = taskIndex >= 0
+                    NSString *statusText = taskIndex >= 0
                         ? [NSString stringWithFormat:@"识图 %.2f 成功后跳转任务%ld", scoreNumber.doubleValue, (long)taskIndex + 1]
                         : @"识图成功后跳转未选任务";
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:statusText];
                     if (completion) {
                         completion(YES, NO, 0.0);
                     }
@@ -12995,10 +13131,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                         if (deferRecognitionBoxUntilAfterPointAction) {
                             [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:currentHostWindow duration:0.75];
                         }
-                        strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f 后%@",
-                                                         scoreNumber.doubleValue,
-                                                         [strongSelf actionNameForMode:imageActionMode]];
-                        [strongSelf showToast:strongSelf->_statusLabel.text];
+                        [strongSelf showTurboAwareStatusToast:[NSString stringWithFormat:@"识图 %.2f 后%@",
+                                                               scoreNumber.doubleValue,
+                                                               [strongSelf actionNameForMode:imageActionMode]]];
                         [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
                                                                            delay:[strongSelf recognitionActionCompletionDelayForDuration:fastPointDuration]];
                         if (completion) {
@@ -13021,10 +13156,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                         return;
                     }
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f 成功后%@完整动作",
-                                                     scoreNumber.doubleValue,
-                                                     [strongSelf actionNameForMode:imageActionMode]];
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:[NSString stringWithFormat:@"识图 %.2f 成功后%@完整动作",
+                                                           scoreNumber.doubleValue,
+                                                           [strongSelf actionNameForMode:imageActionMode]]];
                     NSTimeInterval successActionDelay = [strongSelf recognitionSuccessActionDelayForTask:task];
                     NSTimeInterval configDuration = [strongSelf estimatedTaskDurationForTask:successConfig depth:1];
                     [strongSelf scheduleRecognitionActionAfterDelay:successActionDelay
@@ -13043,12 +13177,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 if ([strongSelf modeIsRecognitionTask:imageActionMode]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     NSDictionary *config = [strongSelf recognitionActionConfigForTask:task success:YES expectedMode:imageActionMode];
-                    strongSelf->_statusLabel.text = config
+                    NSString *statusText = config
                         ? [NSString stringWithFormat:@"识图 %.2f 成功后%@动作",
                            scoreNumber.doubleValue,
                            [strongSelf actionNameForMode:imageActionMode]]
                         : [NSString stringWithFormat:@"识图成功后%@未设置动作", [strongSelf actionNameForMode:imageActionMode]];
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:statusText];
                     if (completion) {
                         completion(YES, NO, 0.0);
                     }
@@ -13067,9 +13201,8 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                             }
                         }];
                     }];
-                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f 网络请求",
-                                                     scoreNumber.doubleValue];
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:[NSString stringWithFormat:@"识图 %.2f 网络请求",
+                                                           scoreNumber.doubleValue]];
                     return;
                 }
                 CGPoint actionPoint = CGPointZero;
@@ -13080,8 +13213,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                               useMatchPoint:useMatchPoint
                                                       point:&actionPoint]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = @"识图成功动作未取点";
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:@"识图成功动作未取点"];
                     if (completion) {
                         completion(YES, YES, 0.0);
                     }
@@ -13115,12 +13247,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                    actionPoint.x,
                                                    actionPoint.y]];
                 }];
-                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识图 %.2f %@ %.0f,%.0f",
-                                                 scoreNumber.doubleValue,
-                                                 [strongSelf actionNameForMode:imageActionMode],
-                                                 actionPoint.x,
-                                                 actionPoint.y];
-                [strongSelf showToast:strongSelf->_statusLabel.text];
+                [strongSelf showTurboAwareStatusToast:[NSString stringWithFormat:@"识图 %.2f %@ %.0f,%.0f",
+                                                       scoreNumber.doubleValue,
+                                                       [strongSelf actionNameForMode:imageActionMode],
+                                                       actionPoint.x,
+                                                       actionPoint.y]];
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
                                                                    delay:[strongSelf recognitionActionCompletionDelayForDuration:(successActionDelay + actionDuration)]];
                 if (completion) {
@@ -13146,8 +13277,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     AnClickOCRMatchMode matchMode = [self ocrMatchModeForTask:task];
     BOOL useRegex = matchMode == AnClickOCRMatchModeRegex;
     if (targetText.length == 0) {
-        _statusLabel.text = useRegex ? @"正则表达式未填写" : @"识字未填写";
-        [self showToast:_statusLabel.text];
+        [self showTurboAwareStatusToast:(useRegex ? @"正则表达式未填写" : @"识字未填写")];
         if (completion) {
             completion(NO, NO, 0.0);
         }
@@ -13156,8 +13286,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 
     AnClickOCRMode ocrMode = [self ocrModeForTask:task];
     if (useRegex && ![self ocrRegexPatternIsValid:targetText]) {
-        _statusLabel.text = @"正则表达式无效";
-        [self showToast:_statusLabel.text];
+        [self showTurboAwareStatusToast:@"正则表达式无效"];
         if (completion) {
             completion(NO, NO, 0.0);
         }
@@ -13170,7 +13299,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         !useMatchPoint &&
         !customPointValue &&
         !task[@"successPoint"]) {
-        _statusLabel.text = @"识字未取点";
+        [self setTurboAwareStatusLabelText:@"识字未取点"];
         if (completion) {
             completion(NO, NO, 0.0);
         }
@@ -13220,8 +13349,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 NSString *error = [match[@"error"] isKindOfClass:NSString.class] ? match[@"error"] : nil;
                 if (error.length > 0) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = error;
-                    [strongSelf showToast:error];
+                    [strongSelf showTurboAwareStatusToast:error];
                     if (completion) {
                         completion(NO, NO, 0.0);
                     }
@@ -13236,10 +13364,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     : 0.0;
                 if (scoreNumber && scoreNumber.doubleValue + 0.0001 < requiredSimilarity) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字相似度不足 %.0f%%/%.0f%%",
-                                                     scoreNumber.doubleValue * 100.0,
-                                                     requiredSimilarity * 100.0];
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:[NSString stringWithFormat:@"识字相似度不足 %.0f%%/%.0f%%",
+                                                           scoreNumber.doubleValue * 100.0,
+                                                           requiredSimilarity * 100.0]];
                     if (completion) {
                         completion(NO, NO, 0.0);
                     } else {
@@ -13261,8 +13388,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                     : matchModeTitle;
                 if (!pointValue || !rectValue) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = @"识字未找到";
-                    [strongSelf showToast:@"识字未找到"];
+                    [strongSelf showTurboAwareStatusToast:@"识字未找到"];
                     if (completion) {
                         completion(NO, NO, 0.0);
                     } else {
@@ -13282,10 +13408,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 if (actionMode == AnClickActionModeJump) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     NSInteger taskIndex = [strongSelf validRecognitionJumpIndexForTask:task success:YES];
-                    strongSelf->_statusLabel.text = taskIndex >= 0
+                    NSString *statusText = taskIndex >= 0
                         ? [NSString stringWithFormat:@"识字 %@ %@ 成功后跳转任务%ld", matchSummary, text, (long)taskIndex + 1]
                         : @"识字成功后跳转未选任务";
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:statusText];
                     if (completion) {
                         completion(YES, NO, 0.0);
                     }
@@ -13314,11 +13440,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                                inWindow:currentHostWindow
                                                                duration:0.75];
                         }
-                        strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ 后%@",
-                                                         matchSummary,
-                                                         text,
-                                                         [strongSelf actionNameForMode:actionMode]];
-                        [strongSelf showToast:strongSelf->_statusLabel.text];
+                        [strongSelf showTurboAwareStatusToast:[NSString stringWithFormat:@"识字 %@ %@ 后%@",
+                                                               matchSummary,
+                                                               text,
+                                                               [strongSelf actionNameForMode:actionMode]]];
                         [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
                                                                            delay:[strongSelf recognitionActionCompletionDelayForDuration:fastPointDuration]];
                         if (completion) {
@@ -13341,11 +13466,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                         return;
                     }
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ 成功后%@完整动作",
-                                                     matchSummary,
-                                                     text,
-                                                     [strongSelf actionNameForMode:actionMode]];
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:[NSString stringWithFormat:@"识字 %@ %@ 成功后%@完整动作",
+                                                           matchSummary,
+                                                           text,
+                                                           [strongSelf actionNameForMode:actionMode]]];
                     NSTimeInterval successActionDelay = [strongSelf recognitionSuccessActionDelayForTask:task];
                     NSTimeInterval configDuration = [strongSelf estimatedTaskDurationForTask:successConfig depth:1];
                     [strongSelf scheduleRecognitionActionAfterDelay:successActionDelay
@@ -13364,13 +13488,13 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 if ([strongSelf modeIsRecognitionTask:actionMode]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     NSDictionary *config = [strongSelf recognitionActionConfigForTask:task success:YES expectedMode:actionMode];
-                    strongSelf->_statusLabel.text = config
+                    NSString *statusText = config
                         ? [NSString stringWithFormat:@"识字 %@ %@ 成功后%@动作",
                            matchSummary,
                            text,
                            [strongSelf actionNameForMode:actionMode]]
                         : [NSString stringWithFormat:@"识字成功后%@未设置动作", [strongSelf actionNameForMode:actionMode]];
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:statusText];
                     if (completion) {
                         completion(YES, NO, 0.0);
                     }
@@ -13389,8 +13513,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                             }
                         }];
                     }];
-                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ 网络请求", matchSummary, text];
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:[NSString stringWithFormat:@"识字 %@ %@ 网络请求", matchSummary, text]];
                     return;
                 }
                 CGPoint actionPoint = CGPointZero;
@@ -13401,8 +13524,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                               useMatchPoint:useMatchPoint
                                                       point:&actionPoint]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = @"识字成功动作未取点";
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:@"识字成功动作未取点"];
                     if (completion) {
                         completion(YES, YES, 0.0);
                     }
@@ -13439,12 +13561,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                    actionPoint.x,
                                                    actionPoint.y]];
                 }];
-                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识字 %@ %@ %.0f,%.0f",
-                                                 matchSummary,
-                                                 text,
-                                                 actionPoint.x,
-                                                 actionPoint.y];
-                [strongSelf showToast:strongSelf->_statusLabel.text];
+                [strongSelf showTurboAwareStatusToast:[NSString stringWithFormat:@"识字 %@ %@ %.0f,%.0f",
+                                                       matchSummary,
+                                                       text,
+                                                       actionPoint.x,
+                                                       actionPoint.y]];
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
                                                                    delay:[strongSelf recognitionActionCompletionDelayForDuration:(successActionDelay + actionDuration)]];
                 if (completion) {
@@ -13468,7 +13589,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
               completion:(AnClickTaskEngineRecognitionCompletion)completion {
     NSArray<NSDictionary *> *colorPoints = [self normalizedColorPatternPointsForTask:task];
     if (colorPoints.count == 0) {
-        _statusLabel.text = @"识色未取色";
+        [self setTurboAwareStatusLabelText:@"识色未取色"];
         if (completion) {
             completion(NO, NO, 0.0);
         }
@@ -13523,8 +13644,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 }
                 if (match && invertColorMatch) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = @"颜色仍存在";
-                    [strongSelf showToast:@"颜色仍存在"];
+                    [strongSelf showTurboAwareStatusToast:@"颜色仍存在"];
                     if (completion) {
                         completion(NO, NO, 0.0);
                     } else {
@@ -13539,8 +13659,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 }
                 if (!match && !invertColorMatch) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = @"颜色未找到";
-                    [strongSelf showToast:@"颜色未找到"];
+                    [strongSelf showTurboAwareStatusToast:@"颜色未找到"];
                     if (completion) {
                         completion(NO, NO, 0.0);
                     } else {
@@ -13571,8 +13690,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 }
                 if (!pointValue || !rectValue) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = @"识色异常";
-                    [strongSelf showToast:@"识色异常"];
+                    [strongSelf showTurboAwareStatusToast:@"识色异常"];
                     if (completion) {
                         completion(NO, NO, 0.0);
                     }
@@ -13585,10 +13703,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 if (actionMode == AnClickActionModeJump) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     NSInteger taskIndex = [strongSelf validRecognitionJumpIndexForTask:task success:YES];
-                    strongSelf->_statusLabel.text = taskIndex >= 0
+                    NSString *statusText = taskIndex >= 0
                         ? [NSString stringWithFormat:@"识色 %@ 成功后跳转任务%ld", patternSummary, (long)taskIndex + 1]
                         : @"识色成功后跳转未选任务";
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:statusText];
                     if (completion) {
                         completion(YES, NO, 0.0);
                     }
@@ -13617,10 +13735,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                                inWindow:currentHostWindow
                                                                duration:0.75];
                         }
-                        strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ 后%@",
-                                                         patternSummary,
-                                                         [strongSelf actionNameForMode:actionMode]];
-                        [strongSelf showToast:strongSelf->_statusLabel.text];
+                        [strongSelf showTurboAwareStatusToast:[NSString stringWithFormat:@"识色 %@ 后%@",
+                                                               patternSummary,
+                                                               [strongSelf actionNameForMode:actionMode]]];
                         [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
                                                                            delay:[strongSelf recognitionActionCompletionDelayForDuration:fastPointDuration]];
                         if (completion) {
@@ -13643,10 +13760,9 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                         return;
                     }
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ 成功后%@完整动作",
-                                                     patternSummary,
-                                                     [strongSelf actionNameForMode:actionMode]];
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:[NSString stringWithFormat:@"识色 %@ 成功后%@完整动作",
+                                                           patternSummary,
+                                                           [strongSelf actionNameForMode:actionMode]]];
                     NSTimeInterval successActionDelay = [strongSelf recognitionSuccessActionDelayForTask:task];
                     NSTimeInterval configDuration = [strongSelf estimatedTaskDurationForTask:successConfig depth:1];
                     [strongSelf scheduleRecognitionActionAfterDelay:successActionDelay
@@ -13665,12 +13781,12 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                 if ([strongSelf modeIsRecognitionTask:actionMode]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
                     NSDictionary *config = [strongSelf recognitionActionConfigForTask:task success:YES expectedMode:actionMode];
-                    strongSelf->_statusLabel.text = config
+                    NSString *statusText = config
                         ? [NSString stringWithFormat:@"识色 %@ 成功后%@动作",
                            patternSummary,
                            [strongSelf actionNameForMode:actionMode]]
                         : [NSString stringWithFormat:@"识色成功后%@未设置动作", [strongSelf actionNameForMode:actionMode]];
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:statusText];
                     if (completion) {
                         completion(YES, NO, 0.0);
                     }
@@ -13689,8 +13805,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                             }
                         }];
                     }];
-                    strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ 网络请求", patternSummary];
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:[NSString stringWithFormat:@"识色 %@ 网络请求", patternSummary]];
                     return;
                 }
                 CGPoint actionPoint = CGPointZero;
@@ -13701,8 +13816,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                               useMatchPoint:useMatchPoint
                                                       point:&actionPoint]) {
                     [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel delay:0.05];
-                    strongSelf->_statusLabel.text = @"识色成功动作未取点";
-                    [strongSelf showToast:strongSelf->_statusLabel.text];
+                    [strongSelf showTurboAwareStatusToast:@"识色成功动作未取点"];
                     if (completion) {
                         completion(YES, YES, 0.0);
                     }
@@ -13739,11 +13853,10 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                    actionPoint.x,
                                                    actionPoint.y]];
                 }];
-                strongSelf->_statusLabel.text = [NSString stringWithFormat:@"识色 %@ %.0f,%.0f",
-                                                 patternSummary,
-                                                 actionPoint.x,
-                                                 actionPoint.y];
-                [strongSelf showToast:strongSelf->_statusLabel.text];
+                [strongSelf showTurboAwareStatusToast:[NSString stringWithFormat:@"识色 %@ %.0f,%.0f",
+                                                       patternSummary,
+                                                       actionPoint.x,
+                                                       actionPoint.y]];
                 [strongSelf restorePanelAfterRecognitionCaptureIfNeeded:shouldRestorePanel
                                                                    delay:[strongSelf recognitionActionCompletionDelayForDuration:(successActionDelay + actionDuration)]];
                 if (completion) {
@@ -14467,6 +14580,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     [_recognitionService cancelPendingRequests];
     [self cancelActiveNetworkTasks];
     _toastGeneration++;
+    BOOL suppressTurboRunFeedback = _globalTurboModeEnabled && _taskRunSingleStepStopIndex < 0;
 
     _taskRunActive = NO;
     [self clearTaskRunPauseState];
@@ -14478,7 +14592,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     [self cancelRunningTaskSideEffects];
     [self stopTaskRunRuntimeTimerReset:YES];
     [self setHomeOutputText:(status.length > 0 ? status : @"已停止")];
-    if (showToast) {
+    if (showToast && !suppressTurboRunFeedback) {
         [self showToast:_statusLabel.text];
     }
     BOOL panelNeedsRestore = restorePanel || _panelHiddenForSingleStepTest || (_panelWindow && (_panelWindow.hidden || !_panelWindow.userInteractionEnabled));

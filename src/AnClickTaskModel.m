@@ -8,6 +8,7 @@ static NSString * const ACKeyCompletionDelay = @"completionDelay";
 static NSString * const ACKeyRepeat = @"repeat";
 static NSString * const ACKeyInterval = @"interval";
 static const NSTimeInterval ACFastDoubleTapInterval = 0.06;
+static const NSTimeInterval ACDefaultRecognitionRetryInterval = 0.20;
 static NSString * const ACDefaultNetworkContentType = @"application/json; charset=utf-8";
 static NSString * const ACDefaultNetworkUserAgent = @"Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1";
 
@@ -185,7 +186,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
         _targetBundleID = @"";
         _macroSpeed = 1.0;
         _recognitionRetryUntilFound = NO;
-        _recognitionRetryInterval = 1.0;
+        _recognitionRetryInterval = ACDefaultRecognitionRetryInterval;
         _recognitionSuccessActionDelay = 0.0;
         _recognitionFailureActionDelay = 0.0;
         _successBranchIndex = -1;
@@ -285,7 +286,7 @@ static BOOL ACCGPointFromObject(id object, CGPoint *point) {
     _macroSpeed = ACClampedDouble(dictionary[@"macroSpeed"], 0.1, 10.0, 1.0);
 
     _recognitionRetryUntilFound = [dictionary[@"recognitionRetryUntilFound"] boolValue];
-    _recognitionRetryInterval = ACClampedDouble(dictionary[@"recognitionRetryInterval"], 0.2, 30.0, 1.0);
+    _recognitionRetryInterval = ACClampedDouble(dictionary[@"recognitionRetryInterval"], 0.2, 30.0, ACDefaultRecognitionRetryInterval);
     _recognitionSuccessActionDelay = ACClampedDouble(dictionary[@"recognitionSuccessActionDelay"], 0.0, 30.0, 0.0);
     _recognitionFailureActionDelay = ACClampedDouble(dictionary[@"recognitionFailureActionDelay"], 0.0, 30.0, 0.0);
     _successBranchIndex = ACClampedInteger(dictionary[@"successBranchIndex"], -1, NSIntegerMax, -1);

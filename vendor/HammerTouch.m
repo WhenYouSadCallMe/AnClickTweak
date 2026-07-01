@@ -111,13 +111,13 @@ static const uint64_t AnClickHammerSenderID = 0x0000000123456789ULL;
 #endif
 
 static NSTimeInterval AnClickHammerExpiryUnixTime(void) {
-    const uint8_t encoded[] = {0x26, 0xA7, 0x1F, 0xF8, 0x0F, 0xC4, 0x78, 0xB3};
+    const uint8_t encoded[] = {0xA6, 0x94, 0xC8, 0xF8, 0x0F, 0xC4, 0x78, 0xB3};
     const uint8_t masks[] = {0xA6, 0x31, 0x5D, 0x92, 0x0F, 0xC4, 0x78, 0xB3};
     uint64_t value = 0;
     for (size_t i = 0; i < sizeof(encoded); i++) {
         value |= ((uint64_t)(encoded[i] ^ masks[i])) << (8 * i);
     }
-    if (((uint32_t)value ^ 0xA70C91EFu) != 0xCD4E076Fu ||
+    if (((uint32_t)value ^ 0xA70C91EFu) != 0xCD9934EFu ||
         value < 1600000000ULL ||
         value > 2200000000ULL) {
         return 1.0;

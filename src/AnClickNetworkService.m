@@ -2,6 +2,7 @@
 
 @interface AnClickNetworkService ()
 @property (nonatomic, strong) NSMutableSet<NSURLSessionDataTask *> *activeTasks;
+@property (nonatomic, strong) NSCache<NSString *, NSRegularExpression *> *regexCache;
 - (void)trackTask:(NSURLSessionDataTask *)task;
 - (void)untrackTask:(NSURLSessionDataTask *)task;
 @end
@@ -15,6 +16,8 @@ static NSString * const AnClickDefaultUserAgent = @"Mozilla/5.0 (iPhone; CPU iPh
     self = [super init];
     if (self) {
         _activeTasks = [NSMutableSet set];
+        _regexCache = [[NSCache alloc] init];
+        _regexCache.countLimit = 32;
     }
     return self;
 }
@@ -99,11 +102,18 @@ static NSString * const AnClickDefaultUserAgent = @"Mozilla/5.0 (iPhone; CPU iPh
     }
 
     NSString *response = body ?: @"";
-    NSError *error = nil;
-    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:regexPattern
-                                                                           options:NSRegularExpressionCaseInsensitive
-                                                                             error:&error];
-    if (!regex || error) {
+    NSString *cacheKey = [NSString stringWithFormat:@"i:%@", regexPattern];
+    NSRegularExpression *regex = [_regexCache objectForKey:cacheKey];
+    if (!regex) {
+        NSError *error = nil;
+        regex = [NSRegularExpression regularExpressionWithPattern:regexPattern
+                                                          options:NSRegularExpressionCaseInsensitive
+                                                            error:&error];
+        if (regex && !error) {
+            [_regexCache setObject:regex forKey:cacheKey];
+        }
+    }
+    if (!regex) {
         return NO;
     }
     NSRange range = NSMakeRange(0, response.length);

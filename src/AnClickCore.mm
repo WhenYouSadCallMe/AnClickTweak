@@ -7,6 +7,8 @@
 #include <float.h>
 #include <math.h>
 #include <string.h>
+#include <mutex>
+#include <unordered_map>
 #include <vector>
 
 #if ANCLICK_RELEASE_SILENT
@@ -424,8 +426,69 @@ static double AnClickColorDistanceSquaredToRGB(const unsigned char *pixel, doubl
     return dr * dr + dg * dg + db * db;
 }
 
+static BOOL AnClickSampleImageDataRGB(CGImageRef imageRef, const UInt8 *bytes, CFIndex length, NSInteger pixelX, NSInteger pixelY, NSInteger *red, NSInteger *green, NSInteger *blue) {
+    if (!imageRef || !bytes || CGImageGetBitsPerPixel(imageRef) != 32 || CGImageGetBitsPerComponent(imageRef) != 8) {
+        return NO;
+    }
+
+    size_t width = CGImageGetWidth(imageRef);
+    size_t height = CGImageGetHeight(imageRef);
+    size_t bytesPerRow = CGImageGetBytesPerRow(imageRef);
+    if (pixelX < 0 || pixelY < 0 ||
+        (size_t)pixelX >= width || (size_t)pixelY >= height ||
+        bytesPerRow < width * 4 ||
+        (CFIndex)((size_t)pixelY * bytesPerRow + (size_t)pixelX * 4 + 3) >= length) {
+        return NO;
+    }
+
+    const UInt8 *pixel = bytes + (size_t)pixelY * bytesPerRow + (size_t)pixelX * 4;
+    CGBitmapInfo bitmapInfo = CGImageGetBitmapInfo(imageRef);
+    CGBitmapInfo byteOrder = bitmapInfo & kCGBitmapByteOrderMask;
+    CGImageAlphaInfo alphaInfo = (CGImageAlphaInfo)(bitmapInfo & kCGBitmapAlphaInfoMask);
+    NSInteger sampleRed = 0;
+    NSInteger sampleGreen = 0;
+    NSInteger sampleBlue = 0;
+
+    if (byteOrder == kCGBitmapByteOrder32Little) {
+        if (alphaInfo == kCGImageAlphaPremultipliedFirst ||
+            alphaInfo == kCGImageAlphaFirst ||
+            alphaInfo == kCGImageAlphaNoneSkipFirst) {
+            sampleBlue = pixel[0];
+            sampleGreen = pixel[1];
+            sampleRed = pixel[2];
+        } else {
+            sampleRed = pixel[3];
+            sampleGreen = pixel[2];
+            sampleBlue = pixel[1];
+        }
+    } else {
+        if (alphaInfo == kCGImageAlphaPremultipliedFirst ||
+            alphaInfo == kCGImageAlphaFirst ||
+            alphaInfo == kCGImageAlphaNoneSkipFirst) {
+            sampleRed = pixel[1];
+            sampleGreen = pixel[2];
+            sampleBlue = pixel[3];
+        } else {
+            sampleRed = pixel[0];
+            sampleGreen = pixel[1];
+            sampleBlue = pixel[2];
+        }
+    }
+
+    if (red) {
+        *red = sampleRed;
+    }
+    if (green) {
+        *green = sampleGreen;
+    }
+    if (blue) {
+        *blue = sampleBlue;
+    }
+    return YES;
+}
+
 static BOOL AnClickSampleImageProviderRGB(CGImageRef imageRef, NSInteger pixelX, NSInteger pixelY, NSInteger *red, NSInteger *green, NSInteger *blue) {
-    if (!imageRef || CGImageGetBitsPerPixel(imageRef) != 32 || CGImageGetBitsPerComponent(imageRef) != 8) {
+    if (!imageRef) {
         return NO;
     }
 
@@ -439,61 +502,7 @@ static BOOL AnClickSampleImageProviderRGB(CGImageRef imageRef, NSInteger pixelX,
         return NO;
     }
 
-    size_t width = CGImageGetWidth(imageRef);
-    size_t height = CGImageGetHeight(imageRef);
-    size_t bytesPerRow = CGImageGetBytesPerRow(imageRef);
-    CFIndex length = CFDataGetLength(data);
-    BOOL success = NO;
-    if (pixelX >= 0 && pixelY >= 0 &&
-        (size_t)pixelX < width && (size_t)pixelY < height &&
-        bytesPerRow >= width * 4 &&
-        (CFIndex)((size_t)pixelY * bytesPerRow + (size_t)pixelX * 4 + 3) < length) {
-        const UInt8 *bytes = CFDataGetBytePtr(data);
-        const UInt8 *pixel = bytes + (size_t)pixelY * bytesPerRow + (size_t)pixelX * 4;
-        CGBitmapInfo bitmapInfo = CGImageGetBitmapInfo(imageRef);
-        CGBitmapInfo byteOrder = bitmapInfo & kCGBitmapByteOrderMask;
-        CGImageAlphaInfo alphaInfo = (CGImageAlphaInfo)(bitmapInfo & kCGBitmapAlphaInfoMask);
-        NSInteger sampleRed = 0;
-        NSInteger sampleGreen = 0;
-        NSInteger sampleBlue = 0;
-
-        if (byteOrder == kCGBitmapByteOrder32Little) {
-            if (alphaInfo == kCGImageAlphaPremultipliedFirst ||
-                alphaInfo == kCGImageAlphaFirst ||
-                alphaInfo == kCGImageAlphaNoneSkipFirst) {
-                sampleBlue = pixel[0];
-                sampleGreen = pixel[1];
-                sampleRed = pixel[2];
-            } else {
-                sampleRed = pixel[3];
-                sampleGreen = pixel[2];
-                sampleBlue = pixel[1];
-            }
-        } else {
-            if (alphaInfo == kCGImageAlphaPremultipliedFirst ||
-                alphaInfo == kCGImageAlphaFirst ||
-                alphaInfo == kCGImageAlphaNoneSkipFirst) {
-                sampleRed = pixel[1];
-                sampleGreen = pixel[2];
-                sampleBlue = pixel[3];
-            } else {
-                sampleRed = pixel[0];
-                sampleGreen = pixel[1];
-                sampleBlue = pixel[2];
-            }
-        }
-
-        if (red) {
-            *red = sampleRed;
-        }
-        if (green) {
-            *green = sampleGreen;
-        }
-        if (blue) {
-            *blue = sampleBlue;
-        }
-        success = YES;
-    }
+    BOOL success = AnClickSampleImageDataRGB(imageRef, CFDataGetBytePtr(data), CFDataGetLength(data), pixelX, pixelY, red, green, blue);
     CFRelease(data);
     return success;
 }
@@ -513,17 +522,28 @@ static BOOL AnClickMatAppearsVerticallyFlippedFromImage(UIImage *image, const cv
         return NO;
     }
 
-    NSArray<NSValue *> *samplePoints = @[
-        [NSValue valueWithCGPoint:CGPointMake(0.20, 0.18)],
-        [NSValue valueWithCGPoint:CGPointMake(0.50, 0.33)],
-        [NSValue valueWithCGPoint:CGPointMake(0.78, 0.62)],
-        [NSValue valueWithCGPoint:CGPointMake(0.35, 0.84)],
-    ];
+    CGDataProviderRef provider = CGImageGetDataProvider(imageRef);
+    if (!provider) {
+        return NO;
+    }
+    CFDataRef imageData = CGDataProviderCopyData(provider);
+    if (!imageData) {
+        return NO;
+    }
+    const UInt8 *imageBytes = CFDataGetBytePtr(imageData);
+    CFIndex imageLength = CFDataGetLength(imageData);
+
+    static const CGPoint samplePoints[] = {
+        {0.20, 0.18},
+        {0.50, 0.33},
+        {0.78, 0.62},
+        {0.35, 0.84},
+    };
     double normalDistance = 0.0;
     double flippedDistance = 0.0;
     NSUInteger validSamples = 0;
-    for (NSValue *value in samplePoints) {
-        CGPoint normalizedPoint = value.CGPointValue;
+    for (size_t i = 0; i < sizeof(samplePoints) / sizeof(samplePoints[0]); i++) {
+        CGPoint normalizedPoint = samplePoints[i];
         int x = MIN(MAX((int)floor(normalizedPoint.x * (double)(mat.cols - 1)), 0), mat.cols - 1);
         int y = MIN(MAX((int)floor(normalizedPoint.y * (double)(mat.rows - 1)), 0), mat.rows - 1);
         int flippedY = mat.rows - 1 - y;
@@ -533,8 +553,8 @@ static BOOL AnClickMatAppearsVerticallyFlippedFromImage(UIImage *image, const cv
         NSInteger flippedRed = 0;
         NSInteger flippedGreen = 0;
         NSInteger flippedBlue = 0;
-        if (!AnClickSampleImageProviderRGB(imageRef, x, y, &red, &green, &blue) ||
-            !AnClickSampleImageProviderRGB(imageRef, x, flippedY, &flippedRed, &flippedGreen, &flippedBlue)) {
+        if (!AnClickSampleImageDataRGB(imageRef, imageBytes, imageLength, x, y, &red, &green, &blue) ||
+            !AnClickSampleImageDataRGB(imageRef, imageBytes, imageLength, x, flippedY, &flippedRed, &flippedGreen, &flippedBlue)) {
             continue;
         }
         const cv::Vec3b matPixel = mat.at<cv::Vec3b>(y, x);
@@ -543,6 +563,7 @@ static BOOL AnClickMatAppearsVerticallyFlippedFromImage(UIImage *image, const cv
         validSamples++;
     }
 
+    CFRelease(imageData);
     if (validSamples == 0) {
         return NO;
     }
@@ -691,6 +712,70 @@ static CGRect AnClickTemplateContentRectInPixels(UIImage *image, int templateCol
     return AnClickRectFromPixelBounds(foregroundMinX, foregroundMinY, foregroundMaxX, foregroundMaxY, width, height, templateCols, templateRows);
 }
 
+struct AnClickTemplateCacheEntry {
+    cv::Mat mat;
+    CGRect contentRect;
+    double averageStdDev;
+};
+
+static BOOL AnClickBuildTemplateCacheEntry(UIImage *templateImage, AnClickTemplateCacheEntry *entry) {
+    if (!templateImage.CGImage || !entry) {
+        return NO;
+    }
+
+    cv::Mat templ = AnClickMatFromUIImage(templateImage);
+    if (templ.empty()) {
+        return NO;
+    }
+
+    cv::Scalar templateMean;
+    cv::Scalar templateStdDev;
+    cv::meanStdDev(templ, templateMean, templateStdDev);
+    entry->averageStdDev = (templateStdDev[0] + templateStdDev[1] + templateStdDev[2]) / 3.0;
+    entry->contentRect = AnClickTemplateContentRectInPixels(templateImage, templ.cols, templ.rows);
+    entry->mat = templ;
+    return YES;
+}
+
+static BOOL AnClickGetTemplateCacheEntry(UIImage *templateImage, AnClickTemplateCacheEntry *entry) {
+    if (!templateImage.CGImage || !entry) {
+        return NO;
+    }
+
+    static std::mutex cacheMutex;
+    static std::unordered_map<uintptr_t, AnClickTemplateCacheEntry> cache;
+    static std::vector<uintptr_t> cacheOrder;
+    static const size_t cacheLimit = 24;
+
+    uintptr_t key = (uintptr_t)templateImage.CGImage;
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        auto found = cache.find(key);
+        if (found != cache.end()) {
+            *entry = found->second;
+            return YES;
+        }
+    }
+
+    AnClickTemplateCacheEntry builtEntry;
+    if (!AnClickBuildTemplateCacheEntry(templateImage, &builtEntry)) {
+        return NO;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        cache[key] = builtEntry;
+        cacheOrder.push_back(key);
+        while (cacheOrder.size() > cacheLimit) {
+            uintptr_t oldestKey = cacheOrder.front();
+            cacheOrder.erase(cacheOrder.begin());
+            cache.erase(oldestKey);
+        }
+        *entry = builtEntry;
+    }
+    return YES;
+}
+
 static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
                                              CGFloat scale,
                                              const std::vector<cv::Point> &matchedPixels,
@@ -783,17 +868,17 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
     }
 
     cv::Mat source = AnClickMatFromUIImage(sourceImage);
-    cv::Mat templ = AnClickMatFromUIImage(templateImage);
+    AnClickTemplateCacheEntry templateEntry;
+    if (!AnClickGetTemplateCacheEntry(templateImage, &templateEntry)) {
+        return nil;
+    }
+    cv::Mat templ = templateEntry.mat;
     if (source.empty() || templ.empty() || source.cols < templ.cols || source.rows < templ.rows) {
         return nil;
     }
 
-    cv::Scalar templateMean;
-    cv::Scalar templateStdDev;
-    cv::meanStdDev(templ, templateMean, templateStdDev);
-    double averageTemplateStdDev = (templateStdDev[0] + templateStdDev[1] + templateStdDev[2]) / 3.0;
-    if (averageTemplateStdDev < 3.0) {
-        NSLog(@"[AnClick] Rejected low-detail template stddev %.3f", averageTemplateStdDev);
+    if (templateEntry.averageStdDev < 3.0) {
+        NSLog(@"[AnClick] Rejected low-detail template stddev %.3f", templateEntry.averageStdDev);
         return nil;
     }
 
@@ -832,7 +917,7 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
 
     CGFloat scale = sourceImage.scale > 0 ? sourceImage.scale : UIScreen.mainScreen.scale;
     BOOL sourceMatFlipped = AnClickMatAppearsVerticallyFlippedFromImage(sourceImage, source);
-    CGRect contentRect = AnClickTemplateContentRectInPixels(templateImage, templ.cols, templ.rows);
+    CGRect contentRect = templateEntry.contentRect;
     CGPoint contentTopLeftPixel = CGPointZero;
     CGPoint contentBottomRightPixel = CGPointZero;
     if (sourceMatFlipped) {
@@ -1004,70 +1089,86 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
         return nil;
     }
 
-    for (int y = startY; y <= endY; y++) {
-        const cv::Vec3b *row = source.ptr<cv::Vec3b>(y);
-        for (int x = startX; x <= endX; x++) {
-            const cv::Vec3b pixel = row[x];
-            double db = (double)pixel[0] - anchorPoint.blue;
-            double dg = (double)pixel[1] - anchorPoint.green;
-            double dr = (double)pixel[2] - anchorPoint.red;
-            double totalDistanceSquared = db * db + dg * dg + dr * dr;
-            if (totalDistanceSquared > maxDistanceSquared) {
-                continue;
-            }
-
-            BOOL matched = YES;
-            for (size_t index = 1; index < normalizedPoints.size(); index++) {
-                const AnClickColorPoint &colorPoint = normalizedPoints[index];
-                const cv::Vec3b samplePixel = source.at<cv::Vec3b>(y + colorPoint.dy, x + colorPoint.dx);
-                double sampleDb = (double)samplePixel[0] - colorPoint.blue;
-                double sampleDg = (double)samplePixel[1] - colorPoint.green;
-                double sampleDr = (double)samplePixel[2] - colorPoint.red;
-                double sampleDistanceSquared = sampleDb * sampleDb + sampleDg * sampleDg + sampleDr * sampleDr;
-                if (sampleDistanceSquared > maxDistanceSquared) {
-                    matched = NO;
-                    break;
+    auto scanRange = [&](int scanStartX, int scanEndX, int scanStartY, int scanEndY) {
+        for (int y = scanStartY; y <= scanEndY; y++) {
+            const cv::Vec3b *row = source.ptr<cv::Vec3b>(y);
+            for (int x = scanStartX; x <= scanEndX; x++) {
+                const cv::Vec3b pixel = row[x];
+                double db = (double)pixel[0] - anchorPoint.blue;
+                double dg = (double)pixel[1] - anchorPoint.green;
+                double dr = (double)pixel[2] - anchorPoint.red;
+                double totalDistanceSquared = db * db + dg * dg + dr * dr;
+                if (totalDistanceSquared > maxDistanceSquared) {
+                    continue;
                 }
-                totalDistanceSquared += sampleDistanceSquared;
-            }
 
-            if (!matched) {
-                continue;
-            }
+                BOOL matched = YES;
+                for (size_t index = 1; index < normalizedPoints.size(); index++) {
+                    const AnClickColorPoint &colorPoint = normalizedPoints[index];
+                    const cv::Vec3b samplePixel = source.at<cv::Vec3b>(y + colorPoint.dy, x + colorPoint.dx);
+                    double sampleDb = (double)samplePixel[0] - colorPoint.blue;
+                    double sampleDg = (double)samplePixel[1] - colorPoint.green;
+                    double sampleDr = (double)samplePixel[2] - colorPoint.red;
+                    double sampleDistanceSquared = sampleDb * sampleDb + sampleDg * sampleDg + sampleDr * sampleDr;
+                    if (sampleDistanceSquared > maxDistanceSquared) {
+                        matched = NO;
+                        break;
+                    }
+                    totalDistanceSquared += sampleDistanceSquared;
+                }
 
-            double proximitySquared = 0.0;
-            if (hasPreferredAnchorPixel) {
-                double proximityDx = (double)x - preferredAnchorPixelX;
-                double proximityDy = (double)y - preferredAnchorPixelY;
-                proximitySquared = proximityDx * proximityDx + proximityDy * proximityDy;
-            }
+                if (!matched) {
+                    continue;
+                }
 
-            BOOL betterMatch = NO;
-            if (hasPreferredAnchorPixel) {
-                if (proximitySquared < bestProximitySquared - 0.5) {
-                    betterMatch = YES;
-                } else if (fabs(proximitySquared - bestProximitySquared) <= 0.5 &&
-                           totalDistanceSquared < bestTotalDistanceSquared) {
+                double proximitySquared = 0.0;
+                if (hasPreferredAnchorPixel) {
+                    double proximityDx = (double)x - preferredAnchorPixelX;
+                    double proximityDy = (double)y - preferredAnchorPixelY;
+                    proximitySquared = proximityDx * proximityDx + proximityDy * proximityDy;
+                }
+
+                BOOL betterMatch = NO;
+                if (hasPreferredAnchorPixel) {
+                    if (proximitySquared < bestProximitySquared - 0.5) {
+                        betterMatch = YES;
+                    } else if (fabs(proximitySquared - bestProximitySquared) <= 0.5 &&
+                               totalDistanceSquared < bestTotalDistanceSquared) {
+                        betterMatch = YES;
+                    }
+                } else if (totalDistanceSquared < bestTotalDistanceSquared) {
                     betterMatch = YES;
                 }
-            } else if (totalDistanceSquared < bestTotalDistanceSquared) {
-                betterMatch = YES;
-            }
 
-            if (betterMatch) {
-                bestTotalDistanceSquared = totalDistanceSquared;
-                bestProximitySquared = proximitySquared;
-                bestAnchor = cv::Point(x, y);
-                if ((!hasPreferredAnchorPixel && bestTotalDistanceSquared <= 0.0) ||
-                    (hasPreferredAnchorPixel && bestTotalDistanceSquared <= 0.0 && bestProximitySquared <= 0.0)) {
-                    break;
+                if (betterMatch) {
+                    bestTotalDistanceSquared = totalDistanceSquared;
+                    bestProximitySquared = proximitySquared;
+                    bestAnchor = cv::Point(x, y);
+                    if ((!hasPreferredAnchorPixel && bestTotalDistanceSquared <= 0.0) ||
+                        (hasPreferredAnchorPixel && bestTotalDistanceSquared <= 0.0 && bestProximitySquared <= 0.0)) {
+                        return;
+                    }
                 }
             }
         }
-        if ((!hasPreferredAnchorPixel && bestTotalDistanceSquared <= 0.0) ||
-            (hasPreferredAnchorPixel && bestTotalDistanceSquared <= 0.0 && bestProximitySquared <= 0.0)) {
-            break;
+    };
+
+    if (hasPreferredAnchorPixel) {
+        int preferredX = MIN(MAX((int)llround(preferredAnchorPixelX), startX), endX);
+        int preferredY = MIN(MAX((int)llround(preferredAnchorPixelY), startY), endY);
+        int localRadius = MAX(32, (int)llround(48.0 * scale));
+        int localStartX = MAX(startX, preferredX - localRadius);
+        int localEndX = MIN(endX, preferredX + localRadius);
+        int localStartY = MAX(startY, preferredY - localRadius);
+        int localEndY = MIN(endY, preferredY + localRadius);
+        scanRange(localStartX, localEndX, localStartY, localEndY);
+        if (bestProximitySquared > (double)localRadius * (double)localRadius) {
+            bestTotalDistanceSquared = DBL_MAX;
+            bestProximitySquared = DBL_MAX;
         }
+    }
+    if (bestTotalDistanceSquared == DBL_MAX) {
+        scanRange(startX, endX, startY, endY);
     }
 
     if (bestTotalDistanceSquared == DBL_MAX) {
