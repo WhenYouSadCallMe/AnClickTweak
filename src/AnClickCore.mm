@@ -971,9 +971,6 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
 
     std::vector<AnClickColorPoint> normalizedPoints;
     normalizedPoints.reserve(points.count);
-    BOOL hasPreferredAnchorPixel = NO;
-    double preferredAnchorPixelX = 0.0;
-    double preferredAnchorPixelY = 0.0;
     int minDx = 0;
     int minDy = 0;
     int maxDx = 0;
@@ -992,16 +989,6 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
         }
         double dxValue = [point[@"dx"] respondsToSelector:@selector(doubleValue)] ? [point[@"dx"] doubleValue] : 0.0;
         double dyValue = [point[@"dy"] respondsToSelector:@selector(doubleValue)] ? [point[@"dy"] doubleValue] : 0.0;
-        if (normalizedPoints.empty()) {
-            id preferredXValue = [point[@"preferredX"] respondsToSelector:@selector(doubleValue)] ? point[@"preferredX"] : point[@"x"];
-            id preferredYValue = [point[@"preferredY"] respondsToSelector:@selector(doubleValue)] ? point[@"preferredY"] : point[@"y"];
-            if ([preferredXValue respondsToSelector:@selector(doubleValue)] &&
-                [preferredYValue respondsToSelector:@selector(doubleValue)]) {
-                preferredAnchorPixelX = [preferredXValue doubleValue] * scale;
-                preferredAnchorPixelY = [preferredYValue doubleValue] * scale;
-                hasPreferredAnchorPixel = YES;
-            }
-        }
         AnClickColorPoint colorPoint = {
             (int)llround(dxValue * scale),
             (int)llround(dyValue * scale),
@@ -1021,30 +1008,6 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
     }
 
     const AnClickColorPoint &anchorPoint = normalizedPoints[0];
-    BOOL usesVerticallyFlippedImageCoordinates = NO;
-    if (hasPreferredAnchorPixel) {
-        int preferredPixelX = MIN(MAX((int)floor(preferredAnchorPixelX), 0), source.cols - 1);
-        int preferredPixelY = MIN(MAX((int)floor(preferredAnchorPixelY), 0), source.rows - 1);
-        int flippedPreferredPixelY = source.rows - 1 - preferredPixelY;
-        const cv::Vec3b normalPixel = source.at<cv::Vec3b>(preferredPixelY, preferredPixelX);
-        const cv::Vec3b flippedPixel = source.at<cv::Vec3b>(flippedPreferredPixelY, preferredPixelX);
-        double normalDb = (double)normalPixel[0] - anchorPoint.blue;
-        double normalDg = (double)normalPixel[1] - anchorPoint.green;
-        double normalDr = (double)normalPixel[2] - anchorPoint.red;
-        double flippedDb = (double)flippedPixel[0] - anchorPoint.blue;
-        double flippedDg = (double)flippedPixel[1] - anchorPoint.green;
-        double flippedDr = (double)flippedPixel[2] - anchorPoint.red;
-        double normalDistanceSquared = normalDb * normalDb + normalDg * normalDg + normalDr * normalDr;
-        double flippedDistanceSquared = flippedDb * flippedDb + flippedDg * flippedDg + flippedDr * flippedDr;
-        usesVerticallyFlippedImageCoordinates = flippedDistanceSquared + 0.5 < normalDistanceSquared &&
-            flippedDistanceSquared <= maxDistanceSquared;
-        if (usesVerticallyFlippedImageCoordinates) {
-            for (AnClickColorPoint &colorPoint : normalizedPoints) {
-                colorPoint.dy = -colorPoint.dy;
-            }
-            preferredAnchorPixelY = (double)(source.rows - 1) - preferredAnchorPixelY;
-        }
-    }
 
     minDx = 0;
     minDy = 0;
@@ -1058,7 +1021,6 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
     }
 
     double bestTotalDistanceSquared = DBL_MAX;
-    double bestProximitySquared = DBL_MAX;
     cv::Point bestAnchor(0, 0);
 
     int startX = MAX(0, -minDx);
@@ -1101,28 +1063,15 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
                     continue;
                 }
 
-                double proximitySquared = 0.0;
-                if (hasPreferredAnchorPixel) {
-                    double proximityDx = (double)x - preferredAnchorPixelX;
-                    double proximityDy = (double)y - preferredAnchorPixelY;
-                    proximitySquared = proximityDx * proximityDx + proximityDy * proximityDy;
-                }
-
                 BOOL betterMatch = NO;
                 if (totalDistanceSquared < bestTotalDistanceSquared - 0.25) {
-                    betterMatch = YES;
-                } else if (fabs(totalDistanceSquared - bestTotalDistanceSquared) <= 0.25 &&
-                           hasPreferredAnchorPixel &&
-                           proximitySquared < bestProximitySquared - 0.5) {
                     betterMatch = YES;
                 }
 
                 if (betterMatch) {
                     bestTotalDistanceSquared = totalDistanceSquared;
-                    bestProximitySquared = proximitySquared;
                     bestAnchor = cv::Point(x, y);
-                    if ((!hasPreferredAnchorPixel && bestTotalDistanceSquared <= 0.0) ||
-                        (hasPreferredAnchorPixel && bestTotalDistanceSquared <= 0.0 && bestProximitySquared <= 0.0)) {
+                    if (bestTotalDistanceSquared <= 0.0) {
                         return;
                     }
                 }
@@ -1130,24 +1079,7 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
         }
     };
 
-    if (hasPreferredAnchorPixel) {
-        int preferredX = MIN(MAX((int)llround(preferredAnchorPixelX), startX), endX);
-        int preferredY = MIN(MAX((int)llround(preferredAnchorPixelY), startY), endY);
-        int localRadius = MAX(32, (int)llround(48.0 * scale));
-        int localStartX = MAX(startX, preferredX - localRadius);
-        int localEndX = MIN(endX, preferredX + localRadius);
-        int localStartY = MAX(startY, preferredY - localRadius);
-        int localEndY = MIN(endY, preferredY + localRadius);
-        scanRange(localStartX, localEndX, localStartY, localEndY);
-        if (bestTotalDistanceSquared > 1.0 ||
-            bestProximitySquared > (double)localRadius * (double)localRadius) {
-            bestTotalDistanceSquared = DBL_MAX;
-            bestProximitySquared = DBL_MAX;
-        }
-    }
-    if (bestTotalDistanceSquared == DBL_MAX) {
-        scanRange(startX, endX, startY, endY);
-    }
+    scanRange(startX, endX, startY, endY);
 
     if (bestTotalDistanceSquared == DBL_MAX) {
         return nil;
@@ -1157,9 +1089,6 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
     matchedPixels.reserve(normalizedPoints.size());
     for (const AnClickColorPoint &point : normalizedPoints) {
         cv::Point matchedPixel(bestAnchor.x + point.dx, bestAnchor.y + point.dy);
-        if (usesVerticallyFlippedImageCoordinates) {
-            matchedPixel.y = source.rows - 1 - matchedPixel.y;
-        }
         matchedPixels.push_back(matchedPixel);
     }
     return AnClickColorMatchResult(sourceWindow,
