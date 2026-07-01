@@ -487,26 +487,6 @@ static BOOL AnClickSampleImageDataRGB(CGImageRef imageRef, const UInt8 *bytes, C
     return YES;
 }
 
-static BOOL AnClickSampleImageProviderRGB(CGImageRef imageRef, NSInteger pixelX, NSInteger pixelY, NSInteger *red, NSInteger *green, NSInteger *blue) {
-    if (!imageRef) {
-        return NO;
-    }
-
-    CGDataProviderRef provider = CGImageGetDataProvider(imageRef);
-    if (!provider) {
-        return NO;
-    }
-
-    CFDataRef data = CGDataProviderCopyData(provider);
-    if (!data) {
-        return NO;
-    }
-
-    BOOL success = AnClickSampleImageDataRGB(imageRef, CFDataGetBytePtr(data), CFDataGetLength(data), pixelX, pixelY, red, green, blue);
-    CFRelease(data);
-    return success;
-}
-
 static double AnClickColorDistanceSquaredBGRToRGB(const cv::Vec3b &pixel, NSInteger red, NSInteger green, NSInteger blue) {
     double db = (double)pixel[0] - (double)blue;
     double dg = (double)pixel[1] - (double)green;
