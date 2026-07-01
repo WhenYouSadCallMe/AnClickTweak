@@ -1109,14 +1109,11 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
                 }
 
                 BOOL betterMatch = NO;
-                if (hasPreferredAnchorPixel) {
-                    if (proximitySquared < bestProximitySquared - 0.5) {
-                        betterMatch = YES;
-                    } else if (fabs(proximitySquared - bestProximitySquared) <= 0.5 &&
-                               totalDistanceSquared < bestTotalDistanceSquared) {
-                        betterMatch = YES;
-                    }
-                } else if (totalDistanceSquared < bestTotalDistanceSquared) {
+                if (totalDistanceSquared < bestTotalDistanceSquared - 0.25) {
+                    betterMatch = YES;
+                } else if (fabs(totalDistanceSquared - bestTotalDistanceSquared) <= 0.25 &&
+                           hasPreferredAnchorPixel &&
+                           proximitySquared < bestProximitySquared - 0.5) {
                     betterMatch = YES;
                 }
 
@@ -1142,7 +1139,8 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
         int localStartY = MAX(startY, preferredY - localRadius);
         int localEndY = MIN(endY, preferredY + localRadius);
         scanRange(localStartX, localEndX, localStartY, localEndY);
-        if (bestProximitySquared > (double)localRadius * (double)localRadius) {
+        if (bestTotalDistanceSquared > 1.0 ||
+            bestProximitySquared > (double)localRadius * (double)localRadius) {
             bestTotalDistanceSquared = DBL_MAX;
             bestProximitySquared = DBL_MAX;
         }
