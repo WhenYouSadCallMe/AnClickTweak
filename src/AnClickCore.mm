@@ -971,6 +971,9 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
 
     std::vector<AnClickColorPoint> normalizedPoints;
     normalizedPoints.reserve(points.count);
+    BOOL hasPreferredAnchorPixel = NO;
+    double preferredAnchorPixelX = 0.0;
+    double preferredAnchorPixelY = 0.0;
     int minDx = 0;
     int minDy = 0;
     int maxDx = 0;
@@ -989,6 +992,16 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
         }
         double dxValue = [point[@"dx"] respondsToSelector:@selector(doubleValue)] ? [point[@"dx"] doubleValue] : 0.0;
         double dyValue = [point[@"dy"] respondsToSelector:@selector(doubleValue)] ? [point[@"dy"] doubleValue] : 0.0;
+        if (normalizedPoints.empty()) {
+            id preferredXValue = [point[@"preferredX"] respondsToSelector:@selector(doubleValue)] ? point[@"preferredX"] : point[@"x"];
+            id preferredYValue = [point[@"preferredY"] respondsToSelector:@selector(doubleValue)] ? point[@"preferredY"] : point[@"y"];
+            if ([preferredXValue respondsToSelector:@selector(doubleValue)] &&
+                [preferredYValue respondsToSelector:@selector(doubleValue)]) {
+                preferredAnchorPixelX = [preferredXValue doubleValue] * scale;
+                preferredAnchorPixelY = [preferredYValue doubleValue] * scale;
+                hasPreferredAnchorPixel = YES;
+            }
+        }
         AnClickColorPoint colorPoint = {
             (int)llround(dxValue * scale),
             (int)llround(dyValue * scale),
@@ -1013,6 +1026,9 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
         for (AnClickColorPoint &colorPoint : normalizedPoints) {
             colorPoint.dy = -colorPoint.dy;
         }
+        if (hasPreferredAnchorPixel) {
+            preferredAnchorPixelY = (double)(source.rows - 1) - preferredAnchorPixelY;
+        }
     }
 
     minDx = 0;
@@ -1026,8 +1042,12 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
         maxDy = MAX(maxDy, colorPoint.dy);
     }
 
-    double bestTotalDistanceSquared = DBL_MAX;
-    cv::Point bestAnchor(0, 0);
+    struct AnClickColorScanBest {
+        double totalDistanceSquared;
+        double proximitySquared;
+        cv::Point anchor;
+        BOOL found;
+    };
 
     int startX = MAX(0, -minDx);
     int endX = MIN(source.cols - 1, source.cols - 1 - maxDx);
@@ -1037,7 +1057,8 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
         return nil;
     }
 
-    auto scanRange = [&](int scanStartX, int scanEndX, int scanStartY, int scanEndY) {
+    auto scanRange = [&](int scanStartX, int scanEndX, int scanStartY, int scanEndY, BOOL preferProximity) {
+        AnClickColorScanBest best = {DBL_MAX, DBL_MAX, cv::Point(0, 0), NO};
         for (int y = scanStartY; y <= scanEndY; y++) {
             const cv::Vec3b *row = source.ptr<cv::Vec3b>(y);
             for (int x = scanStartX; x <= scanEndX; x++) {
@@ -1069,32 +1090,67 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
                     continue;
                 }
 
+                double proximitySquared = 0.0;
+                if (hasPreferredAnchorPixel) {
+                    double proximityDx = (double)x - preferredAnchorPixelX;
+                    double proximityDy = (double)y - preferredAnchorPixelY;
+                    proximitySquared = proximityDx * proximityDx + proximityDy * proximityDy;
+                }
+
                 BOOL betterMatch = NO;
-                if (totalDistanceSquared < bestTotalDistanceSquared - 0.25) {
+                if (!best.found || totalDistanceSquared < best.totalDistanceSquared - 0.25) {
+                    betterMatch = YES;
+                } else if (fabs(totalDistanceSquared - best.totalDistanceSquared) <= 0.25 &&
+                           preferProximity &&
+                           proximitySquared < best.proximitySquared - 0.5) {
                     betterMatch = YES;
                 }
 
                 if (betterMatch) {
-                    bestTotalDistanceSquared = totalDistanceSquared;
-                    bestAnchor = cv::Point(x, y);
-                    if (bestTotalDistanceSquared <= 0.0) {
-                        return;
+                    best.totalDistanceSquared = totalDistanceSquared;
+                    best.proximitySquared = proximitySquared;
+                    best.anchor = cv::Point(x, y);
+                    best.found = YES;
+                    if (best.totalDistanceSquared <= 0.0 && (!preferProximity || best.proximitySquared <= 0.0)) {
+                        return best;
                     }
                 }
             }
         }
+        return best;
     };
 
-    scanRange(startX, endX, startY, endY);
+    AnClickColorScanBest globalBest = scanRange(startX, endX, startY, endY, NO);
+    AnClickColorScanBest chosenBest = globalBest;
+    if (hasPreferredAnchorPixel) {
+        int preferredX = MIN(MAX((int)llround(preferredAnchorPixelX), startX), endX);
+        int preferredY = MIN(MAX((int)llround(preferredAnchorPixelY), startY), endY);
+        int localRadius = MAX(32, (int)llround(48.0 * scale));
+        int localStartX = MAX(startX, preferredX - localRadius);
+        int localEndX = MIN(endX, preferredX + localRadius);
+        int localStartY = MAX(startY, preferredY - localRadius);
+        int localEndY = MIN(endY, preferredY + localRadius);
+        AnClickColorScanBest localBest = scanRange(localStartX, localEndX, localStartY, localEndY, YES);
+        if (localBest.found) {
+            double localDistance = sqrt(MAX(0.0, localBest.totalDistanceSquared));
+            double globalDistance = globalBest.found ? sqrt(MAX(0.0, globalBest.totalDistanceSquared)) : DBL_MAX;
+            double distanceSlack = MAX(2.0, maxDistance * 0.18);
+            if (!globalBest.found ||
+                localDistance <= 1.0 ||
+                localDistance <= globalDistance + distanceSlack) {
+                chosenBest = localBest;
+            }
+        }
+    }
 
-    if (bestTotalDistanceSquared == DBL_MAX) {
+    if (!chosenBest.found) {
         return nil;
     }
 
     std::vector<cv::Point> matchedPixels;
     matchedPixels.reserve(normalizedPoints.size());
     for (const AnClickColorPoint &point : normalizedPoints) {
-        cv::Point matchedPixel(bestAnchor.x + point.dx, bestAnchor.y + point.dy);
+        cv::Point matchedPixel(chosenBest.anchor.x + point.dx, chosenBest.anchor.y + point.dy);
         if (usesVerticallyFlippedImageCoordinates) {
             matchedPixel.y = source.rows - 1 - matchedPixel.y;
         }
@@ -1103,7 +1159,7 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
     return AnClickColorMatchResult(sourceWindow,
                                    scale,
                                    matchedPixels,
-                                   sqrt(MAX(0.0, bestTotalDistanceSquared)),
+                                   sqrt(MAX(0.0, chosenBest.totalDistanceSquared)),
                                    maxDistance);
 }
 

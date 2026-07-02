@@ -15022,6 +15022,65 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     return YES;
 }
 
+- (NSArray<NSDictionary *> *)colorSamplesByAddingAutoContextIfNeeded:(NSArray<NSDictionary *> *)samples {
+    NSArray<NSDictionary *> *normalizedSamples = [self colorSamplesForPersistence:samples];
+    if (normalizedSamples.count != 1 || !_colorPickImage) {
+        return normalizedSamples;
+    }
+
+    NSDictionary *anchor = normalizedSamples.firstObject;
+    if (![anchor[@"x"] respondsToSelector:@selector(doubleValue)] ||
+        ![anchor[@"y"] respondsToSelector:@selector(doubleValue)]) {
+        return normalizedSamples;
+    }
+
+    CGPoint anchorPoint = CGPointMake([anchor[@"x"] doubleValue], [anchor[@"y"] doubleValue]);
+    CGSize imageSize = _colorPickImage.size;
+    if (imageSize.width <= 1.0 || imageSize.height <= 1.0) {
+        return normalizedSamples;
+    }
+
+    static const CGFloat offsets[][2] = {
+        {4.0, 0.0}, {-4.0, 0.0}, {0.0, 4.0}, {0.0, -4.0},
+        {8.0, 0.0}, {-8.0, 0.0}, {0.0, 8.0}, {0.0, -8.0},
+        {6.0, 6.0}, {-6.0, 6.0}, {6.0, -6.0}, {-6.0, -6.0},
+        {12.0, 0.0}, {-12.0, 0.0}, {0.0, 12.0}, {0.0, -12.0},
+    };
+
+    NSMutableArray<NSDictionary *> *enrichedSamples = [NSMutableArray arrayWithObject:anchor];
+    for (size_t index = 0; index < sizeof(offsets) / sizeof(offsets[0]); index++) {
+        if (enrichedSamples.count >= AnClickColorPickMaxSamples) {
+            break;
+        }
+        CGPoint contextPoint = CGPointMake(anchorPoint.x + offsets[index][0],
+                                           anchorPoint.y + offsets[index][1]);
+        if (contextPoint.x < 0.0 ||
+            contextPoint.y < 0.0 ||
+            contextPoint.x >= imageSize.width ||
+            contextPoint.y >= imageSize.height) {
+            continue;
+        }
+
+        NSInteger red = 0;
+        NSInteger green = 0;
+        NSInteger blue = 0;
+        if (![self sampleColorAtImagePoint:contextPoint image:_colorPickImage red:&red green:&green blue:&blue]) {
+            continue;
+        }
+        [enrichedSamples addObject:@{
+            @"x": @(contextPoint.x),
+            @"y": @(contextPoint.y),
+            @"dx": @(contextPoint.x - anchorPoint.x),
+            @"dy": @(contextPoint.y - anchorPoint.y),
+            @"red": @(MIN(255, MAX(0, red))),
+            @"green": @(MIN(255, MAX(0, green))),
+            @"blue": @(MIN(255, MAX(0, blue))),
+        }];
+    }
+
+    return enrichedSamples.count > 1 ? enrichedSamples : normalizedSamples;
+}
+
 - (BOOL)colorPickSampleHasCoordinate:(NSDictionary *)sample {
     return [sample[@"x"] respondsToSelector:@selector(doubleValue)] &&
            [sample[@"y"] respondsToSelector:@selector(doubleValue)];
@@ -15389,7 +15448,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     if (_branchColorPickActive) {
         BOOL success = _branchColorPickSuccess;
         AnClickActionMode mode = _branchColorPickMode;
-        NSArray<NSDictionary *> *samples = [self colorSamplesForPersistence:_pendingColorPickSamples];
+        NSArray<NSDictionary *> *samples = [self colorSamplesByAddingAutoContextIfNeeded:_pendingColorPickSamples];
         NSDictionary *anchor = samples.firstObject;
         NSMutableDictionary *config = [self ensureMutableBranchActionConfigForSuccess:success mode:mode];
         if (config && anchor) {
@@ -15410,7 +15469,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         [self updateStatusForCurrentConfig];
         return;
     }
-    [self applyTargetColorSamples:_pendingColorPickSamples];
+    [self applyTargetColorSamples:[self colorSamplesByAddingAutoContextIfNeeded:_pendingColorPickSamples]];
     [self rememberManualCoordinateScreenSize];
     [self finishColorPickingOverlay];
     [self refreshTaskEditorAfterExternalResult];
