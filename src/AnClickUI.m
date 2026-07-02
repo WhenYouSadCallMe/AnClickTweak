@@ -47,7 +47,7 @@ static const NSTimeInterval AnClickMacroMaxPlaybackDuration = 600.0;
 static const double AnClickMacroMinPlaybackSpeed = 0.1;
 static const double AnClickMacroMaxPlaybackSpeed = 10.0;
 static const NSTimeInterval AnClickDefaultTapPressDuration = 1.0 / 240.0;
-static const NSTimeInterval AnClickFastRecognitionTapDuration = 1.0 / 240.0;
+static const NSTimeInterval AnClickFastRecognitionTapDuration = 0.020;
 static const NSTimeInterval AnClickFastDoubleTapDuration = 0.060;
 static const NSTimeInterval AnClickDefaultDoubleTapInterval = 0.060;
 static const NSTimeInterval AnClickDefaultSwipeDuration = 0.300;
@@ -237,6 +237,7 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
 @interface AnClickHammerTouchDriver : NSObject
 + (void)fastTapAtPoint:(CGPoint)point;
 + (void)fastTapAtPoint:(CGPoint)point inWindow:(UIWindow *)targetWindow;
++ (void)recognitionTapAtPoint:(CGPoint)point inWindow:(UIWindow *)targetWindow;
 + (void)fastDoubleTapAtPoint:(CGPoint)point;
 + (void)fastDoubleTapAtPoint:(CGPoint)point inWindow:(UIWindow *)targetWindow;
 + (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points;
@@ -11487,6 +11488,17 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
     return mode == AnClickActionModeDoubleTap ? AnClickFastDoubleTapDuration : AnClickFastRecognitionTapDuration;
 }
 
+- (void)performRecognitionTapAtPoint:(CGPoint)point inWindow:(UIWindow *)hostWindow showTrace:(BOOL)showTrace duration:(NSTimeInterval)duration {
+    if (![self panelCanUseCurrentScene]) {
+        return;
+    }
+    [self temporarilyPassPanelTouchesThroughForDuration:duration];
+    [AnClickHammerTouchDriver recognitionTapAtPoint:point inWindow:hostWindow];
+    if (showTrace) {
+        [self showOperationTraceForMode:AnClickActionModeTap atPoint:point inWindow:hostWindow duration:duration];
+    }
+}
+
 - (NSMutableDictionary *)draftActionTaskForMode:(AnClickActionMode)mode {
     NSMutableDictionary *task = [@{
         @"mode": @(mode),
@@ -11918,6 +11930,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             finishPendingActionNow();
             return;
         }
+        [strongSelf temporarilyPassPanelTouchesThroughForDuration:(safeDuration + AnClickRecognitionActionCompletionSafetyDelay)];
         block(currentHostWindow);
         finishPendingActionAfterTouch();
     };
@@ -13140,7 +13153,14 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                           inWindow:hostWindow
                                         generation:runGeneration
                                              block:^(UIWindow *currentHostWindow) {
-        [self performPointActionMode:failureMode atPoint:actionPoint inWindow:currentHostWindow showTrace:NO];
+        if (failureMode == AnClickActionModeTap) {
+            [self performRecognitionTapAtPoint:actionPoint
+                                      inWindow:currentHostWindow
+                                     showTrace:NO
+                                      duration:actionDuration];
+        } else {
+            [self performPointActionMode:failureMode atPoint:actionPoint inWindow:currentHostWindow showTrace:NO];
+        }
         [self setHomeOutputText:[NSString stringWithFormat:@"识别失败后%@已执行 %.0f,%.0f",
                                  [self actionNameForMode:failureMode],
                                  actionPoint.x,
@@ -13196,8 +13216,11 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
         return NO;
     }
 
-    CGPoint point = [self point:[self resolvedPointForTask:config fallbackPoint:pointValue.CGPointValue]
-          byApplyingJitterForTask:config];
+    BOOL useMatchPoint = config[@"useMatchPoint"] ? [config[@"useMatchPoint"] boolValue] : NO;
+    CGPoint basePoint = (useMatchPoint && pointValue)
+        ? pointValue.CGPointValue
+        : [self resolvedPointForTask:config fallbackPoint:pointValue.CGPointValue];
+    CGPoint point = [self point:basePoint byApplyingJitterForTask:config];
     NSTimeInterval actionDuration = [self modeIsFastClickTask:actionMode]
         ? [self fastClickDurationForMode:actionMode]
         : [self durationForTaskMode:actionMode];
@@ -13226,7 +13249,14 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
             [self setHomeOutputText:[NSString stringWithFormat:@"识别后长按已执行 %.0f,%.0f", point.x, point.y]];
             [self showOperationTraceForMode:actionMode atPoint:point inWindow:currentHostWindow duration:actionDuration];
         } else {
-            [self performPointActionMode:actionMode atPoint:point inWindow:currentHostWindow showTrace:NO];
+            if (actionMode == AnClickActionModeTap) {
+                [self performRecognitionTapAtPoint:point
+                                          inWindow:currentHostWindow
+                                         showTrace:NO
+                                          duration:actionDuration];
+            } else {
+                [self performPointActionMode:actionMode atPoint:point inWindow:currentHostWindow showTrace:NO];
+            }
             [self setHomeOutputText:[NSString stringWithFormat:@"识别后%@已执行 %.0f,%.0f",
                                      [self actionNameForMode:actionMode],
                                      point.x,
@@ -13469,11 +13499,18 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                             inWindow:currentHostWindow
                                                           generation:runGeneration
                                                                block:^(UIWindow *delayedHostWindow) {
-                    [strongSelf performPointActionMode:imageActionMode
-                                               atPoint:actionPoint
-                                              inWindow:delayedHostWindow
-                                             showTrace:NO
-                                     longPressDuration:actionLongPressDuration];
+                    if (imageActionMode == AnClickActionModeTap) {
+                        [strongSelf performRecognitionTapAtPoint:actionPoint
+                                                        inWindow:delayedHostWindow
+                                                       showTrace:NO
+                                                        duration:actionDuration];
+                    } else {
+                        [strongSelf performPointActionMode:imageActionMode
+                                                   atPoint:actionPoint
+                                                  inWindow:delayedHostWindow
+                                                 showTrace:NO
+                                         longPressDuration:actionLongPressDuration];
+                    }
                     if (deferRecognitionBoxUntilAfterPointAction) {
                         [strongSelf showRecognitionBoxForScreenRect:rect score:scoreNumber.doubleValue inWindow:delayedHostWindow duration:0.75];
                     }
@@ -13772,11 +13809,18 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                             inWindow:currentHostWindow
                                                           generation:runGeneration
                                                                block:^(UIWindow *delayedHostWindow) {
-                    [strongSelf performPointActionMode:actionMode
-                                               atPoint:actionPoint
-                                              inWindow:delayedHostWindow
-                                             showTrace:NO
-                                     longPressDuration:actionLongPressDuration];
+                    if (actionMode == AnClickActionModeTap) {
+                        [strongSelf performRecognitionTapAtPoint:actionPoint
+                                                        inWindow:delayedHostWindow
+                                                       showTrace:NO
+                                                        duration:actionDuration];
+                    } else {
+                        [strongSelf performPointActionMode:actionMode
+                                                   atPoint:actionPoint
+                                                  inWindow:delayedHostWindow
+                                                 showTrace:NO
+                                         longPressDuration:actionLongPressDuration];
+                    }
                     if (deferRecognitionBoxUntilAfterPointAction) {
                         [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue
                                                               score:scoreNumber ? scoreNumber.doubleValue : 1.0
@@ -14066,11 +14110,18 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
                                                             inWindow:currentHostWindow
                                                           generation:runGeneration
                                                                block:^(UIWindow *delayedHostWindow) {
-                    [strongSelf performPointActionMode:actionMode
-                                               atPoint:actionPoint
-                                              inWindow:delayedHostWindow
-                                             showTrace:NO
-                                     longPressDuration:actionLongPressDuration];
+                    if (actionMode == AnClickActionModeTap) {
+                        [strongSelf performRecognitionTapAtPoint:actionPoint
+                                                        inWindow:delayedHostWindow
+                                                       showTrace:NO
+                                                        duration:actionDuration];
+                    } else {
+                        [strongSelf performPointActionMode:actionMode
+                                                   atPoint:actionPoint
+                                                  inWindow:delayedHostWindow
+                                                 showTrace:NO
+                                         longPressDuration:actionLongPressDuration];
+                    }
                     if (deferRecognitionBoxUntilAfterPointAction) {
                         [strongSelf showRecognitionBoxForScreenRect:rectValue.CGRectValue
                                                               score:scoreNumber ? scoreNumber.doubleValue : 1.0

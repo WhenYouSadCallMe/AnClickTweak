@@ -11,6 +11,7 @@
 @interface AnClickHammerTouchDriver : NSObject
 + (void)fastTapAtPoint:(CGPoint)point;
 + (void)fastTapAtPoint:(CGPoint)point inWindow:(UIWindow *)targetWindow;
++ (void)recognitionTapAtPoint:(CGPoint)point inWindow:(UIWindow *)targetWindow;
 + (void)fastDoubleTapAtPoint:(CGPoint)point;
 + (void)fastDoubleTapAtPoint:(CGPoint)point inWindow:(UIWindow *)targetWindow;
 + (void)fastMultiTapAtPoints:(NSArray<NSValue *> *)points;
@@ -58,6 +59,7 @@ static NSUInteger AnClickTouchGeneration = 0;
 static const NSTimeInterval AnClickHoldTickInterval = 1.0 / 60.0;
 static const NSTimeInterval AnClickTouchUpDelay = 1.0 / 120.0;
 static const NSTimeInterval AnClickTurboTapUpDelay = 1.0 / 240.0;
+static const NSTimeInterval AnClickRecognitionTapUpDelay = 0.020;
 static const NSTimeInterval AnClickTurboDoubleTapDelay = 0.060;
 static const NSTimeInterval AnClickRecordedKeepAliveInterval = 1.0 / 30.0;
 static const NSTimeInterval AnClickRecordedMoveMinInterval = 1.0 / 90.0;
@@ -113,6 +115,19 @@ static NSInteger AnClickTurboTapNextTouchId = 40;
         if (![self touchGenerationIsCurrent:generation]) {
             return;
         }
+        [self touchUpAtPoint:point touchId:touchId inWindow:targetWindow];
+    });
+}
+
++ (void)recognitionTapAtPoint:(CGPoint)point inWindow:(UIWindow *)targetWindow {
+    NSUInteger generation = AnClickTouchGeneration;
+    NSInteger touchId = [self nextTurboTapTouchId];
+    [self touchDownAtPoint:point touchId:touchId inWindow:targetWindow];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(AnClickRecognitionTapUpDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (![self touchGenerationIsCurrent:generation]) {
+            return;
+        }
+        [self touchMoveAtPoint:point touchId:touchId inWindow:targetWindow];
         [self touchUpAtPoint:point touchId:touchId inWindow:targetWindow];
     });
 }
