@@ -1020,6 +1020,50 @@ static void AnClickInstallSpringBoardVolumeControlHook(void);
     return [NSString stringWithFormat:@"%@ +%lu点", hex, (unsigned long)points.count - 1];
 }
 
+- (BOOL)colorPatternLooksLikeAutoContextPoints:(NSArray<NSDictionary *> *)points {
+    if (points.count < 5) {
+        return NO;
+    }
+
+    static const CGFloat autoOffsets[][2] = {
+        {4.0, 0.0}, {-4.0, 0.0}, {0.0, 4.0}, {0.0, -4.0},
+        {8.0, 0.0}, {-8.0, 0.0}, {0.0, 8.0}, {0.0, -8.0},
+        {6.0, 6.0}, {-6.0, 6.0}, {6.0, -6.0}, {-6.0, -6.0},
+        {12.0, 0.0}, {-12.0, 0.0}, {0.0, 12.0}, {0.0, -12.0},
+    };
+
+    for (NSUInteger index = 1; index < points.count; index++) {
+        NSDictionary *point = points[index];
+        if (![point[@"dx"] respondsToSelector:@selector(doubleValue)] ||
+            ![point[@"dy"] respondsToSelector:@selector(doubleValue)]) {
+            return NO;
+        }
+        CGFloat dx = [point[@"dx"] doubleValue];
+        CGFloat dy = [point[@"dy"] doubleValue];
+        BOOL matchedAutoOffset = NO;
+        for (size_t offsetIndex = 0; offsetIndex < sizeof(autoOffsets) / sizeof(autoOffsets[0]); offsetIndex++) {
+            if (fabs(dx - autoOffsets[offsetIndex][0]) <= 0.5 &&
+                fabs(dy - autoOffsets[offsetIndex][1]) <= 0.5) {
+                matchedAutoOffset = YES;
+                break;
+            }
+        }
+        if (!matchedAutoOffset) {
+            return NO;
+        }
+    }
+
+    return YES;
+}
+
+- (NSArray<NSDictionary *> *)colorPointsByRemovingAutoContextIfNeeded:(NSArray<NSDictionary *> *)points {
+    if (![self colorPatternLooksLikeAutoContextPoints:points]) {
+        return points;
+    }
+    NSDictionary *anchor = points.firstObject;
+    return anchor ? @[anchor] : points;
+}
+
 - (NSSet *)archiveAllowedClasses {
     return [NSSet setWithObjects:
             NSArray.class,
@@ -13863,6 +13907,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
            runGeneration:(NSUInteger)runGeneration
               completion:(AnClickTaskEngineRecognitionCompletion)completion {
     NSArray<NSDictionary *> *colorPoints = [self normalizedColorPatternPointsForTask:task];
+    colorPoints = [self colorPointsByRemovingAutoContextIfNeeded:colorPoints];
     if (colorPoints.count == 0) {
         [self setTurboAwareStatusLabelText:@"识色未取色"];
         if (completion) {
@@ -15075,61 +15120,7 @@ nextIndexAfterRecognitionTaskModel:(AnClickTaskModel *)model
 
 - (NSArray<NSDictionary *> *)colorSamplesByAddingAutoContextIfNeeded:(NSArray<NSDictionary *> *)samples {
     NSArray<NSDictionary *> *normalizedSamples = [self colorSamplesForPersistence:samples];
-    if (normalizedSamples.count != 1 || !_colorPickImage) {
-        return normalizedSamples;
-    }
-
-    NSDictionary *anchor = normalizedSamples.firstObject;
-    if (![anchor[@"x"] respondsToSelector:@selector(doubleValue)] ||
-        ![anchor[@"y"] respondsToSelector:@selector(doubleValue)]) {
-        return normalizedSamples;
-    }
-
-    CGPoint anchorPoint = CGPointMake([anchor[@"x"] doubleValue], [anchor[@"y"] doubleValue]);
-    CGSize imageSize = _colorPickImage.size;
-    if (imageSize.width <= 1.0 || imageSize.height <= 1.0) {
-        return normalizedSamples;
-    }
-
-    static const CGFloat offsets[][2] = {
-        {4.0, 0.0}, {-4.0, 0.0}, {0.0, 4.0}, {0.0, -4.0},
-        {8.0, 0.0}, {-8.0, 0.0}, {0.0, 8.0}, {0.0, -8.0},
-        {6.0, 6.0}, {-6.0, 6.0}, {6.0, -6.0}, {-6.0, -6.0},
-        {12.0, 0.0}, {-12.0, 0.0}, {0.0, 12.0}, {0.0, -12.0},
-    };
-
-    NSMutableArray<NSDictionary *> *enrichedSamples = [NSMutableArray arrayWithObject:anchor];
-    for (size_t index = 0; index < sizeof(offsets) / sizeof(offsets[0]); index++) {
-        if (enrichedSamples.count >= AnClickColorPickMaxSamples) {
-            break;
-        }
-        CGPoint contextPoint = CGPointMake(anchorPoint.x + offsets[index][0],
-                                           anchorPoint.y + offsets[index][1]);
-        if (contextPoint.x < 0.0 ||
-            contextPoint.y < 0.0 ||
-            contextPoint.x >= imageSize.width ||
-            contextPoint.y >= imageSize.height) {
-            continue;
-        }
-
-        NSInteger red = 0;
-        NSInteger green = 0;
-        NSInteger blue = 0;
-        if (![self sampleColorAtImagePoint:contextPoint image:_colorPickImage red:&red green:&green blue:&blue]) {
-            continue;
-        }
-        [enrichedSamples addObject:@{
-            @"x": @(contextPoint.x),
-            @"y": @(contextPoint.y),
-            @"dx": @(contextPoint.x - anchorPoint.x),
-            @"dy": @(contextPoint.y - anchorPoint.y),
-            @"red": @(MIN(255, MAX(0, red))),
-            @"green": @(MIN(255, MAX(0, green))),
-            @"blue": @(MIN(255, MAX(0, blue))),
-        }];
-    }
-
-    return enrichedSamples.count > 1 ? enrichedSamples : normalizedSamples;
+    return normalizedSamples;
 }
 
 - (BOOL)colorPickSampleHasCoordinate:(NSDictionary *)sample {
