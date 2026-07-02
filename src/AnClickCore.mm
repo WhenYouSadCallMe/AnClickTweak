@@ -967,6 +967,7 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
         double red;
         double green;
         double blue;
+        BOOL softContext;
     };
 
     std::vector<AnClickColorPoint> normalizedPoints;
@@ -993,8 +994,8 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
         double dxValue = [point[@"dx"] respondsToSelector:@selector(doubleValue)] ? [point[@"dx"] doubleValue] : 0.0;
         double dyValue = [point[@"dy"] respondsToSelector:@selector(doubleValue)] ? [point[@"dy"] doubleValue] : 0.0;
         if (normalizedPoints.empty()) {
-            id preferredXValue = [point[@"preferredX"] respondsToSelector:@selector(doubleValue)] ? point[@"preferredX"] : point[@"x"];
-            id preferredYValue = [point[@"preferredY"] respondsToSelector:@selector(doubleValue)] ? point[@"preferredY"] : point[@"y"];
+            id preferredXValue = point[@"preferredX"];
+            id preferredYValue = point[@"preferredY"];
             if ([preferredXValue respondsToSelector:@selector(doubleValue)] &&
                 [preferredYValue respondsToSelector:@selector(doubleValue)]) {
                 preferredAnchorPixelX = [preferredXValue doubleValue] * scale;
@@ -1008,11 +1009,14 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
             (double)MIN(255.0, MAX(0.0, [redValue doubleValue])),
             (double)MIN(255.0, MAX(0.0, [greenValue doubleValue])),
             (double)MIN(255.0, MAX(0.0, [blueValue doubleValue])),
+            [point[@"softContext"] respondsToSelector:@selector(boolValue)] ? [point[@"softContext"] boolValue] : NO,
         };
-        minDx = MIN(minDx, colorPoint.dx);
-        minDy = MIN(minDy, colorPoint.dy);
-        maxDx = MAX(maxDx, colorPoint.dx);
-        maxDy = MAX(maxDy, colorPoint.dy);
+        if (!colorPoint.softContext) {
+            minDx = MIN(minDx, colorPoint.dx);
+            minDy = MIN(minDy, colorPoint.dy);
+            maxDx = MAX(maxDx, colorPoint.dx);
+            maxDy = MAX(maxDy, colorPoint.dy);
+        }
         normalizedPoints.push_back(colorPoint);
     }
 
@@ -1036,6 +1040,9 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
     maxDx = 0;
     maxDy = 0;
     for (const AnClickColorPoint &colorPoint : normalizedPoints) {
+        if (colorPoint.softContext) {
+            continue;
+        }
         minDx = MIN(minDx, colorPoint.dx);
         minDy = MIN(minDy, colorPoint.dy);
         maxDx = MAX(maxDx, colorPoint.dx);
@@ -1074,11 +1081,26 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
                 BOOL matched = YES;
                 for (size_t index = 1; index < normalizedPoints.size(); index++) {
                     const AnClickColorPoint &colorPoint = normalizedPoints[index];
-                    const cv::Vec3b samplePixel = source.at<cv::Vec3b>(y + colorPoint.dy, x + colorPoint.dx);
+                    int sampleX = x + colorPoint.dx;
+                    int sampleY = y + colorPoint.dy;
+                    if (sampleX < 0 || sampleY < 0 || sampleX >= source.cols || sampleY >= source.rows) {
+                        if (colorPoint.softContext) {
+                            totalDistanceSquared += maxDistanceSquared;
+                            continue;
+                        }
+                        matched = NO;
+                        break;
+                    }
+                    const cv::Vec3b samplePixel = source.at<cv::Vec3b>(sampleY, sampleX);
                     double sampleDb = (double)samplePixel[0] - colorPoint.blue;
                     double sampleDg = (double)samplePixel[1] - colorPoint.green;
                     double sampleDr = (double)samplePixel[2] - colorPoint.red;
                     double sampleDistanceSquared = sampleDb * sampleDb + sampleDg * sampleDg + sampleDr * sampleDr;
+                    if (colorPoint.softContext) {
+                        double relaxedLimit = MAX(maxDistanceSquared, 1.0) * 9.0;
+                        totalDistanceSquared += MIN(sampleDistanceSquared, relaxedLimit) * 0.35;
+                        continue;
+                    }
                     if (sampleDistanceSquared > maxDistanceSquared) {
                         matched = NO;
                         break;
@@ -1151,6 +1173,10 @@ static NSDictionary *AnClickColorMatchResult(UIWindow *sourceWindow,
     matchedPixels.reserve(normalizedPoints.size());
     for (const AnClickColorPoint &point : normalizedPoints) {
         cv::Point matchedPixel(chosenBest.anchor.x + point.dx, chosenBest.anchor.y + point.dy);
+        if (point.softContext &&
+            (matchedPixel.x < 0 || matchedPixel.y < 0 || matchedPixel.x >= source.cols || matchedPixel.y >= source.rows)) {
+            continue;
+        }
         if (usesVerticallyFlippedImageCoordinates) {
             matchedPixel.y = source.rows - 1 - matchedPixel.y;
         }
